@@ -18,6 +18,7 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (Project, error)
 	CreateProject(ctx context.Context, project Project) (Project, error)
 	UpdateProject(ctx context.Context, project Project) (Project, error)
+	DeleteProject(ctx context.Context, id string) error
 
 	ListAgentProfiles(ctx context.Context) ([]AgentProfile, error)
 	GetAgentProfile(ctx context.Context, id string) (AgentProfile, error)

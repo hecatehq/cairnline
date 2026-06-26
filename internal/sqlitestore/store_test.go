@@ -273,6 +273,115 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "cairnline.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+
+	profile, err := service.CreateAgentProfile(ctx, core.AgentProfile{Name: "Global profile"})
+	if err != nil {
+		t.Fatalf("CreateAgentProfile() error = %v", err)
+	}
+	execution, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Global execution"})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	project, err := service.CreateProject(ctx, core.Project{Name: "Delete me"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := service.CreateProjectSkill(ctx, core.ProjectSkill{
+		ProjectID:  project.ID,
+		ID:         "review",
+		Title:      "Review",
+		Format:     core.SkillFormatMarkdown,
+		Status:     core.SkillStatusAvailable,
+		TrustLabel: core.SkillTrustWorkspace,
+	}); err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer", DefaultProfileID: profile.ID})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Delete scoped rows"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:          project.ID,
+		WorkItemID:         work.ID,
+		RoleID:             role.ID,
+		ExecutionProfileID: execution.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, core.Evidence{ProjectID: project.ID, WorkItemID: work.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: core.ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, Title: "Handoff", Body: "Follow up"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{ProjectID: project.ID, Title: "Memory", Body: "Remember this"}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteProject(ctx, project.ID); err != nil {
+		t.Fatalf("DeleteProject() error = %v", err)
+	}
+	if _, err := service.GetProject(ctx, project.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetProject() after delete error = %v, want ErrNotFound", err)
+	}
+	assertGone := func(name string, count int, err error) {
+		t.Helper()
+		if errors.Is(err, core.ErrNotFound) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s list error = %v", name, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s count = %d, want 0 after project delete", name, count)
+		}
+	}
+	skills, err := service.ListProjectSkills(ctx, project.ID)
+	assertGone("skills", len(skills), err)
+	roles, err := service.ListRoles(ctx, project.ID)
+	assertGone("roles", len(roles), err)
+	workItems, err := service.ListWorkItems(ctx, project.ID)
+	assertGone("work items", len(workItems), err)
+	assignments, err := service.ListAssignments(ctx, project.ID)
+	assertGone("assignments", len(assignments), err)
+	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
+	assertGone("evidence", len(evidence), err)
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	assertGone("reviews", len(reviews), err)
+	handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID)
+	assertGone("handoffs", len(handoffs), err)
+	memory, err := service.ListMemoryCandidates(ctx, project.ID)
+	assertGone("memory candidates", len(memory), err)
+
+	profiles, err := service.ListAgentProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentProfiles() error = %v", err)
+	}
+	executionProfiles, err := service.ListExecutionProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionProfiles() error = %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != profile.ID || len(executionProfiles) != 1 || executionProfiles[0].ID != execution.ID {
+		t.Fatalf("global profiles = %+v execution = %+v, want preserved globals", profiles, executionProfiles)
+	}
+}
+
 func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old.db")

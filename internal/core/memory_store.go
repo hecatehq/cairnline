@@ -85,6 +85,25 @@ func (s *MemoryStore) UpdateProject(ctx context.Context, project Project) (Proje
 	return project, nil
 }
 
+func (s *MemoryStore) DeleteProject(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.projects, id)
+	delete(s.skills, id)
+	delete(s.workItems, id)
+	delete(s.roles, id)
+	delete(s.assignments, id)
+	delete(s.evidence, id)
+	delete(s.reviews, id)
+	delete(s.handoffs, id)
+	delete(s.memory, id)
+	return nil
+}
+
 func (s *MemoryStore) ListAgentProfiles(ctx context.Context) ([]AgentProfile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

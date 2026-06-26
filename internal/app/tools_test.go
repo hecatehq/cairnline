@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,18 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.get","arguments":{"id":"` + projects[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Project "+projects[0].ID+": Research notes") {
+		t.Fatalf("get project response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination."}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -58,7 +70,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes."}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -69,7 +81,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.list","arguments":{"project_id":"` + projects[0].ID + `"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"work_items.list","arguments":{"project_id":"` + projects[0].ID + `"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -84,7 +96,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 		t.Fatalf("ListWorkItems() error = %v", err)
 	}
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"work_items.update","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `","brief":"Updated themes."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"work_items.update","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `","brief":"Updated themes."}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -99,6 +111,28 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 	if workItems[0].Title != "Summarize interviews" || workItems[0].Brief != "Updated themes." {
 		t.Fatalf("updated work item = %+v, want patch preserving title and replacing brief", workItems[0])
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"projects.delete","arguments":{"id":"` + projects[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted project "+projects[0].ID) {
+		t.Fatalf("delete project response = %s", output.String())
+	}
+	projects, err = service.ListProjects(context.Background())
+	if err != nil {
+		t.Fatalf("ListProjects() after delete error = %v", err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("projects after delete = %+v, want empty", projects)
+	}
+	_, err = service.ListWorkItems(context.Background(), workItems[0].ProjectID)
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListWorkItems() after project delete error = %v, want ErrNotFound", err)
 	}
 }
 

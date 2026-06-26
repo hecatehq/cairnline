@@ -22,6 +22,20 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, listProjects(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "projects.get",
+		Title:       "Get project",
+		Description: "Return one durable project coordination space.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["id"]
+		}`),
+		Annotations: readOnly,
+	}, getProject(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "projects.create",
 		Title:       "Create project",
 		Description: "Create a rootless or workspace-backed project coordination space.",
@@ -65,6 +79,19 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["id"]
 		}`),
 	}, updateProject(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "projects.delete",
+		Title:       "Delete project",
+		Description: "Delete a project and its project-scoped coordination records. Global profiles and execution profiles are not deleted.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["id"]
+		}`),
+	}, deleteProject(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "profiles.list",
@@ -564,6 +591,34 @@ func listProjects(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func getProject(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetProject(ctx, input.ID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		var detail strings.Builder
+		fmt.Fprintf(&detail, "Project %s: %s", item.ID, item.Name)
+		if item.Description != "" {
+			fmt.Fprintf(&detail, " — %s", item.Description)
+		}
+		if len(item.Roots) > 0 {
+			fmt.Fprintf(&detail, "\nRoots: %d", len(item.Roots))
+		}
+		if len(item.ContextSources) > 0 {
+			fmt.Fprintf(&detail, "\nContext sources: %d", len(item.ContextSources))
+		}
+		return mcp.CallToolResult{Content: mcp.TextContent(detail.String())}, nil
+	}
+}
+
 type rootArgs struct {
 	ID        string `json:"id"`
 	Path      string `json:"path"`
@@ -658,6 +713,24 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated project %s: %s", item.ID, item.Name)),
+		}, nil
+	}
+}
+
+func deleteProject(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteProject(ctx, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted project %s", strings.TrimSpace(input.ID))),
 		}, nil
 	}
 }

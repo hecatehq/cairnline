@@ -39,8 +39,10 @@ Implemented now:
   - `cairnline://projects/{project_id}/assignments/{assignment_id}/launch-packet`
 - MCP tools:
   - `projects.list`
+  - `projects.get`
   - `projects.create`
   - `projects.update`
+  - `projects.delete`
   - `profiles.list`
   - `profiles.create`
   - `profiles.update`

@@ -27,6 +27,14 @@ func (s *Service) ListProjects(ctx context.Context) ([]Project, error) {
 	return s.store.ListProjects(ctx)
 }
 
+func (s *Service) GetProject(ctx context.Context, id string) (Project, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Project{}, errors.Join(ErrInvalid, errors.New("project id is required"))
+	}
+	return s.store.GetProject(ctx, id)
+}
+
 func (s *Service) CreateProject(ctx context.Context, input Project) (Project, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -68,6 +76,14 @@ func (s *Service) UpdateProject(ctx context.Context, input Project) (Project, er
 		UpdatedAt:      s.now(),
 	}
 	return s.store.UpdateProject(ctx, item)
+}
+
+func (s *Service) DeleteProject(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("project id is required"))
+	}
+	return s.store.DeleteProject(ctx, id)
 }
 
 func (s *Service) ListProjectSkills(ctx context.Context, projectID string) ([]ProjectSkill, error) {

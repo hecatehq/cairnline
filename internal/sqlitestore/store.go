@@ -298,6 +298,44 @@ func (s *Store) UpdateProject(ctx context.Context, project core.Project) (core.P
 	return project, requireAffected(result)
 }
 
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	rollback := func() {
+		_ = tx.Rollback()
+	}
+	for _, table := range []string{
+		"evidence",
+		"reviews",
+		"handoffs",
+		"memory_candidates",
+		"assignments",
+		"project_skills",
+		"work_items",
+		"roles",
+	} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = ?`, id); err != nil {
+			rollback()
+			return mapSQLiteWriteError(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ListAgentProfiles(ctx context.Context) ([]core.AgentProfile, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at FROM agent_profiles ORDER BY name ASC`)
 	if err != nil {
