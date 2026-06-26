@@ -45,8 +45,9 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateExecutionProfile() error = %v", err)
 	}
 	project, err := service.CreateProject(ctx, core.Project{
-		Name:        "Persistent project",
-		Description: "Survives process restart.",
+		Name:          "Persistent project",
+		Description:   "Survives process restart.",
+		DefaultRootID: "root_main",
 		Roots: []core.Root{{
 			ID:     "root_main",
 			Path:   "/tmp/example",
@@ -200,6 +201,9 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if len(projects) != 1 || projects[0].ID != project.ID || len(projects[0].Roots) != 1 || len(projects[0].ContextSources) != 1 {
 		t.Fatalf("projects = %+v, want persisted project metadata", projects)
+	}
+	if projects[0].DefaultRootID != "root_main" {
+		t.Fatalf("default root = %q, want root_main", projects[0].DefaultRootID)
 	}
 	profiles, err := reopenedService.ListAgentProfiles(ctx)
 	if err != nil {
@@ -525,6 +529,64 @@ func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("assignments root_id column was not added")
+	}
+}
+
+func TestStore_MigrateAddsProjectDefaultRootID(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old-project.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = db.ExecContext(ctx, `CREATE TABLE projects (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		roots_json TEXT NOT NULL DEFAULT '[]',
+		context_sources_json TEXT NOT NULL DEFAULT '[]',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("create old projects table error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old db error = %v", err)
+	}
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	rows, err := store.db.QueryContext(ctx, `PRAGMA table_info(projects)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info error = %v", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan table_info error = %v", err)
+		}
+		if name == "default_root_id" {
+			found = true
+			if columnType != "TEXT" || notNull != 1 {
+				t.Fatalf("default_root_id column type=%q notNull=%d, want TEXT NOT NULL", columnType, notNull)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table_info rows error = %v", err)
+	}
+	if !found {
+		t.Fatalf("projects default_root_id column was not added")
 	}
 }
 

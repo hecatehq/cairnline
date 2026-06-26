@@ -254,6 +254,9 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
+	if project.DefaultRootID != "root_main" {
+		t.Fatalf("default root = %q, want root_main", project.DefaultRootID)
+	}
 	updatedProject, err := service.UpdateProject(ctx, Project{
 		ID:          project.ID,
 		Name:        "Ready project",
@@ -270,8 +273,37 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	if updatedProject.Name != "Ready project" || updatedProject.Description != "Updated description." || len(updatedProject.Roots) != 1 || updatedProject.Roots[0].Active {
 		t.Fatalf("updated project = %+v, want replacement metadata and inactive root", updatedProject)
 	}
+	if updatedProject.DefaultRootID != "root_main" {
+		t.Fatalf("updated default root = %q, want root_main", updatedProject.DefaultRootID)
+	}
 	if updatedProject.CreatedAt.IsZero() || updatedProject.UpdatedAt.Before(updatedProject.CreatedAt) {
 		t.Fatalf("updated project timestamps = created %s updated %s", updatedProject.CreatedAt, updatedProject.UpdatedAt)
+	}
+	updatedProject, err = service.UpdateProject(ctx, Project{
+		ID:   project.ID,
+		Name: "Retargeted project",
+		Roots: []Root{{
+			ID:     "root_feature",
+			Path:   "/tmp/project-feature",
+			Active: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProject(new roots) error = %v", err)
+	}
+	if updatedProject.DefaultRootID != "root_feature" {
+		t.Fatalf("retargeted default root = %q, want root_feature", updatedProject.DefaultRootID)
+	}
+	if _, err := service.UpdateProject(ctx, Project{
+		ID:            project.ID,
+		Name:          "Broken default",
+		DefaultRootID: "root_missing",
+		Roots: []Root{{
+			ID:   "root_main",
+			Path: "/tmp/project",
+		}},
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateProject(missing default root) error = %v, want ErrNotFound", err)
 	}
 
 	profile, err := service.CreateAgentProfile(ctx, AgentProfile{Name: "Default profile"})
@@ -318,12 +350,12 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 		Priority:        PriorityNormal,
 		OwnerRoleID:     role.ID,
 		ReviewerRoleIDs: []string{role.ID, role.ID},
-		RootID:          "root_main",
+		RootID:          "root_feature",
 	})
 	if err != nil {
 		t.Fatalf("UpdateWorkItem() error = %v", err)
 	}
-	if updatedWork.Title != "Updated work" || updatedWork.OwnerRoleID != role.ID || len(updatedWork.ReviewerRoleIDs) != 1 || updatedWork.RootID != "root_main" {
+	if updatedWork.Title != "Updated work" || updatedWork.OwnerRoleID != role.ID || len(updatedWork.ReviewerRoleIDs) != 1 || updatedWork.RootID != "root_feature" {
 		t.Fatalf("updated work item = %+v, want replacement metadata", updatedWork)
 	}
 }
@@ -1333,6 +1365,16 @@ func TestService_ValidatesProjectRootReferences(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := service.CreateProject(ctx, Project{
+		Name:          "Broken default root",
+		DefaultRootID: "root_missing",
+		Roots: []Root{{
+			ID:   "root_main",
+			Path: "/workspace/main",
+		}},
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateProject(missing default root) error = %v, want ErrNotFound", err)
 	}
 	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
 	if err != nil {
