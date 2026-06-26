@@ -29,6 +29,8 @@ Implemented now:
   collaboration artifacts
 - SQLite store for durable projects, profiles, roles, work items, assignments,
   skill metadata, and collaboration artifacts
+- embeddable Go API for applications that want to use the coordination core
+  directly instead of speaking MCP
 - stdio MCP server with JSON-RPC framing
 - MCP resources:
   - `cairnline://projects/{project_id}`
@@ -97,6 +99,53 @@ go run ./cmd/cairnline -db ./cairnline.db
 
 The server speaks MCP over newline-delimited JSON-RPC on stdin/stdout.
 
+## Embedded Go API
+
+Applications can embed Cairnline directly through the root Go package. Do not
+import `internal/*` packages; they are private implementation details.
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/hecatehq/cairnline"
+)
+
+func main() {
+	ctx := context.Background()
+
+	service, store, err := cairnline.NewSQLiteService(ctx, "cairnline.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer store.Close()
+
+	project, err := service.CreateProject(ctx, cairnline.Project{
+		Name: "Example project",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = service.CreateWorkItem(ctx, cairnline.WorkItem{
+		ProjectID: project.ID,
+		Title:     "Coordinate the next reviewable task",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+For tests or short-lived tools, use the in-memory service:
+
+```go
+service := cairnline.NewMemoryService()
+```
+
 ## MCP Client Config
 
 Use a durable SQLite database for normal local use:
@@ -136,10 +185,21 @@ For development from a checkout:
 Cairnline is the intended portable extraction path for Hecate's Projects
 coordination substrate, not a drop-in replacement yet.
 
-Before Hecate can use Cairnline as its Projects backend, Cairnline needs stable
-API/resource contracts, Hecate Projects API parity, migration/import-export
-from Hecate's current store, permission and path-boundary review, and dogfood
-coverage for at least one real Hecate project flow.
+Cairnline now has a public embeddable Go API, so Hecate can start integration
+experiments without going through MCP. MCP remains the interoperability surface
+for external agents and other hosts.
+
+Before Hecate can replace its current Projects backend with Cairnline, the
+following gates should be closed:
+
+- stable API/resource contracts for the coordination model
+- Hecate Projects API parity for current operator workflows
+- migration/import-export from Hecate's current local store
+- permission and path-boundary review for workspace-backed projects
+- adapter between Hecate task/external-agent execution records and Cairnline
+  assignment coordination records
+- dogfood coverage for at least one real Hecate project flow, including work
+  creation, assignment, evidence, review, handoff, memory candidate, and closeout
 
 ## Test
 
