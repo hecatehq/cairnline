@@ -37,8 +37,10 @@ Implemented now:
 - MCP resources:
   - `cairnline://projects/{project_id}`
   - `cairnline://projects/{project_id}/work-items/{work_item_id}`
+  - `cairnline://projects/{project_id}/work-items/{work_item_id}/closeout-readiness`
   - `cairnline://projects/{project_id}/assignments/{assignment_id}`
   - `cairnline://projects/{project_id}/assignments/{assignment_id}/launch-packet`
+  - `cairnline://projects/{project_id}/memory-candidates/{memory_candidate_id}`
 - MCP tools:
   - `projects.list`
   - `projects.create`
@@ -97,7 +99,6 @@ Implemented now:
 Planned next:
 
 - resource templates once the MCP transport grows that surface
-- richer assignment context resources for memory candidates and review follow-up
 
 ## Run
 
