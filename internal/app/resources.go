@@ -105,12 +105,13 @@ type projectResourceRef struct {
 }
 
 type projectResourcePayload struct {
-	Project     core.Project        `json:"project"`
-	Roles       []core.Role         `json:"roles,omitempty"`
-	Skills      []core.ProjectSkill `json:"skills,omitempty"`
-	Memory      []core.MemoryEntry  `json:"memory,omitempty"`
-	WorkItems   []core.WorkItem     `json:"work_items,omitempty"`
-	Assignments []core.Assignment   `json:"assignments,omitempty"`
+	Project     core.Project                `json:"project"`
+	Operations  core.ProjectOperationsBrief `json:"operations"`
+	Roles       []core.Role                 `json:"roles,omitempty"`
+	Skills      []core.ProjectSkill         `json:"skills,omitempty"`
+	Memory      []core.MemoryEntry          `json:"memory,omitempty"`
+	WorkItems   []core.WorkItem             `json:"work_items,omitempty"`
+	Assignments []core.Assignment           `json:"assignments,omitempty"`
 }
 
 type workItemResourcePayload struct {
@@ -157,8 +158,13 @@ func buildProjectResource(ctx context.Context, service *core.Service, projectID 
 	if err != nil {
 		return projectResourcePayload{}, err
 	}
+	operations, err := service.ProjectOperationsBrief(ctx, projectID)
+	if err != nil {
+		return projectResourcePayload{}, err
+	}
 	return projectResourcePayload{
 		Project:     project,
+		Operations:  operations,
 		Roles:       roles,
 		Skills:      skills,
 		Memory:      memoryEntries,

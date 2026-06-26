@@ -84,6 +84,7 @@ func EvaluateWorkItemCloseoutReadiness(workItem WorkItem, assignments []Assignme
 	for _, handoff := range handoffs {
 		if strings.TrimSpace(handoff.Status) == HandoffStatusOpen {
 			pendingHandoffs++
+			readiness.OpenHandoffIDs = append(readiness.OpenHandoffIDs, handoff.ID)
 		}
 	}
 	if activeAssignments > 0 {

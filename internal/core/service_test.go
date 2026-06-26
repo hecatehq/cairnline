@@ -751,6 +751,138 @@ func TestService_WorkItemCloseoutReadinessReviewFollowUp(t *testing.T) {
 	}
 }
 
+func TestService_ProjectOperationsBrief(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Operations"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Operator"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ProjectID: project.ID,
+		Title:     "Testing convention",
+		Body:      "Record durable test lessons.",
+	}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+	activeWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Active work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(active) error = %v", err)
+	}
+	if _, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: activeWork.ID, RoleID: role.ID}); err != nil {
+		t.Fatalf("CreateAssignment(active) error = %v", err)
+	}
+	failedWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Failed work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(failed) error = %v", err)
+	}
+	failedAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: failedWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(failed) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, failedAssignment.ID, AssignmentFailed, "run-failed"); err != nil {
+		t.Fatalf("CompleteAssignment(failed) error = %v", err)
+	}
+	missingEvidenceWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Needs evidence"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(missing evidence) error = %v", err)
+	}
+	missingEvidenceAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: missingEvidenceWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(missing evidence) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, missingEvidenceAssignment.ID, AssignmentCompleted, "run-missing"); err != nil {
+		t.Fatalf("CompleteAssignment(missing evidence) error = %v", err)
+	}
+	openHandoff, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:  project.ID,
+		WorkItemID: missingEvidenceWork.ID,
+		Title:      "Follow-up path",
+		Body:       "Operator needs to decide the next path.",
+		Status:     HandoffStatusOpen,
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff(open) error = %v", err)
+	}
+	reviewWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Needs review follow-up"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(review) error = %v", err)
+	}
+	reviewAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: reviewWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(review) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, reviewAssignment.ID, AssignmentCompleted, "run-review"); err != nil {
+		t.Fatalf("CompleteAssignment(review) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: reviewWork.ID, AssignmentID: reviewAssignment.ID, Title: "Review evidence", Locator: "file://review.md"}); err != nil {
+		t.Fatalf("CreateEvidence(review) error = %v", err)
+	}
+	review, err := service.CreateReview(ctx, Review{
+		ProjectID:    project.ID,
+		WorkItemID:   reviewWork.ID,
+		AssignmentID: reviewAssignment.ID,
+		Title:        "Risk review",
+		Body:         "Needs a follow-up path.",
+		Verdict:      ReviewVerdictConcerns,
+		Risk:         ReviewRiskMedium,
+	})
+	if err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	closeoutWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Ready work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(closeout) error = %v", err)
+	}
+	closeoutAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: closeoutWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(closeout) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, closeoutAssignment.ID, AssignmentCompleted, "run-ready"); err != nil {
+		t.Fatalf("CompleteAssignment(closeout) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: closeoutWork.ID, AssignmentID: closeoutAssignment.ID, Title: "Ready evidence", Locator: "file://ready.md"}); err != nil {
+		t.Fatalf("CreateEvidence(closeout) error = %v", err)
+	}
+	unassignedWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Unassigned work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(unassigned) error = %v", err)
+	}
+
+	brief, err := service.ProjectOperationsBrief(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectOperationsBrief() error = %v", err)
+	}
+	if brief.Status != ProjectOperationsStatusAttention || brief.Next == nil || brief.Next.AssignmentID != failedAssignment.ID {
+		t.Fatalf("brief next = %+v, want failed assignment first in attention brief", brief.Next)
+	}
+	if brief.Counts.WorkItems != 6 || brief.Counts.OpenWorkItems != 6 || brief.Counts.Assignments != 5 {
+		t.Fatalf("brief counts = %+v, want six open work items and five assignments", brief.Counts)
+	}
+	if brief.Counts.ActiveAssignments != 1 || brief.Counts.BlockedAssignments != 1 || brief.Counts.PendingMemoryCandidates != 1 || brief.Counts.MissingEvidence != 1 || brief.Counts.ReviewFollowUps != 1 || brief.Counts.OpenHandoffs != 1 || brief.Counts.CloseoutReady != 1 {
+		t.Fatalf("brief counts = %+v, want active/blocked/memory/evidence/review/handoff/closeout coverage", brief.Counts)
+	}
+	if !containsOperation(brief.Items, ProjectOperationKindReviewFollowUp, reviewWork.ID, review.ID) {
+		t.Fatalf("brief items = %+v, want review follow-up item for %s", brief.Items, review.ID)
+	}
+	if !containsOperation(brief.Items, ProjectOperationKindMissingEvidence, missingEvidenceWork.ID, missingEvidenceAssignment.ID) {
+		t.Fatalf("brief items = %+v, want missing evidence item for %s", brief.Items, missingEvidenceAssignment.ID)
+	}
+	if !containsOperation(brief.Items, ProjectOperationKindHandoff, missingEvidenceWork.ID, openHandoff.ID) {
+		t.Fatalf("brief items = %+v, want open handoff item for %s", brief.Items, openHandoff.ID)
+	}
+	if !containsOperation(brief.Items, ProjectOperationKindCloseoutReady, closeoutWork.ID, "") {
+		t.Fatalf("brief items = %+v, want closeout ready item for %s", brief.Items, closeoutWork.ID)
+	}
+	if !containsOperation(brief.Items, ProjectOperationKindWorkItem, unassignedWork.ID, "") {
+		t.Fatalf("brief items = %+v, want unassigned work item for %s", brief.Items, unassignedWork.ID)
+	}
+}
+
 func TestService_MemoryCandidateDecisionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
@@ -1019,6 +1151,18 @@ func writeSkill(t *testing.T, root, base, id, body string) {
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsOperation(items []ProjectOperationItem, kind, workItemID, refID string) bool {
+	for _, item := range items {
+		if item.Kind != kind || item.WorkItemID != workItemID {
+			continue
+		}
+		if refID == "" || item.AssignmentID == refID || item.ArtifactID == refID || item.MemoryCandidateID == refID {
 			return true
 		}
 	}
