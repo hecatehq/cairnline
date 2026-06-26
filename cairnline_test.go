@@ -67,6 +67,15 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 	if claimed.Status != cairnline.AssignmentClaimed {
 		t.Fatalf("claimed assignment = %+v, want claimed status", claimed)
 	}
+
+	brief, err := service.ProjectOperationsBrief(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectOperationsBrief() error = %v", err)
+	}
+	var typedBrief cairnline.ProjectOperationsBrief = brief
+	if typedBrief.Status != cairnline.ProjectOperationsStatusAttention || typedBrief.Next == nil || typedBrief.Next.Kind != cairnline.ProjectOperationKindAssignment || typedBrief.Next.Severity != cairnline.ProjectOperationSeverityActive {
+		t.Fatalf("operations brief = %+v, want public active assignment attention item", typedBrief)
+	}
 }
 
 func TestPublicAPIOpensSQLiteStore(t *testing.T) {

@@ -33,6 +33,9 @@ type AgentProfile = core.AgentProfile
 type ExecutionProfile = core.ExecutionProfile
 type WorkItem = core.WorkItem
 type WorkItemCloseoutReadiness = core.WorkItemCloseoutReadiness
+type ProjectOperationsBrief = core.ProjectOperationsBrief
+type ProjectOperationsCounts = core.ProjectOperationsCounts
+type ProjectOperationItem = core.ProjectOperationItem
 type ReviewFollowUpReadiness = core.ReviewFollowUpReadiness
 type DesiredAgent = core.DesiredAgent
 type Assignment = core.Assignment
@@ -101,6 +104,23 @@ const (
 	MemoryCandidatePromoted = core.MemoryCandidatePromoted
 	MemoryCandidateRejected = core.MemoryCandidateRejected
 	MemoryCandidateProposed = core.MemoryCandidateProposed
+
+	ProjectOperationsStatusClear     = core.ProjectOperationsStatusClear
+	ProjectOperationsStatusAttention = core.ProjectOperationsStatusAttention
+
+	ProjectOperationKindAssignment      = core.ProjectOperationKindAssignment
+	ProjectOperationKindCloseoutReady   = core.ProjectOperationKindCloseoutReady
+	ProjectOperationKindHandoff         = core.ProjectOperationKindHandoff
+	ProjectOperationKindMemoryCandidate = core.ProjectOperationKindMemoryCandidate
+	ProjectOperationKindMissingEvidence = core.ProjectOperationKindMissingEvidence
+	ProjectOperationKindReviewFollowUp  = core.ProjectOperationKindReviewFollowUp
+	ProjectOperationKindWorkItem        = core.ProjectOperationKindWorkItem
+
+	ProjectOperationSeverityBlocked = core.ProjectOperationSeverityBlocked
+	ProjectOperationSeverityAction  = core.ProjectOperationSeverityAction
+	ProjectOperationSeverityActive  = core.ProjectOperationSeverityActive
+	ProjectOperationSeverityReady   = core.ProjectOperationSeverityReady
+	ProjectOperationSeverityInfo    = core.ProjectOperationSeverityInfo
 
 	LaunchPacketKindAssignment = core.LaunchPacketKindAssignment
 )
