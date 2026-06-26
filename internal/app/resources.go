@@ -47,6 +47,13 @@ func projectResources(service *core.Service) mcp.ResourceProvider {
 					Description: "Work item with collaboration artifacts.",
 					MimeType:    jsonMimeType,
 				})
+				resources = append(resources, mcp.Resource{
+					URI:         workItemCloseoutReadinessResourceURI(project.ID, workItem.ID),
+					Name:        "work_item_closeout_readiness/" + workItem.ID,
+					Title:       "Closeout readiness " + workItem.ID,
+					Description: "Work item closeout readiness with blockers, warnings, and review follow-up.",
+					MimeType:    jsonMimeType,
+				})
 			}
 			assignments, err := service.ListAssignments(ctx, project.ID)
 			if err != nil {
@@ -68,6 +75,22 @@ func projectResources(service *core.Service) mcp.ResourceProvider {
 					MimeType:    jsonMimeType,
 				})
 			}
+			candidates, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{
+				ProjectID:       project.ID,
+				IncludeResolved: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, candidate := range candidates {
+				resources = append(resources, mcp.Resource{
+					URI:         memoryCandidateResourceURI(project.ID, candidate.ID),
+					Name:        "memory_candidate/" + candidate.ID,
+					Title:       candidate.Title,
+					Description: "Memory candidate with provenance and review status.",
+					MimeType:    jsonMimeType,
+				})
+			}
 		}
 		return resources, nil
 	}
@@ -86,11 +109,17 @@ func readProjectResource(service *core.Service) mcp.ResourceReader {
 		case "work_item":
 			payload, err := buildWorkItemResource(ctx, service, ref.projectID, ref.id)
 			return jsonResource(uri, payload, err)
+		case "work_item_closeout_readiness":
+			payload, err := service.WorkItemCloseoutReadiness(ctx, ref.projectID, ref.id)
+			return jsonResource(uri, payload, err)
 		case "assignment":
 			payload, err := service.AssignmentContext(ctx, ref.projectID, ref.id)
 			return jsonResource(uri, payload, err)
 		case "assignment_launch_packet":
 			payload, err := service.AssignmentLaunchPacket(ctx, ref.projectID, ref.id)
+			return jsonResource(uri, payload, err)
+		case "memory_candidate":
+			payload, err := service.GetMemoryCandidate(ctx, ref.projectID, ref.id)
 			return jsonResource(uri, payload, err)
 		default:
 			return mcp.ReadResourceResult{}, false, nil
@@ -259,12 +288,20 @@ func workItemResourceURI(projectID, workItemID string) string {
 	return resourcePrefix + projectID + "/work-items/" + workItemID
 }
 
+func workItemCloseoutReadinessResourceURI(projectID, workItemID string) string {
+	return workItemResourceURI(projectID, workItemID) + "/closeout-readiness"
+}
+
 func assignmentResourceURI(projectID, assignmentID string) string {
 	return resourcePrefix + projectID + "/assignments/" + assignmentID
 }
 
 func assignmentLaunchPacketResourceURI(projectID, assignmentID string) string {
 	return assignmentResourceURI(projectID, assignmentID) + "/launch-packet"
+}
+
+func memoryCandidateResourceURI(projectID, candidateID string) string {
+	return resourcePrefix + projectID + "/memory-candidates/" + candidateID
 }
 
 func parseProjectResourceURI(uri string) (projectResourceRef, bool) {
@@ -278,11 +315,17 @@ func parseProjectResourceURI(uri string) (projectResourceRef, bool) {
 	if len(parts) == 3 && parts[0] != "" && parts[1] == "work-items" && parts[2] != "" {
 		return projectResourceRef{kind: "work_item", projectID: parts[0], id: parts[2]}, true
 	}
+	if len(parts) == 4 && parts[0] != "" && parts[1] == "work-items" && parts[2] != "" && parts[3] == "closeout-readiness" {
+		return projectResourceRef{kind: "work_item_closeout_readiness", projectID: parts[0], id: parts[2]}, true
+	}
 	if len(parts) == 3 && parts[0] != "" && parts[1] == "assignments" && parts[2] != "" {
 		return projectResourceRef{kind: "assignment", projectID: parts[0], id: parts[2]}, true
 	}
 	if len(parts) == 4 && parts[0] != "" && parts[1] == "assignments" && parts[2] != "" && parts[3] == "launch-packet" {
 		return projectResourceRef{kind: "assignment_launch_packet", projectID: parts[0], id: parts[2]}, true
+	}
+	if len(parts) == 3 && parts[0] != "" && parts[1] == "memory-candidates" && parts[2] != "" {
+		return projectResourceRef{kind: "memory_candidate", projectID: parts[0], id: parts[2]}, true
 	}
 	return projectResourceRef{}, false
 }

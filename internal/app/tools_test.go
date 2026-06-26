@@ -464,6 +464,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if evidence[0].AssignmentID != assignmentID {
 		t.Fatalf("evidence = %+v, want assignment-scoped evidence from MCP tool", evidence[0])
 	}
+	candidateID := memory[0].ID
 
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":20,"method":"resources/list"}` + "\n",
@@ -473,9 +474,11 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("Serve() resources/list error = %v", err)
 	}
 	projectURI := "cairnline://projects/" + project.ID
+	readinessURI := projectURI + "/work-items/" + work.ID + "/closeout-readiness"
 	launchURI := projectURI + "/assignments/" + assignmentID + "/launch-packet"
-	if got := output.String(); !strings.Contains(got, projectURI) || !strings.Contains(got, launchURI) {
-		t.Fatalf("resources/list response = %s, want project and launch packet resources", got)
+	candidateURI := projectURI + "/memory-candidates/" + candidateID
+	if got := output.String(); !strings.Contains(got, projectURI) || !strings.Contains(got, readinessURI) || !strings.Contains(got, launchURI) || !strings.Contains(got, candidateURI) {
+		t.Fatalf("resources/list response = %s, want project, readiness, launch packet, and memory candidate resources", got)
 	}
 
 	input = strings.NewReader(
@@ -491,7 +494,26 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":22,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":22,"method":"resources/read","params":{"uri":"` + readinessURI + `"}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() readiness resources/read error = %v", err)
+	}
+	readinessResourceResponse := readSingleResourceResponse(t, output.Bytes())
+	if readinessResourceResponse.URI != readinessURI || readinessResourceResponse.MimeType != "application/json" {
+		t.Fatalf("readiness resource content = %+v, want JSON readiness resource", readinessResourceResponse)
+	}
+	var readinessFromResource core.WorkItemCloseoutReadiness
+	if err := json.Unmarshal([]byte(readinessResourceResponse.Text), &readinessFromResource); err != nil {
+		t.Fatalf("readiness resource text did not unmarshal: %v\n%s", err, readinessResourceResponse.Text)
+	}
+	if !readinessFromResource.Ready || readinessFromResource.WorkItemID != work.ID || readinessFromResource.CompletedAssignments != 1 {
+		t.Fatalf("readiness resource = %+v, want ready closeout readiness", readinessFromResource)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":23,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -507,6 +529,25 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if packetFromResource.Assignment.ID != assignmentID || packetFromResource.Kind != core.LaunchPacketKindAssignment {
 		t.Fatalf("launch resource packet = %+v, want assignment launch packet", packetFromResource)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":24,"method":"resources/read","params":{"uri":"` + candidateURI + `"}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() memory candidate resources/read error = %v", err)
+	}
+	candidateResourceResponse := readSingleResourceResponse(t, output.Bytes())
+	if candidateResourceResponse.URI != candidateURI || candidateResourceResponse.MimeType != "application/json" {
+		t.Fatalf("memory candidate resource content = %+v, want JSON memory candidate resource", candidateResourceResponse)
+	}
+	var candidateFromResource core.MemoryCandidate
+	if err := json.Unmarshal([]byte(candidateResourceResponse.Text), &candidateFromResource); err != nil {
+		t.Fatalf("memory candidate resource text did not unmarshal: %v\n%s", err, candidateResourceResponse.Text)
+	}
+	if candidateFromResource.ID != candidateID || candidateFromResource.Status != core.MemoryCandidatePending || len(candidateFromResource.SourceRefs) != 1 {
+		t.Fatalf("memory candidate resource = %+v, want pending candidate with provenance", candidateFromResource)
 	}
 }
 
