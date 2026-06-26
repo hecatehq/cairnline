@@ -7,7 +7,8 @@ It provides durable project identity, work coordination, context metadata,
 evidence, reviews, handoffs, and memory-candidate concepts without assuming
 that any specific agent host can be launched or supervised.
 
-Initial status: early implementation.
+Initial status: early implementation. Cairnline is usable as an experimental
+local MCP server, but its contracts are not stable yet.
 
 ## Goals
 
@@ -76,6 +77,12 @@ Planned next:
 
 ## Run
 
+Install the command from source:
+
+```sh
+go install github.com/hecatehq/cairnline/cmd/cairnline@latest
+```
+
 Ephemeral in-memory state:
 
 ```sh
@@ -90,8 +97,59 @@ go run ./cmd/cairnline -db ./cairnline.db
 
 The server speaks MCP over newline-delimited JSON-RPC on stdin/stdout.
 
+## MCP Client Config
+
+Use a durable SQLite database for normal local use:
+
+```json
+{
+  "mcpServers": {
+    "cairnline": {
+      "command": "cairnline",
+      "args": ["-db", "/Users/alice/.local/share/cairnline/cairnline.db"]
+    }
+  }
+}
+```
+
+For development from a checkout:
+
+```json
+{
+  "mcpServers": {
+    "cairnline-dev": {
+      "command": "go",
+      "args": [
+        "run",
+        "./cmd/cairnline",
+        "-db",
+        "/tmp/cairnline-dev.db"
+      ],
+      "cwd": "/path/to/cairnline"
+    }
+  }
+}
+```
+
+## Hecate Integration Status
+
+Cairnline is the intended portable extraction path for Hecate's Projects
+coordination substrate, not a drop-in replacement yet.
+
+Before Hecate can use Cairnline as its Projects backend, Cairnline needs stable
+API/resource contracts, Hecate Projects API parity, migration/import-export
+from Hecate's current store, permission and path-boundary review, and dogfood
+coverage for at least one real Hecate project flow.
+
 ## Test
 
 ```sh
 go test ./...
+```
+
+The public CI also runs:
+
+```sh
+go vet ./...
+go test -race ./...
 ```
