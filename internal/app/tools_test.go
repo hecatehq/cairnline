@@ -416,6 +416,29 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("operations brief = %+v, want memory candidate next and closeout-ready count", operations)
 	}
 
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"projects.activity","arguments":{"project_id":"` + project.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() activity error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Project activity "+project.ID) || !strings.Contains(output.String(), "completed=1") {
+		t.Fatalf("activity response = %s", output.String())
+	}
+	var activityResponse struct {
+		Result struct {
+			StructuredContent core.ProjectActivity `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &activityResponse); err != nil {
+		t.Fatalf("activity response did not unmarshal: %v\n%s", err, output.String())
+	}
+	activity := activityResponse.Result.StructuredContent
+	if activity.Counts.Assignments != 1 || activity.Counts.Completed != 1 || len(activity.Buckets.Completed) != 1 || activity.Buckets.Completed[0].AssignmentID != assignmentID {
+		t.Fatalf("activity = %+v, want completed assignment bucket", activity)
+	}
+
 	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
@@ -443,7 +466,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":19,"method":"resources/list"}` + "\n",
+		`{"jsonrpc":"2.0","id":20,"method":"resources/list"}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -456,19 +479,19 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":20,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":21,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
 		t.Fatalf("Serve() project resources/read error = %v", err)
 	}
 	projectResourceText := readSingleResourceText(t, output.Bytes())
-	if !strings.Contains(projectResourceText, `"project"`) || !strings.Contains(projectResourceText, `"operations"`) || !strings.Contains(projectResourceText, `"roles"`) || !strings.Contains(projectResourceText, `"assignments"`) || !strings.Contains(projectResourceText, `"memory"`) {
+	if !strings.Contains(projectResourceText, `"project"`) || !strings.Contains(projectResourceText, `"operations"`) || !strings.Contains(projectResourceText, `"activity"`) || !strings.Contains(projectResourceText, `"roles"`) || !strings.Contains(projectResourceText, `"assignments"`) || !strings.Contains(projectResourceText, `"memory"`) {
 		t.Fatalf("project resources/read text = %s", projectResourceText)
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":21,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":22,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

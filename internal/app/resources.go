@@ -107,6 +107,7 @@ type projectResourceRef struct {
 type projectResourcePayload struct {
 	Project     core.Project                `json:"project"`
 	Operations  core.ProjectOperationsBrief `json:"operations"`
+	Activity    core.ProjectActivity        `json:"activity"`
 	Roles       []core.Role                 `json:"roles,omitempty"`
 	Skills      []core.ProjectSkill         `json:"skills,omitempty"`
 	Memory      []core.MemoryEntry          `json:"memory,omitempty"`
@@ -162,9 +163,14 @@ func buildProjectResource(ctx context.Context, service *core.Service, projectID 
 	if err != nil {
 		return projectResourcePayload{}, err
 	}
+	activity, err := service.ProjectActivity(ctx, projectID)
+	if err != nil {
+		return projectResourcePayload{}, err
+	}
 	return projectResourcePayload{
 		Project:     project,
 		Operations:  operations,
+		Activity:    activity,
 		Roles:       roles,
 		Skills:      skills,
 		Memory:      memoryEntries,

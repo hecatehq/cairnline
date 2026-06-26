@@ -79,6 +79,18 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, projectOperationsBrief(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "projects.activity",
+		Title:       "Project activity",
+		Description: "Return a read-only project activity projection grouped by assignment state.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string","minLength":1}},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, projectActivity(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "profiles.list",
 		Title:       "List agent profiles",
 		Description: "List portable agent behavior and context-policy profiles.",
@@ -889,6 +901,26 @@ func projectOperationsBrief(service *core.Service) mcp.ToolHandler {
 		return mcp.CallToolResult{
 			Content:           mcp.TextContent(formatProjectOperationsBrief(brief)),
 			StructuredContent: brief,
+		}, nil
+	}
+}
+
+func projectActivity(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		activity, err := service.ProjectActivity(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatProjectActivity(activity)),
+			StructuredContent: activity,
 		}, nil
 	}
 }
@@ -2364,6 +2396,49 @@ func formatProjectOperationsBrief(brief core.ProjectOperationsBrief) string {
 		}
 	}
 	return b.String()
+}
+
+func formatProjectActivity(activity core.ProjectActivity) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Project activity %s\n", activity.ProjectID)
+	fmt.Fprintf(&b, "Counts: assignments=%d active=%d blocked=%d queued=%d claimed=%d running=%d awaiting_review=%d completed=%d failed=%d cancelled=%d other=%d\n",
+		activity.Counts.Assignments,
+		activity.Counts.Active,
+		activity.Counts.Blocked,
+		activity.Counts.Queued,
+		activity.Counts.Claimed,
+		activity.Counts.Running,
+		activity.Counts.AwaitingReview,
+		activity.Counts.Completed,
+		activity.Counts.Failed,
+		activity.Counts.Cancelled,
+		activity.Counts.Other,
+	)
+	formatProjectActivityBucket(&b, "Active", activity.Buckets.Active)
+	formatProjectActivityBucket(&b, "Blocked", activity.Buckets.Blocked)
+	formatProjectActivityBucket(&b, "Completed", activity.Buckets.Completed)
+	formatProjectActivityBucket(&b, "Other", activity.Buckets.Other)
+	return b.String()
+}
+
+func formatProjectActivityBucket(b *strings.Builder, title string, items []core.ProjectActivityItem) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s:\n", title)
+	for _, item := range items {
+		fmt.Fprintf(b, "- %s: [%s] work=%s", item.AssignmentID, item.Status, item.WorkItemID)
+		if item.WorkItemTitle != "" {
+			fmt.Fprintf(b, " title=%q", item.WorkItemTitle)
+		}
+		if item.RoleID != "" {
+			fmt.Fprintf(b, " role=%s", item.RoleID)
+		}
+		if item.ExecutionMode != "" {
+			fmt.Fprintf(b, " mode=%s", item.ExecutionMode)
+		}
+		b.WriteByte('\n')
+	}
 }
 
 func formatMemoryEntries(title string, items []core.MemoryEntry) string {

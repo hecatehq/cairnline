@@ -36,6 +36,10 @@ type WorkItemCloseoutReadiness = core.WorkItemCloseoutReadiness
 type ProjectOperationsBrief = core.ProjectOperationsBrief
 type ProjectOperationsCounts = core.ProjectOperationsCounts
 type ProjectOperationItem = core.ProjectOperationItem
+type ProjectActivity = core.ProjectActivity
+type ProjectActivityCounts = core.ProjectActivityCounts
+type ProjectActivityBuckets = core.ProjectActivityBuckets
+type ProjectActivityItem = core.ProjectActivityItem
 type ReviewFollowUpReadiness = core.ReviewFollowUpReadiness
 type DesiredAgent = core.DesiredAgent
 type Assignment = core.Assignment
@@ -121,6 +125,11 @@ const (
 	ProjectOperationSeverityActive  = core.ProjectOperationSeverityActive
 	ProjectOperationSeverityReady   = core.ProjectOperationSeverityReady
 	ProjectOperationSeverityInfo    = core.ProjectOperationSeverityInfo
+
+	ProjectActivityBucketActive    = core.ProjectActivityBucketActive
+	ProjectActivityBucketBlocked   = core.ProjectActivityBucketBlocked
+	ProjectActivityBucketCompleted = core.ProjectActivityBucketCompleted
+	ProjectActivityBucketOther     = core.ProjectActivityBucketOther
 
 	LaunchPacketKindAssignment = core.LaunchPacketKindAssignment
 )

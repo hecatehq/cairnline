@@ -43,6 +43,7 @@ Implemented now:
   - `projects.list`
   - `projects.create`
   - `projects.update`
+  - `projects.activity`
   - `projects.operations_brief`
   - `profiles.list`
   - `profiles.create`
@@ -90,6 +91,8 @@ Implemented now:
 - read-only project operations briefs for attention routing across active
   assignments, blocked closeout, review follow-up, memory candidates, and open
   work
+- read-only project activity projections grouped by active, blocked, completed,
+  and recent assignment state
 
 Planned next:
 
