@@ -863,8 +863,8 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	if brief.Counts.WorkItems != 6 || brief.Counts.OpenWorkItems != 6 || brief.Counts.Assignments != 5 {
 		t.Fatalf("brief counts = %+v, want six open work items and five assignments", brief.Counts)
 	}
-	if brief.Counts.ActiveAssignments != 1 || brief.Counts.BlockedAssignments != 1 || brief.Counts.PendingMemoryCandidates != 1 || brief.Counts.MissingEvidence != 1 || brief.Counts.ReviewFollowUps != 1 || brief.Counts.OpenHandoffs != 1 || brief.Counts.CloseoutReady != 1 {
-		t.Fatalf("brief counts = %+v, want active/blocked/memory/evidence/review/handoff/closeout coverage", brief.Counts)
+	if brief.Counts.ActiveAssignments != 0 || brief.Counts.BlockedAssignments != 2 || brief.Counts.PendingMemoryCandidates != 1 || brief.Counts.MissingEvidence != 1 || brief.Counts.ReviewFollowUps != 1 || brief.Counts.OpenHandoffs != 1 || brief.Counts.CloseoutReady != 1 {
+		t.Fatalf("brief counts = %+v, want queued+failed blocked and memory/evidence/review/handoff/closeout coverage", brief.Counts)
 	}
 	if !containsOperation(brief.Items, ProjectOperationKindReviewFollowUp, reviewWork.ID, review.ID) {
 		t.Fatalf("brief items = %+v, want review follow-up item for %s", brief.Items, review.ID)
@@ -941,10 +941,12 @@ func TestService_ProjectActivity(t *testing.T) {
 	if activity.Counts.Assignments != 5 || activity.Counts.Queued != 1 || activity.Counts.Claimed != 1 || activity.Counts.Running != 1 || activity.Counts.Completed != 1 || activity.Counts.Failed != 1 {
 		t.Fatalf("activity counts = %+v, want status counts", activity.Counts)
 	}
-	if activity.Counts.Active != 3 || activity.Counts.Blocked != 1 || len(activity.Buckets.Active) != 3 || len(activity.Buckets.Blocked) != 1 || len(activity.Buckets.Completed) != 1 || len(activity.Buckets.Recent) != 5 {
+	if activity.Counts.Active != 2 || activity.Counts.Blocked != 2 || len(activity.Buckets.Active) != 2 || len(activity.Buckets.Blocked) != 2 || len(activity.Buckets.Completed) != 1 || len(activity.Buckets.Recent) != 5 {
 		t.Fatalf("activity buckets = counts %+v buckets %+v, want active/blocked/completed/recent", activity.Counts, activity.Buckets)
 	}
-	if !containsActivity(activity.Items, ProjectActivityBucketActive, queued.ID, work.ID, role.Name) ||
+	if !containsActivity(activity.Items, ProjectActivityBucketBlocked, queued.ID, work.ID, role.Name) ||
+		!containsActivity(activity.Items, ProjectActivityBucketActive, claimed.ID, work.ID, role.Name) ||
+		!containsActivity(activity.Items, ProjectActivityBucketActive, running.ID, work.ID, role.Name) ||
 		!containsActivity(activity.Items, ProjectActivityBucketCompleted, completed.ID, work.ID, role.Name) ||
 		!containsActivity(activity.Items, ProjectActivityBucketBlocked, failed.ID, work.ID, role.Name) {
 		t.Fatalf("activity items = %+v, want resolved work and role metadata", activity.Items)

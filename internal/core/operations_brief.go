@@ -187,6 +187,17 @@ func (s *Service) evaluateWorkItemOperationsReadiness(ctx context.Context, workI
 func projectAssignmentOperationItem(workItem WorkItem, assignment Assignment) (ProjectOperationItem, bool) {
 	status := assignmentCloseoutStatus(assignment)
 	switch status {
+	case AssignmentQueued:
+		return ProjectOperationItem{
+			Kind:         ProjectOperationKindAssignment,
+			Severity:     ProjectOperationSeverityBlocked,
+			Status:       status,
+			Title:        "Start queued assignment for " + workItem.Title,
+			Detail:       "The assignment is queued and needs an operator or compatible agent to claim it.",
+			WorkItemID:   workItem.ID,
+			AssignmentID: assignment.ID,
+			UpdatedAt:    assignment.UpdatedAt,
+		}, true
 	case AssignmentFailed, AssignmentCancelled:
 		return ProjectOperationItem{
 			Kind:         ProjectOperationKindAssignment,
@@ -198,7 +209,7 @@ func projectAssignmentOperationItem(workItem WorkItem, assignment Assignment) (P
 			AssignmentID: assignment.ID,
 			UpdatedAt:    assignment.UpdatedAt,
 		}, true
-	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentReview:
+	case AssignmentClaimed, AssignmentRunning, AssignmentReview:
 		return ProjectOperationItem{
 			Kind:         ProjectOperationKindAssignment,
 			Severity:     ProjectOperationSeverityActive,
