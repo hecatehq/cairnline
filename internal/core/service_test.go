@@ -883,6 +883,74 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	}
 }
 
+func TestService_ProjectActivity(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Activity"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Track assignments"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	queued, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(queued) error = %v", err)
+	}
+	claimed, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(claimed) error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, claimed.ID, "agent-a"); err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	running, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(running) error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, running.ID, "agent-b"); err != nil {
+		t.Fatalf("ClaimAssignment(running) error = %v", err)
+	}
+	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, running.ID, AssignmentRunning, "run-1"); err != nil {
+		t.Fatalf("UpdateAssignmentStatus(running) error = %v", err)
+	}
+	completed, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(completed) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, "run-2"); err != nil {
+		t.Fatalf("CompleteAssignment(completed) error = %v", err)
+	}
+	failed, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(failed) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, failed.ID, AssignmentFailed, "run-3"); err != nil {
+		t.Fatalf("CompleteAssignment(failed) error = %v", err)
+	}
+
+	activity, err := service.ProjectActivity(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectActivity() error = %v", err)
+	}
+	if activity.Counts.Assignments != 5 || activity.Counts.Queued != 1 || activity.Counts.Claimed != 1 || activity.Counts.Running != 1 || activity.Counts.Completed != 1 || activity.Counts.Failed != 1 {
+		t.Fatalf("activity counts = %+v, want status counts", activity.Counts)
+	}
+	if activity.Counts.Active != 3 || activity.Counts.Blocked != 1 || len(activity.Buckets.Active) != 3 || len(activity.Buckets.Blocked) != 1 || len(activity.Buckets.Completed) != 1 || len(activity.Buckets.Recent) != 5 {
+		t.Fatalf("activity buckets = counts %+v buckets %+v, want active/blocked/completed/recent", activity.Counts, activity.Buckets)
+	}
+	if !containsActivity(activity.Items, ProjectActivityBucketActive, queued.ID, work.ID, role.Name) ||
+		!containsActivity(activity.Items, ProjectActivityBucketCompleted, completed.ID, work.ID, role.Name) ||
+		!containsActivity(activity.Items, ProjectActivityBucketBlocked, failed.ID, work.ID, role.Name) {
+		t.Fatalf("activity items = %+v, want resolved work and role metadata", activity.Items)
+	}
+}
+
 func TestService_MemoryCandidateDecisionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
@@ -1163,6 +1231,15 @@ func containsOperation(items []ProjectOperationItem, kind, workItemID, refID str
 			continue
 		}
 		if refID == "" || item.AssignmentID == refID || item.ArtifactID == refID || item.MemoryCandidateID == refID {
+			return true
+		}
+	}
+	return false
+}
+
+func containsActivity(items []ProjectActivityItem, bucket, assignmentID, workItemID, roleName string) bool {
+	for _, item := range items {
+		if item.Bucket == bucket && item.AssignmentID == assignmentID && item.WorkItemID == workItemID && item.RoleName == roleName {
 			return true
 		}
 	}

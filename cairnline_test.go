@@ -76,6 +76,15 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 	if typedBrief.Status != cairnline.ProjectOperationsStatusAttention || typedBrief.Next == nil || typedBrief.Next.Kind != cairnline.ProjectOperationKindAssignment || typedBrief.Next.Severity != cairnline.ProjectOperationSeverityActive {
 		t.Fatalf("operations brief = %+v, want public active assignment attention item", typedBrief)
 	}
+
+	activity, err := service.ProjectActivity(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectActivity() error = %v", err)
+	}
+	var typedActivity cairnline.ProjectActivity = activity
+	if typedActivity.Counts.Active != 1 || len(typedActivity.Buckets.Active) != 1 || typedActivity.Buckets.Active[0].Bucket != cairnline.ProjectActivityBucketActive {
+		t.Fatalf("activity = %+v, want public active assignment bucket", typedActivity)
+	}
 }
 
 func TestPublicAPIOpensSQLiteStore(t *testing.T) {

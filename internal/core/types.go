@@ -157,6 +157,52 @@ type ProjectOperationItem struct {
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
+type ProjectActivity struct {
+	ProjectID string                 `json:"project_id"`
+	Counts    ProjectActivityCounts  `json:"counts"`
+	Buckets   ProjectActivityBuckets `json:"buckets"`
+	Items     []ProjectActivityItem  `json:"items,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+type ProjectActivityCounts struct {
+	Assignments    int `json:"assignments"`
+	Queued         int `json:"queued"`
+	Claimed        int `json:"claimed"`
+	Running        int `json:"running"`
+	AwaitingReview int `json:"awaiting_review"`
+	Completed      int `json:"completed"`
+	Failed         int `json:"failed"`
+	Cancelled      int `json:"cancelled"`
+	Other          int `json:"other"`
+	Active         int `json:"active"`
+	Blocked        int `json:"blocked"`
+}
+
+type ProjectActivityBuckets struct {
+	Active    []ProjectActivityItem `json:"active,omitempty"`
+	Blocked   []ProjectActivityItem `json:"blocked,omitempty"`
+	Completed []ProjectActivityItem `json:"completed,omitempty"`
+	Other     []ProjectActivityItem `json:"other,omitempty"`
+	Recent    []ProjectActivityItem `json:"recent,omitempty"`
+}
+
+type ProjectActivityItem struct {
+	Bucket           string    `json:"bucket"`
+	AssignmentID     string    `json:"assignment_id"`
+	WorkItemID       string    `json:"work_item_id"`
+	WorkItemTitle    string    `json:"work_item_title,omitempty"`
+	RoleID           string    `json:"role_id,omitempty"`
+	RoleName         string    `json:"role_name,omitempty"`
+	RootID           string    `json:"root_id,omitempty"`
+	Status           string    `json:"status"`
+	ExecutionMode    string    `json:"execution_mode,omitempty"`
+	DesiredAgentKind string    `json:"desired_agent_kind,omitempty"`
+	ExecutionRef     string    `json:"execution_ref,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 type ReviewFollowUpReadiness struct {
 	ArtifactID           string `json:"artifact_id"`
 	Title                string `json:"title"`
@@ -406,6 +452,11 @@ const (
 	ProjectOperationSeverityActive  = "active"
 	ProjectOperationSeverityReady   = "ready"
 	ProjectOperationSeverityInfo    = "info"
+
+	ProjectActivityBucketActive    = "active"
+	ProjectActivityBucketBlocked   = "blocked"
+	ProjectActivityBucketCompleted = "completed"
+	ProjectActivityBucketOther     = "other"
 
 	LaunchPacketKindAssignment = "assignment_launch_packet"
 )
