@@ -865,21 +865,32 @@ func (s *Service) CreateEvidence(ctx context.Context, input Evidence) (Evidence,
 	if body == "" && locator == "" {
 		return Evidence{}, errors.Join(ErrInvalid, errors.New("evidence body or locator is required"))
 	}
+	assignmentID := strings.TrimSpace(input.AssignmentID)
+	if assignmentID != "" {
+		assignment, err := s.store.GetAssignment(ctx, projectID, assignmentID)
+		if err != nil {
+			return Evidence{}, err
+		}
+		if assignment.WorkItemID != workItemID {
+			return Evidence{}, errors.Join(ErrNotFound, errors.New("assignment_id was not found in work item"))
+		}
+	}
 	trustLabel := strings.TrimSpace(input.TrustLabel)
 	if trustLabel == "" {
 		trustLabel = EvidenceTrustOperator
 	}
 	now := s.now()
 	item := Evidence{
-		ID:         firstNonEmpty(strings.TrimSpace(input.ID), newID("ev")),
-		ProjectID:  projectID,
-		WorkItemID: workItemID,
-		Title:      title,
-		Body:       body,
-		Locator:    locator,
-		TrustLabel: trustLabel,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:           firstNonEmpty(strings.TrimSpace(input.ID), newID("ev")),
+		ProjectID:    projectID,
+		WorkItemID:   workItemID,
+		AssignmentID: assignmentID,
+		Title:        title,
+		Body:         body,
+		Locator:      locator,
+		TrustLabel:   trustLabel,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	return s.store.CreateEvidence(ctx, item)
 }

@@ -102,6 +102,33 @@ type WorkItem struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+type WorkItemCloseoutReadiness struct {
+	ProjectID                    string                    `json:"project_id"`
+	WorkItemID                   string                    `json:"work_item_id"`
+	Ready                        bool                      `json:"ready"`
+	Status                       string                    `json:"status"`
+	Title                        string                    `json:"title"`
+	Detail                       string                    `json:"detail"`
+	Blockers                     []string                  `json:"blockers,omitempty"`
+	Warnings                     []string                  `json:"warnings,omitempty"`
+	AssignmentCount              int                       `json:"assignment_count"`
+	CompletedAssignments         int                       `json:"completed_assignments"`
+	ReviewFollowUpCount          int                       `json:"review_follow_up_count"`
+	ReviewFollowUpArtifactIDs    []string                  `json:"review_follow_up_artifact_ids,omitempty"`
+	ReviewFollowUps              []ReviewFollowUpReadiness `json:"review_follow_ups,omitempty"`
+	MissingEvidenceAssignmentIDs []string                  `json:"missing_evidence_assignment_ids,omitempty"`
+}
+
+type ReviewFollowUpReadiness struct {
+	ArtifactID           string `json:"artifact_id"`
+	Title                string `json:"title"`
+	Status               string `json:"status"`
+	Blocker              string `json:"blocker,omitempty"`
+	ReviewedAssignmentID string `json:"reviewed_assignment_id,omitempty"`
+	ReviewVerdict        string `json:"review_verdict,omitempty"`
+	ReviewRisk           string `json:"review_risk,omitempty"`
+}
+
 type DesiredAgent struct {
 	Kind     string   `json:"kind,omitempty"`
 	SkillIDs []string `json:"skill_ids,omitempty"`
@@ -164,15 +191,16 @@ type AssignmentLaunchPacket struct {
 }
 
 type Evidence struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"project_id"`
-	WorkItemID string    `json:"work_item_id"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body,omitempty"`
-	Locator    string    `json:"locator,omitempty"`
-	TrustLabel string    `json:"trust_label,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	WorkItemID   string    `json:"work_item_id"`
+	AssignmentID string    `json:"assignment_id,omitempty"`
+	Title        string    `json:"title"`
+	Body         string    `json:"body,omitempty"`
+	Locator      string    `json:"locator,omitempty"`
+	TrustLabel   string    `json:"trust_label,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type Review struct {
@@ -271,6 +299,7 @@ type MemoryCandidatePromotion struct {
 
 const (
 	WorkStatusReady = "ready"
+	WorkStatusDone  = "done"
 	PriorityNormal  = "normal"
 
 	ExecutionManual          = "manual"

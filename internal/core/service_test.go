@@ -427,10 +427,11 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 
 	evidence, err := service.CreateEvidence(ctx, Evidence{
-		ProjectID:  project.ID,
-		WorkItemID: work.ID,
-		Title:      "Test output",
-		Locator:    "file://report.md",
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Title:        "Test output",
+		Locator:      "file://report.md",
 	})
 	if err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
@@ -552,6 +553,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
 	}
+	if launchPacket.Evidence[0].AssignmentID != assignment.ID {
+		t.Fatalf("launch packet evidence = %+v, want assignment-scoped evidence", launchPacket.Evidence[0])
+	}
 
 	completed, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-123")
 	if err != nil {
@@ -559,6 +563,191 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if completed.Status != AssignmentCompleted || completed.ExecutionRef != "run-123" {
 		t.Fatalf("completed assignment = %+v, want completed with execution ref", completed)
+	}
+}
+
+func TestService_WorkItemCloseoutReadiness(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Closeout project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Close out work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-1"); err != nil {
+		t.Fatalf("CompleteAssignment() error = %v", err)
+	}
+
+	readiness, err := service.WorkItemCloseoutReadiness(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("WorkItemCloseoutReadiness() error = %v", err)
+	}
+	if readiness.Ready || readiness.Status != "blocked" || len(readiness.MissingEvidenceAssignmentIDs) != 1 || readiness.MissingEvidenceAssignmentIDs[0] != assignment.ID {
+		t.Fatalf("readiness = %+v, want missing evidence blocker", readiness)
+	}
+
+	otherWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Other work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(other) error = %v", err)
+	}
+	otherAssignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: otherWork.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(other) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: otherAssignment.ID,
+		Title:        "Wrong assignment evidence",
+		Locator:      "file://wrong.md",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateEvidence(wrong assignment) error = %v, want ErrNotFound", err)
+	}
+
+	if _, err := service.CreateEvidence(ctx, Evidence{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Title:        "Test output",
+		Locator:      "file://report.md",
+	}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	readiness, err = service.WorkItemCloseoutReadiness(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("WorkItemCloseoutReadiness() with evidence error = %v", err)
+	}
+	if !readiness.Ready || readiness.CompletedAssignments != 1 || readiness.AssignmentCount != 1 {
+		t.Fatalf("readiness with evidence = %+v, want ready closeout", readiness)
+	}
+}
+
+func TestService_WorkItemCloseoutReadinessManualAndActiveStates(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Manual closeout"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Coordinator"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	manualWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Manual work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(manual) error = %v", err)
+	}
+	readiness, err := service.WorkItemCloseoutReadiness(ctx, project.ID, manualWork.ID)
+	if err != nil {
+		t.Fatalf("WorkItemCloseoutReadiness(manual) error = %v", err)
+	}
+	if !readiness.Ready || len(readiness.Warnings) != 1 || readiness.AssignmentCount != 0 {
+		t.Fatalf("manual readiness = %+v, want ready manual warning", readiness)
+	}
+
+	activeWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Active work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(active) error = %v", err)
+	}
+	if _, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: activeWork.ID, RoleID: role.ID}); err != nil {
+		t.Fatalf("CreateAssignment(active) error = %v", err)
+	}
+	readiness, err = service.WorkItemCloseoutReadiness(ctx, project.ID, activeWork.ID)
+	if err != nil {
+		t.Fatalf("WorkItemCloseoutReadiness(active) error = %v", err)
+	}
+	if readiness.Ready || readiness.Status != "blocked" || !containsString(readiness.Blockers, "1 assignment is still active") {
+		t.Fatalf("active readiness = %+v, want active assignment blocker", readiness)
+	}
+}
+
+func TestService_WorkItemCloseoutReadinessReviewFollowUp(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Review closeout"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Review follow-up"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-1"); err != nil {
+		t.Fatalf("CompleteAssignment() error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Evidence", Locator: "file://report.md"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	review, err := service.CreateReview(ctx, Review{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Title:        "Architecture review",
+		Body:         "Needs follow-up.",
+		Verdict:      ReviewVerdictConcerns,
+		Risk:         ReviewRiskMedium,
+	})
+	if err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	readiness, err := service.WorkItemCloseoutReadiness(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("WorkItemCloseoutReadiness() error = %v", err)
+	}
+	if readiness.Ready || len(readiness.ReviewFollowUps) != 1 || readiness.ReviewFollowUps[0].ArtifactID != review.ID || readiness.ReviewFollowUps[0].Blocker == "" {
+		t.Fatalf("readiness review follow-up = %+v, want typed blocker", readiness)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:          project.ID,
+		WorkItemID:         work.ID,
+		TargetWorkItemID:   work.ID,
+		Title:              "Dismiss review follow-up",
+		Body:               "Operator accepted the risk.",
+		LinkedArtifactIDs:  []string{review.ID},
+		Status:             HandoffStatusDismissed,
+		TargetAssignmentID: "",
+	}); err != nil {
+		t.Fatalf("CreateHandoff(dismissed) error = %v", err)
+	}
+	readiness, err = service.WorkItemCloseoutReadiness(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("WorkItemCloseoutReadiness() after dismissed handoff error = %v", err)
+	}
+	if !readiness.Ready || readiness.ReviewFollowUpCount != 0 {
+		t.Fatalf("readiness after dismissed follow-up = %+v, want ready closeout", readiness)
 	}
 }
 

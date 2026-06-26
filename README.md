@@ -25,8 +25,8 @@ local MCP server, but its contracts are not stable yet.
 Implemented now:
 
 - portable core types for projects, roles, profiles, work items, assignments,
-  skill metadata, evidence, reviews, handoffs with source/target refs, accepted
-  memory, and memory candidates
+  skill metadata, assignment-scoped evidence, reviews, handoffs with
+  source/target refs, accepted memory, and memory candidates
 - in-memory service for projects, profiles, roles, work items, assignments, and
   collaboration artifacts
 - SQLite store for durable projects, profiles, roles, work items, assignments,
@@ -59,6 +59,7 @@ Implemented now:
   - `work_items.list`
   - `work_items.create`
   - `work_items.update`
+  - `work_items.closeout_readiness`
   - `assignments.list`
   - `assignments.next`
   - `assignments.create`
@@ -83,12 +84,12 @@ Implemented now:
   - `memory_candidates.delete`
 - assignment launch packets with resolved profile, execution-profile, skill,
   artifact, handoff, accepted-memory, and memory-candidate metadata
+- read-only work-item closeout readiness summaries derived from assignment,
+  evidence, review, and handoff metadata
 
 Planned next:
 
 - resource templates once the MCP transport grows that surface
-- closeout/readiness summaries built from assignment, evidence, review, and
-  handoff metadata
 - richer assignment context resources for memory candidates and review follow-up
 
 ## Run
