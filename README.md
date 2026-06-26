@@ -74,7 +74,12 @@ Implemented now:
   - `memory_entries.create`
   - `memory_entries.update`
   - `memory_entries.delete`
+  - `memory_candidates.list`
+  - `memory_candidates.get`
   - `memory_candidates.create`
+  - `memory_candidates.promote`
+  - `memory_candidates.reject`
+  - `memory_candidates.delete`
 - assignment launch packets with resolved profile, execution-profile, skill,
   artifact, handoff, accepted-memory, and memory-candidate metadata
 

@@ -42,6 +42,9 @@ type Review = core.Review
 type Handoff = core.Handoff
 type MemoryEntry = core.MemoryEntry
 type MemoryCandidate = core.MemoryCandidate
+type MemoryCandidateSourceRef = core.MemoryCandidateSourceRef
+type MemoryCandidateFilter = core.MemoryCandidateFilter
+type MemoryCandidatePromotion = core.MemoryCandidatePromotion
 
 const (
 	WorkStatusReady = core.WorkStatusReady
@@ -88,6 +91,9 @@ const (
 	MemorySourceOperator  = core.MemorySourceOperator
 	MemorySourceGenerated = core.MemorySourceGenerated
 
+	MemoryCandidatePending  = core.MemoryCandidatePending
+	MemoryCandidatePromoted = core.MemoryCandidatePromoted
+	MemoryCandidateRejected = core.MemoryCandidateRejected
 	MemoryCandidateProposed = core.MemoryCandidateProposed
 
 	LaunchPacketKindAssignment = core.LaunchPacketKindAssignment

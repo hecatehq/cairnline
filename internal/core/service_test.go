@@ -468,15 +468,18 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		t.Fatalf("handoff = %+v, want open status", handoff)
 	}
 	memory, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
-		ProjectID: project.ID,
-		Title:     "Project convention",
-		Body:      "Reviews should include concrete evidence.",
+		ProjectID:           project.ID,
+		Title:               "Project convention",
+		Body:                "Reviews should include concrete evidence.",
+		SuggestedTrustLabel: MemoryTrustGenerated,
+		SuggestedSourceKind: MemorySourceGenerated,
+		SuggestedSourceID:   assignment.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateMemoryCandidate() error = %v", err)
 	}
-	if memory.Status != MemoryCandidateProposed {
-		t.Fatalf("memory candidate = %+v, want proposed status", memory)
+	if memory.Status != MemoryCandidatePending || memory.SuggestedTrustLabel != MemoryTrustGenerated {
+		t.Fatalf("memory candidate = %+v, want pending generated status", memory)
 	}
 	memoryEntry, err := service.CreateMemoryEntry(ctx, MemoryEntry{
 		ProjectID:  project.ID,
@@ -514,6 +517,107 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if completed.Status != AssignmentCompleted || completed.ExecutionRef != "run-123" {
 		t.Fatalf("completed assignment = %+v, want completed with execution ref", completed)
+	}
+}
+
+func TestService_MemoryCandidateDecisionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Candidate decisions"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	promoteCandidate, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ProjectID:           project.ID,
+		Title:               "Generated review lesson",
+		Body:                "Review handoffs should cite concrete evidence.",
+		SuggestedKind:       "note",
+		SuggestedTrustLabel: MemoryTrustGenerated,
+		SuggestedSourceKind: MemorySourceGenerated,
+		SuggestedSourceID:   "run_1",
+		SourceRefs: []MemoryCandidateSourceRef{{
+			Kind:  "task_run",
+			ID:    "run_1",
+			Title: "Task run",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(promote) error = %v", err)
+	}
+	if promoteCandidate.Status != MemoryCandidatePending || len(promoteCandidate.SourceRefs) != 1 {
+		t.Fatalf("promote candidate = %+v, want pending candidate with source ref", promoteCandidate)
+	}
+	overriddenTitle := "Reviewed review lesson"
+	trust := MemoryTrustOperator
+	sourceKind := MemorySourceOperator
+	promoted, entry, err := service.PromoteMemoryCandidate(ctx, MemoryCandidatePromotion{
+		ProjectID:   project.ID,
+		CandidateID: promoteCandidate.ID,
+		Title:       &overriddenTitle,
+		TrustLabel:  &trust,
+		SourceKind:  &sourceKind,
+	})
+	if err != nil {
+		t.Fatalf("PromoteMemoryCandidate() error = %v", err)
+	}
+	if promoted.Status != MemoryCandidatePromoted || promoted.PromotedMemoryID != entry.ID {
+		t.Fatalf("promoted candidate = %+v entry=%+v, want promoted candidate linked to entry", promoted, entry)
+	}
+	if entry.Title != overriddenTitle || entry.TrustLabel != MemoryTrustOperator || !entry.Enabled {
+		t.Fatalf("promoted entry = %+v, want override title/operator trust/enabled", entry)
+	}
+	retried, retriedEntry, err := service.PromoteMemoryCandidate(ctx, MemoryCandidatePromotion{
+		ProjectID:   project.ID,
+		CandidateID: promoteCandidate.ID,
+	})
+	if err != nil {
+		t.Fatalf("PromoteMemoryCandidate(retry) error = %v", err)
+	}
+	if retried.PromotedMemoryID != entry.ID || retriedEntry.ID != entry.ID {
+		t.Fatalf("retried promote candidate=%+v entry=%+v, want idempotent promoted memory %s", retried, retriedEntry, entry.ID)
+	}
+
+	rejectCandidate, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ProjectID: project.ID,
+		Title:     "Speculative convention",
+		Body:      "Maybe skip all tests.",
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(reject) error = %v", err)
+	}
+	rejected, err := service.RejectMemoryCandidate(ctx, project.ID, rejectCandidate.ID, "Not durable project knowledge.")
+	if err != nil {
+		t.Fatalf("RejectMemoryCandidate() error = %v", err)
+	}
+	if rejected.Status != MemoryCandidateRejected || rejected.StatusReason != "Not durable project knowledge." {
+		t.Fatalf("rejected candidate = %+v, want rejected reason", rejected)
+	}
+	if _, _, err := service.PromoteMemoryCandidate(ctx, MemoryCandidatePromotion{
+		ProjectID:   project.ID,
+		CandidateID: rejectCandidate.ID,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("PromoteMemoryCandidate(rejected) error = %v, want ErrConflict", err)
+	}
+
+	pending, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates(pending) error = %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending candidates = %+v, want resolved candidates omitted", pending)
+	}
+	all, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID, IncludeResolved: true})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates(all) error = %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("all candidates = %+v, want promoted and rejected candidates", all)
+	}
+	if err := service.DeleteMemoryCandidate(ctx, project.ID, rejectCandidate.ID); err != nil {
+		t.Fatalf("DeleteMemoryCandidate() error = %v", err)
+	}
+	if _, err := service.GetMemoryCandidate(ctx, project.ID, rejectCandidate.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetMemoryCandidate(deleted) error = %v, want ErrNotFound", err)
 	}
 }
 

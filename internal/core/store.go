@@ -65,6 +65,10 @@ type Store interface {
 	UpdateMemoryEntry(ctx context.Context, entry MemoryEntry) (MemoryEntry, error)
 	DeleteMemoryEntry(ctx context.Context, projectID, id string) error
 
-	ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error)
+	ListMemoryCandidates(ctx context.Context, filter MemoryCandidateFilter) ([]MemoryCandidate, error)
+	GetMemoryCandidate(ctx context.Context, projectID, id string) (MemoryCandidate, error)
 	CreateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error)
+	UpdateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error)
+	DeleteMemoryCandidate(ctx context.Context, projectID, id string) error
+	PromoteMemoryCandidate(ctx context.Context, projectID, id string, entry MemoryEntry) (MemoryCandidate, MemoryEntry, error)
 }

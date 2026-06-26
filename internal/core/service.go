@@ -747,7 +747,9 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
 	}
-	memoryCandidates, err := s.store.ListMemoryCandidates(ctx, packetContext.Project.ID)
+	memoryCandidates, err := s.store.ListMemoryCandidates(ctx, MemoryCandidateFilter{
+		ProjectID: packetContext.Project.ID,
+	})
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
 	}
@@ -1087,12 +1089,28 @@ func (s *Service) DeleteMemoryEntry(ctx context.Context, projectID, id string) e
 	return s.store.DeleteMemoryEntry(ctx, projectID, id)
 }
 
-func (s *Service) ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error) {
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
+func (s *Service) ListMemoryCandidates(ctx context.Context, filter MemoryCandidateFilter) ([]MemoryCandidate, error) {
+	filter.ProjectID = strings.TrimSpace(filter.ProjectID)
+	filter.Status = strings.TrimSpace(filter.Status)
+	if filter.ProjectID == "" {
 		return nil, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
-	return s.store.ListMemoryCandidates(ctx, projectID)
+	if filter.Status != "" && !isMemoryCandidateStatus(filter.Status) {
+		return nil, errors.Join(ErrInvalid, errors.New("memory candidate status is invalid"))
+	}
+	return s.store.ListMemoryCandidates(ctx, filter)
+}
+
+func (s *Service) GetMemoryCandidate(ctx context.Context, projectID, id string) (MemoryCandidate, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory_candidate_id is required"))
+	}
+	return s.store.GetMemoryCandidate(ctx, projectID, id)
 }
 
 func (s *Service) CreateMemoryCandidate(ctx context.Context, input MemoryCandidate) (MemoryCandidate, error) {
@@ -1108,23 +1126,206 @@ func (s *Service) CreateMemoryCandidate(ctx context.Context, input MemoryCandida
 	if body == "" {
 		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory candidate body is required"))
 	}
-	trustLabel := strings.TrimSpace(input.TrustLabel)
-	if trustLabel == "" {
-		trustLabel = EvidenceTrustOperator
-	}
+	suggestedTrustLabel := firstNonEmpty(strings.TrimSpace(input.SuggestedTrustLabel), MemoryTrustGenerated)
+	suggestedSourceKind := firstNonEmpty(strings.TrimSpace(input.SuggestedSourceKind), MemorySourceGenerated)
 	now := s.now()
 	item := MemoryCandidate{
-		ID:         firstNonEmpty(strings.TrimSpace(input.ID), newID("memcand")),
+		ID:                  firstNonEmpty(strings.TrimSpace(input.ID), newID("memcand")),
+		ProjectID:           projectID,
+		Title:               title,
+		Body:                body,
+		SuggestedKind:       strings.TrimSpace(input.SuggestedKind),
+		SuggestedTrustLabel: suggestedTrustLabel,
+		SuggestedSourceKind: suggestedSourceKind,
+		SuggestedSourceID:   strings.TrimSpace(input.SuggestedSourceID),
+		SourceRefs:          normalizeMemoryCandidateSourceRefs(input.SourceRefs),
+		Status:              MemoryCandidatePending,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	return s.store.CreateMemoryCandidate(ctx, item)
+}
+
+func (s *Service) UpdateMemoryCandidate(ctx context.Context, input MemoryCandidate) (MemoryCandidate, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	id := strings.TrimSpace(input.ID)
+	title := strings.TrimSpace(input.Title)
+	body := strings.TrimSpace(input.Body)
+	if projectID == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory_candidate_id is required"))
+	}
+	if title == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory candidate title is required"))
+	}
+	if body == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory candidate body is required"))
+	}
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = MemoryCandidatePending
+	}
+	if !isMemoryCandidateStatus(status) {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory candidate status is invalid"))
+	}
+	existing, err := s.store.GetMemoryCandidate(ctx, projectID, id)
+	if err != nil {
+		return MemoryCandidate{}, err
+	}
+	item := MemoryCandidate{
+		ID:                  id,
+		ProjectID:           projectID,
+		Title:               title,
+		Body:                body,
+		SuggestedKind:       strings.TrimSpace(input.SuggestedKind),
+		SuggestedTrustLabel: firstNonEmpty(strings.TrimSpace(input.SuggestedTrustLabel), MemoryTrustGenerated),
+		SuggestedSourceKind: firstNonEmpty(strings.TrimSpace(input.SuggestedSourceKind), MemorySourceGenerated),
+		SuggestedSourceID:   strings.TrimSpace(input.SuggestedSourceID),
+		SourceRefs:          normalizeMemoryCandidateSourceRefs(input.SourceRefs),
+		Status:              status,
+		StatusReason:        strings.TrimSpace(input.StatusReason),
+		PromotedMemoryID:    strings.TrimSpace(input.PromotedMemoryID),
+		CreatedAt:           existing.CreatedAt,
+		UpdatedAt:           s.now(),
+	}
+	if item.Status != MemoryCandidatePromoted {
+		item.PromotedMemoryID = ""
+	}
+	if item.Status == MemoryCandidatePending {
+		item.StatusReason = ""
+	}
+	return s.store.UpdateMemoryCandidate(ctx, item)
+}
+
+func (s *Service) PromoteMemoryCandidate(ctx context.Context, input MemoryCandidatePromotion) (MemoryCandidate, MemoryEntry, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	id := strings.TrimSpace(input.CandidateID)
+	if projectID == "" {
+		return MemoryCandidate{}, MemoryEntry{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return MemoryCandidate{}, MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory_candidate_id is required"))
+	}
+	candidate, err := s.store.GetMemoryCandidate(ctx, projectID, id)
+	if err != nil {
+		return MemoryCandidate{}, MemoryEntry{}, err
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	title := candidate.Title
+	if input.Title != nil {
+		title = *input.Title
+	}
+	body := candidate.Body
+	if input.Body != nil {
+		body = *input.Body
+	}
+	trustLabel := firstNonEmpty(candidate.SuggestedTrustLabel, MemoryTrustGenerated)
+	if input.TrustLabel != nil {
+		trustLabel = *input.TrustLabel
+	}
+	sourceKind := firstNonEmpty(candidate.SuggestedSourceKind, MemorySourceGenerated)
+	if input.SourceKind != nil {
+		sourceKind = *input.SourceKind
+	}
+	sourceID := candidate.SuggestedSourceID
+	if input.SourceID != nil {
+		sourceID = *input.SourceID
+	}
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if title == "" {
+		return MemoryCandidate{}, MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory title is required"))
+	}
+	if body == "" {
+		return MemoryCandidate{}, MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory body is required"))
+	}
+	now := s.now()
+	entry := MemoryEntry{
+		ID:         newID("mem"),
 		ProjectID:  projectID,
 		Title:      title,
 		Body:       body,
-		Status:     MemoryCandidateProposed,
-		TrustLabel: trustLabel,
-		SourceRef:  strings.TrimSpace(input.SourceRef),
+		TrustLabel: strings.TrimSpace(trustLabel),
+		SourceKind: strings.TrimSpace(sourceKind),
+		SourceID:   strings.TrimSpace(sourceID),
+		Enabled:    enabled,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
-	return s.store.CreateMemoryCandidate(ctx, item)
+	if entry.TrustLabel == "" {
+		entry.TrustLabel = MemoryTrustGenerated
+	}
+	if entry.SourceKind == "" {
+		entry.SourceKind = MemorySourceGenerated
+	}
+	return s.store.PromoteMemoryCandidate(ctx, projectID, id, entry)
+}
+
+func (s *Service) RejectMemoryCandidate(ctx context.Context, projectID, id, reason string) (MemoryCandidate, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return MemoryCandidate{}, errors.Join(ErrInvalid, errors.New("memory_candidate_id is required"))
+	}
+	candidate, err := s.store.GetMemoryCandidate(ctx, projectID, id)
+	if err != nil {
+		return MemoryCandidate{}, err
+	}
+	if candidate.Status != MemoryCandidatePending {
+		return MemoryCandidate{}, ErrConflict
+	}
+	candidate.Status = MemoryCandidateRejected
+	candidate.StatusReason = strings.TrimSpace(reason)
+	candidate.PromotedMemoryID = ""
+	candidate.UpdatedAt = s.now()
+	return s.store.UpdateMemoryCandidate(ctx, candidate)
+}
+
+func (s *Service) DeleteMemoryCandidate(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("memory_candidate_id is required"))
+	}
+	return s.store.DeleteMemoryCandidate(ctx, projectID, id)
+}
+
+func normalizeMemoryCandidateSourceRefs(refs []MemoryCandidateSourceRef) []MemoryCandidateSourceRef {
+	out := make([]MemoryCandidateSourceRef, 0, len(refs))
+	for _, ref := range refs {
+		kind := strings.TrimSpace(ref.Kind)
+		id := strings.TrimSpace(ref.ID)
+		if kind == "" || id == "" {
+			continue
+		}
+		out = append(out, MemoryCandidateSourceRef{
+			Kind:  kind,
+			ID:    id,
+			Title: strings.TrimSpace(ref.Title),
+			URL:   strings.TrimSpace(ref.URL),
+		})
+	}
+	return out
+}
+
+func isMemoryCandidateStatus(status string) bool {
+	switch status {
+	case MemoryCandidatePending, MemoryCandidatePromoted, MemoryCandidateRejected:
+		return true
+	default:
+		return false
+	}
 }
 
 func firstNonEmpty(values ...string) string {

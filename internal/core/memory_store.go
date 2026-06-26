@@ -687,21 +687,42 @@ func (s *MemoryStore) DeleteMemoryEntry(ctx context.Context, projectID, id strin
 	return nil
 }
 
-func (s *MemoryStore) ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error) {
+func (s *MemoryStore) ListMemoryCandidates(ctx context.Context, filter MemoryCandidateFilter) ([]MemoryCandidate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	projectID := filter.ProjectID
 	if _, ok := s.projects[projectID]; !ok {
 		return nil, ErrNotFound
 	}
 	items := make([]MemoryCandidate, 0, len(s.memory[projectID]))
 	for _, item := range s.memory[projectID] {
+		if filter.Status != "" && item.Status != filter.Status {
+			continue
+		}
+		if filter.Status == "" && !filter.IncludeResolved && item.Status != MemoryCandidatePending {
+			continue
+		}
 		items = append(items, item)
 	}
 	slices.SortFunc(items, func(a, b MemoryCandidate) int {
 		return b.UpdatedAt.Compare(a.UpdatedAt)
 	})
 	return items, nil
+}
+
+func (s *MemoryStore) GetMemoryCandidate(ctx context.Context, projectID, id string) (MemoryCandidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return MemoryCandidate{}, ErrNotFound
+	}
+	item, ok := s.memory[projectID][id]
+	if !ok {
+		return MemoryCandidate{}, ErrNotFound
+	}
+	return item, nil
 }
 
 func (s *MemoryStore) CreateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error) {
@@ -719,6 +740,72 @@ func (s *MemoryStore) CreateMemoryCandidate(ctx context.Context, candidate Memor
 	}
 	s.memory[candidate.ProjectID][candidate.ID] = candidate
 	return candidate, nil
+}
+
+func (s *MemoryStore) UpdateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[candidate.ProjectID]; !ok {
+		return MemoryCandidate{}, ErrNotFound
+	}
+	existing, ok := s.memory[candidate.ProjectID][candidate.ID]
+	if !ok {
+		return MemoryCandidate{}, ErrNotFound
+	}
+	candidate.CreatedAt = existing.CreatedAt
+	s.memory[candidate.ProjectID][candidate.ID] = candidate
+	return candidate, nil
+}
+
+func (s *MemoryStore) DeleteMemoryCandidate(ctx context.Context, projectID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := s.memory[projectID][id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.memory[projectID], id)
+	return nil
+}
+
+func (s *MemoryStore) PromoteMemoryCandidate(ctx context.Context, projectID, id string, entry MemoryEntry) (MemoryCandidate, MemoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return MemoryCandidate{}, MemoryEntry{}, ErrNotFound
+	}
+	candidate, ok := s.memory[projectID][id]
+	if !ok {
+		return MemoryCandidate{}, MemoryEntry{}, ErrNotFound
+	}
+	if candidate.Status == MemoryCandidatePromoted && candidate.PromotedMemoryID != "" {
+		promoted, ok := s.entries[projectID][candidate.PromotedMemoryID]
+		if !ok {
+			return MemoryCandidate{}, MemoryEntry{}, ErrNotFound
+		}
+		return candidate, promoted, nil
+	}
+	if candidate.Status != MemoryCandidatePending {
+		return MemoryCandidate{}, MemoryEntry{}, ErrConflict
+	}
+	if s.entries[projectID] == nil {
+		s.entries[projectID] = make(map[string]MemoryEntry)
+	}
+	if _, ok := s.entries[projectID][entry.ID]; ok {
+		return MemoryCandidate{}, MemoryEntry{}, ErrDuplicate
+	}
+	s.entries[projectID][entry.ID] = entry
+	candidate.Status = MemoryCandidatePromoted
+	candidate.StatusReason = ""
+	candidate.PromotedMemoryID = entry.ID
+	candidate.UpdatedAt = entry.UpdatedAt
+	s.memory[projectID][id] = candidate
+	return candidate, entry, nil
 }
 
 func (s *MemoryStore) requireWorkItemLocked(projectID, workItemID string) error {

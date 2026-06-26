@@ -616,12 +616,100 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"project_id":{"type":"string","minLength":1},
 				"title":{"type":"string","minLength":1},
 				"body":{"type":"string","minLength":1},
-				"trust_label":{"type":"string"},
-				"source_ref":{"type":"string"}
+				"suggested_kind":{"type":"string"},
+				"suggested_trust_label":{"type":"string"},
+				"suggested_source_kind":{"type":"string"},
+				"suggested_source_id":{"type":"string"},
+				"source_refs":{"type":"array","items":{"type":"object","properties":{
+					"kind":{"type":"string","minLength":1},
+					"id":{"type":"string","minLength":1},
+					"title":{"type":"string"},
+					"url":{"type":"string"}
+				},"required":["kind","id"]}}
 			},
 			"required":["project_id","title","body"]
 		}`),
 	}, createMemoryCandidate(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_candidates.list",
+		Title:       "List memory candidates",
+		Description: "List project memory candidates. Pending candidates are returned by default.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"include_resolved":{"type":"boolean"},
+				"status":{"type":"string","enum":["pending","promoted","rejected"]}
+			},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, listMemoryCandidates(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_candidates.get",
+		Title:       "Get memory candidate",
+		Description: "Get one project memory candidate by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"candidate_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","candidate_id"]
+		}`),
+		Annotations: readOnly,
+	}, getMemoryCandidate(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_candidates.promote",
+		Title:       "Promote memory candidate",
+		Description: "Promote a pending memory candidate into an accepted project memory entry.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"candidate_id":{"type":"string","minLength":1},
+				"title":{"type":"string"},
+				"body":{"type":"string"},
+				"trust_label":{"type":"string"},
+				"source_kind":{"type":"string"},
+				"source_id":{"type":"string"},
+				"enabled":{"type":"boolean"}
+			},
+			"required":["project_id","candidate_id"]
+		}`),
+	}, promoteMemoryCandidate(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_candidates.reject",
+		Title:       "Reject memory candidate",
+		Description: "Reject a pending memory candidate without creating accepted memory.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"candidate_id":{"type":"string","minLength":1},
+				"reason":{"type":"string"}
+			},
+			"required":["project_id","candidate_id"]
+		}`),
+	}, rejectMemoryCandidate(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_candidates.delete",
+		Title:       "Delete memory candidate",
+		Description: "Delete a project memory candidate.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"candidate_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","candidate_id"]
+		}`),
+	}, deleteMemoryCandidate(service))
 }
 
 func listProjects(service *core.Service) mcp.ToolHandler {
@@ -1716,13 +1804,23 @@ func deleteMemoryEntry(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+type memoryCandidateSourceRefArgs struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+}
+
 func createMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID  string `json:"project_id"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		TrustLabel string `json:"trust_label"`
-		SourceRef  string `json:"source_ref"`
+		ProjectID           string                         `json:"project_id"`
+		Title               string                         `json:"title"`
+		Body                string                         `json:"body"`
+		SuggestedKind       string                         `json:"suggested_kind"`
+		SuggestedTrustLabel string                         `json:"suggested_trust_label"`
+		SuggestedSourceKind string                         `json:"suggested_source_kind"`
+		SuggestedSourceID   string                         `json:"suggested_source_id"`
+		SourceRefs          []memoryCandidateSourceRefArgs `json:"source_refs"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1730,11 +1828,14 @@ func createMemoryCandidate(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
-			ProjectID:  input.ProjectID,
-			Title:      input.Title,
-			Body:       input.Body,
-			TrustLabel: input.TrustLabel,
-			SourceRef:  input.SourceRef,
+			ProjectID:           input.ProjectID,
+			Title:               input.Title,
+			Body:                input.Body,
+			SuggestedKind:       input.SuggestedKind,
+			SuggestedTrustLabel: input.SuggestedTrustLabel,
+			SuggestedSourceKind: input.SuggestedSourceKind,
+			SuggestedSourceID:   input.SuggestedSourceID,
+			SourceRefs:          toCoreMemoryCandidateSourceRefs(input.SourceRefs),
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -1743,6 +1844,143 @@ func createMemoryCandidate(service *core.Service) mcp.ToolHandler {
 			Content: mcp.TextContent(fmt.Sprintf("Created memory candidate %s: %s", item.ID, item.Title)),
 		}, nil
 	}
+}
+
+func listMemoryCandidates(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID       string `json:"project_id"`
+		IncludeResolved bool   `json:"include_resolved"`
+		Status          string `json:"status"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{
+			ProjectID:       input.ProjectID,
+			Status:          input.Status,
+			IncludeResolved: input.IncludeResolved,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatMemoryCandidates("Memory candidates", items)),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func getMemoryCandidate(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID   string `json:"project_id"`
+		CandidateID string `json:"candidate_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetMemoryCandidate(ctx, input.ProjectID, input.CandidateID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatMemoryCandidates("Memory candidate", []core.MemoryCandidate{item})),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func promoteMemoryCandidate(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID   string  `json:"project_id"`
+		CandidateID string  `json:"candidate_id"`
+		Title       *string `json:"title"`
+		Body        *string `json:"body"`
+		TrustLabel  *string `json:"trust_label"`
+		SourceKind  *string `json:"source_kind"`
+		SourceID    *string `json:"source_id"`
+		Enabled     *bool   `json:"enabled"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		candidate, entry, err := service.PromoteMemoryCandidate(ctx, core.MemoryCandidatePromotion{
+			ProjectID:   input.ProjectID,
+			CandidateID: input.CandidateID,
+			Title:       input.Title,
+			Body:        input.Body,
+			TrustLabel:  input.TrustLabel,
+			SourceKind:  input.SourceKind,
+			SourceID:    input.SourceID,
+			Enabled:     input.Enabled,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Promoted memory candidate %s to memory entry %s", candidate.ID, entry.ID)),
+			StructuredContent: candidate,
+		}, nil
+	}
+}
+
+func rejectMemoryCandidate(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID   string `json:"project_id"`
+		CandidateID string `json:"candidate_id"`
+		Reason      string `json:"reason"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.RejectMemoryCandidate(ctx, input.ProjectID, input.CandidateID, input.Reason)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Rejected memory candidate %s", item.ID)),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func deleteMemoryCandidate(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID   string `json:"project_id"`
+		CandidateID string `json:"candidate_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteMemoryCandidate(ctx, input.ProjectID, input.CandidateID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted memory candidate %s", input.CandidateID)),
+		}, nil
+	}
+}
+
+func toCoreMemoryCandidateSourceRefs(input []memoryCandidateSourceRefArgs) []core.MemoryCandidateSourceRef {
+	out := make([]core.MemoryCandidateSourceRef, 0, len(input))
+	for _, ref := range input {
+		out = append(out, core.MemoryCandidateSourceRef{
+			Kind:  ref.Kind,
+			ID:    ref.ID,
+			Title: ref.Title,
+			URL:   ref.URL,
+		})
+	}
+	return out
 }
 
 func formatAssignmentContext(item core.AssignmentContext) string {
@@ -1784,7 +2022,7 @@ func formatLaunchPacketSummary(packet core.AssignmentLaunchPacket) string {
 		fmt.Fprintf(&b, "Role: %s (%s)\n", packet.Role.Name, packet.Role.ID)
 	}
 	fmt.Fprintf(&b, "Assignment: %s [%s] mode=%s\n", packet.Assignment.ID, packet.Assignment.Status, packet.Assignment.ExecutionMode)
-	fmt.Fprintf(&b, "Skills: %d; evidence: %d; reviews: %d; handoffs: %d; memory candidates: %d\n", len(packet.Skills), len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.MemoryCandidates))
+	fmt.Fprintf(&b, "Skills: %d; evidence: %d; reviews: %d; handoffs: %d; memory: %d; memory candidates: %d\n", len(packet.Skills), len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.Memory), len(packet.MemoryCandidates))
 	for _, warning := range packet.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n", warning)
 	}
@@ -1950,6 +2188,37 @@ func formatMemoryEntries(title string, items []core.MemoryEntry) string {
 			if item.SourceID != "" {
 				fmt.Fprintf(&b, ":%s", item.SourceID)
 			}
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatMemoryCandidates(title string, items []core.MemoryCandidate) string {
+	if len(items) == 0 {
+		return "No memory candidates."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s: %s status=%s", item.ID, item.Title, item.Status)
+		if item.SuggestedTrustLabel != "" {
+			fmt.Fprintf(&b, " trust=%s", item.SuggestedTrustLabel)
+		}
+		if item.SuggestedSourceKind != "" {
+			fmt.Fprintf(&b, " source=%s", item.SuggestedSourceKind)
+			if item.SuggestedSourceID != "" {
+				fmt.Fprintf(&b, ":%s", item.SuggestedSourceID)
+			}
+		}
+		if item.PromotedMemoryID != "" {
+			fmt.Fprintf(&b, " promoted_memory=%s", item.PromotedMemoryID)
+		}
+		if item.StatusReason != "" {
+			fmt.Fprintf(&b, " reason=%q", item.StatusReason)
+		}
+		if len(item.SourceRefs) > 0 {
+			fmt.Fprintf(&b, " refs=%d", len(item.SourceRefs))
 		}
 		b.WriteByte('\n')
 	}

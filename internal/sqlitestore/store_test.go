@@ -147,11 +147,12 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateHandoff() error = %v", err)
 	}
 	if _, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
-		ProjectID:  project.ID,
-		Title:      "Persistence lesson",
-		Body:       "Cairnline stores collaboration artifacts in SQLite.",
-		TrustLabel: "test",
-		SourceRef:  assignment.ID,
+		ProjectID:           project.ID,
+		Title:               "Persistence lesson",
+		Body:                "Cairnline stores collaboration artifacts in SQLite.",
+		SuggestedTrustLabel: "test",
+		SuggestedSourceKind: "assignment",
+		SuggestedSourceID:   assignment.ID,
 	}); err != nil {
 		t.Fatalf("CreateMemoryCandidate() error = %v", err)
 	}
@@ -255,11 +256,11 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusOpen {
 		t.Fatalf("handoffs = %+v, want persisted handoff", handoffs)
 	}
-	memory, err := reopenedService.ListMemoryCandidates(ctx, project.ID)
+	memory, err := reopenedService.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
 	if err != nil {
 		t.Fatalf("ListMemoryCandidates() error = %v", err)
 	}
-	if len(memory) != 1 || memory[0].Status != core.MemoryCandidateProposed || memory[0].SourceRef != assignment.ID {
+	if len(memory) != 1 || memory[0].Status != core.MemoryCandidatePending || memory[0].SuggestedSourceID != assignment.ID {
 		t.Fatalf("memory candidates = %+v, want persisted candidate", memory)
 	}
 	memoryEntries, err := reopenedService.ListMemoryEntries(ctx, project.ID, false)
@@ -290,6 +291,96 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	}
+}
+
+func TestStore_MemoryCandidateDecisionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "candidate.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Candidates"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	candidate, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
+		ProjectID:           project.ID,
+		Title:               "Generated convention",
+		Body:                "Use durable memory only after review.",
+		SuggestedKind:       "note",
+		SuggestedTrustLabel: core.MemoryTrustGenerated,
+		SuggestedSourceKind: core.MemorySourceGenerated,
+		SuggestedSourceID:   "run_1",
+		SourceRefs: []core.MemoryCandidateSourceRef{{
+			Kind: "task_run",
+			ID:   "run_1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+	promoted, entry, err := service.PromoteMemoryCandidate(ctx, core.MemoryCandidatePromotion{
+		ProjectID:   project.ID,
+		CandidateID: candidate.ID,
+	})
+	if err != nil {
+		t.Fatalf("PromoteMemoryCandidate() error = %v", err)
+	}
+	if promoted.Status != core.MemoryCandidatePromoted || promoted.PromotedMemoryID != entry.ID {
+		t.Fatalf("promoted candidate = %+v entry=%+v, want promoted linked entry", promoted, entry)
+	}
+	retried, retriedEntry, err := service.PromoteMemoryCandidate(ctx, core.MemoryCandidatePromotion{
+		ProjectID:   project.ID,
+		CandidateID: candidate.ID,
+	})
+	if err != nil {
+		t.Fatalf("PromoteMemoryCandidate(retry) error = %v", err)
+	}
+	if retried.PromotedMemoryID != entry.ID || retriedEntry.ID != entry.ID {
+		t.Fatalf("retry candidate=%+v entry=%+v, want idempotent promoted entry", retried, retriedEntry)
+	}
+
+	rejectCandidate, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
+		ProjectID: project.ID,
+		Title:     "Speculative convention",
+		Body:      "Maybe skip tests.",
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(reject) error = %v", err)
+	}
+	rejected, err := service.RejectMemoryCandidate(ctx, project.ID, rejectCandidate.ID, "Speculative.")
+	if err != nil {
+		t.Fatalf("RejectMemoryCandidate() error = %v", err)
+	}
+	if rejected.Status != core.MemoryCandidateRejected || rejected.StatusReason != "Speculative." {
+		t.Fatalf("rejected candidate = %+v, want rejected reason", rejected)
+	}
+	if _, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID, Status: "bogus"}); !errors.Is(err, core.ErrInvalid) {
+		t.Fatalf("ListMemoryCandidates(invalid status) error = %v, want ErrInvalid", err)
+	}
+	pending, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates(pending) error = %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending candidates = %+v, want none after resolution", pending)
+	}
+	resolved, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID, IncludeResolved: true})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates(resolved) error = %v", err)
+	}
+	if len(resolved) != 2 {
+		t.Fatalf("resolved candidates = %+v, want promoted and rejected", resolved)
+	}
+	if err := service.DeleteMemoryCandidate(ctx, project.ID, rejectCandidate.ID); err != nil {
+		t.Fatalf("DeleteMemoryCandidate() error = %v", err)
+	}
+	if _, err := service.GetMemoryCandidate(ctx, project.ID, rejectCandidate.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetMemoryCandidate(deleted) error = %v, want ErrNotFound", err)
 	}
 }
 
