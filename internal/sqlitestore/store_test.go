@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -92,6 +93,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		Title:           "Check persistence",
 		Brief:           "Create, claim, complete, reopen.",
 		ReviewerRoleIDs: []string{role.ID},
+		RootID:          "root_main",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
@@ -100,6 +102,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		ProjectID:          project.ID,
 		WorkItemID:         work.ID,
 		RoleID:             role.ID,
+		RootID:             "root_main",
 		ExecutionProfileID: executionProfile.ID,
 		ExecutionMode:      core.ExecutionMCPPull,
 		DesiredAgent: core.DesiredAgent{
@@ -208,12 +211,18 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].Status != core.AssignmentCompleted || assignments[0].ExecutionRef != "run-1" {
 		t.Fatalf("assignments = %+v, want completed assignment", assignments)
 	}
+	if assignments[0].RootID != "root_main" {
+		t.Fatalf("assignment root = %q, want root_main", assignments[0].RootID)
+	}
 	packet, err := reopenedService.AssignmentContext(ctx, project.ID, assignment.ID)
 	if err != nil {
 		t.Fatalf("AssignmentContext() error = %v", err)
 	}
 	if packet.Role == nil || packet.Role.ID != role.ID || packet.WorkItem.ID != work.ID {
 		t.Fatalf("packet = %+v, want persisted context metadata", packet)
+	}
+	if packet.WorkItem.RootID != "root_main" || packet.Assignment.RootID != "root_main" {
+		t.Fatalf("packet roots work=%q assignment=%q, want root_main", packet.WorkItem.RootID, packet.Assignment.RootID)
 	}
 	evidence, err := reopenedService.ListEvidence(ctx, project.ID, work.ID)
 	if err != nil {
@@ -250,6 +259,9 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if launchPacket.Kind != core.LaunchPacketKindAssignment || launchPacket.Assignment.ID != assignment.ID || launchPacket.Role == nil || launchPacket.Role.ID != role.ID {
 		t.Fatalf("launch packet = %+v, want persisted launch packet metadata", launchPacket)
 	}
+	if launchPacket.Assignment.RootID != "root_main" {
+		t.Fatalf("launch packet assignment root = %q, want root_main", launchPacket.Assignment.RootID)
+	}
 	if launchPacket.Profile == nil || launchPacket.Profile.ID != profile.ID || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
 		t.Fatalf("launch packet = %+v, want persisted resolved profiles", launchPacket)
 	}
@@ -258,6 +270,72 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	}
+}
+
+func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = db.ExecContext(ctx, `CREATE TABLE assignments (
+		project_id TEXT NOT NULL,
+		id TEXT NOT NULL,
+		work_item_id TEXT NOT NULL,
+		role_id TEXT NOT NULL,
+		profile_id TEXT NOT NULL DEFAULT '',
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		execution_mode TEXT NOT NULL,
+		status TEXT NOT NULL,
+		desired_agent_json TEXT NOT NULL DEFAULT '{}',
+		claimed_by TEXT NOT NULL DEFAULT '',
+		execution_ref TEXT NOT NULL DEFAULT '',
+		context_snapshot_id TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (project_id, id)
+	)`)
+	if err != nil {
+		t.Fatalf("create old assignments table error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old db error = %v", err)
+	}
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+
+	rows, err := store.db.QueryContext(ctx, `PRAGMA table_info(assignments)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info error = %v", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan table_info error = %v", err)
+		}
+		if name == "root_id" {
+			found = true
+			if columnType != "TEXT" || notNull != 1 {
+				t.Fatalf("root_id column type=%q notNull=%d, want TEXT NOT NULL", columnType, notNull)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table_info rows error = %v", err)
+	}
+	if !found {
+		t.Fatalf("assignments root_id column was not added")
 	}
 }
 

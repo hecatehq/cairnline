@@ -129,7 +129,15 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("create execution profile response = %s", output.String())
 	}
 
-	project, err := service.CreateProject(ctx, core.Project{Name: "Dogfood"})
+	project, err := service.CreateProject(ctx, core.Project{
+		Name: "Dogfood",
+		Roots: []core.Root{{
+			ID:     "root_main",
+			Path:   "/workspace/dogfood",
+			Kind:   "local",
+			Active: true,
+		}},
+	})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
@@ -163,13 +171,14 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		ProjectID: project.ID,
 		Title:     "Review MCP pull",
 		Brief:     "Prove assignment claim and completion.",
+		RootID:    "root_main",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"assignments.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","execution_profile_id":"exec_local","desired_agent_kind":"any","skill_ids":["review"]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"assignments.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","root_id":"root_main","execution_profile_id":"exec_local","desired_agent_kind":"any","skill_ids":["review"]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -185,6 +194,9 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if len(assignments) != 1 {
 		t.Fatalf("assignments = %+v, want one assignment", assignments)
+	}
+	if assignments[0].RootID != "root_main" {
+		t.Fatalf("assignment root = %q, want root_main", assignments[0].RootID)
 	}
 	assignmentID := assignments[0].ID
 

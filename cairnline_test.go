@@ -13,7 +13,15 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 	ctx := context.Background()
 	service := cairnline.NewMemoryService()
 
-	project, err := service.CreateProject(ctx, cairnline.Project{Name: "Embedded project"})
+	project, err := service.CreateProject(ctx, cairnline.Project{
+		Name: "Embedded project",
+		Roots: []cairnline.Root{{
+			ID:     "root_main",
+			Path:   "/workspace/example",
+			Kind:   "local",
+			Active: true,
+		}},
+	})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
@@ -28,6 +36,7 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 	work, err := service.CreateWorkItem(ctx, cairnline.WorkItem{
 		ProjectID: project.ID,
 		Title:     "Wire embedded API",
+		RootID:    "root_main",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
@@ -36,6 +45,7 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 		ProjectID:  project.ID,
 		WorkItemID: work.ID,
 		RoleID:     role.ID,
+		RootID:     "root_main",
 		DesiredAgent: cairnline.DesiredAgent{
 			Kind: cairnline.DesiredAgentAny,
 		},
@@ -45,6 +55,9 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 	}
 	if assignment.Status != cairnline.AssignmentQueued || assignment.ExecutionMode != cairnline.ExecutionMCPPull {
 		t.Fatalf("assignment = %+v, want queued mcp_pull assignment", assignment)
+	}
+	if assignment.RootID != "root_main" {
+		t.Fatalf("assignment root = %q, want root_main", assignment.RootID)
 	}
 
 	claimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "hecate")

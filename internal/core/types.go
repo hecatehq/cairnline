@@ -112,6 +112,7 @@ type Assignment struct {
 	ProjectID          string       `json:"project_id"`
 	WorkItemID         string       `json:"work_item_id"`
 	RoleID             string       `json:"role_id"`
+	RootID             string       `json:"root_id,omitempty"`
 	ProfileID          string       `json:"profile_id,omitempty"`
 	ExecutionProfileID string       `json:"execution_profile_id,omitempty"`
 	ExecutionMode      string       `json:"execution_mode"`

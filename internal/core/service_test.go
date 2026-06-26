@@ -673,6 +673,65 @@ func TestService_CreateAssignmentValidatesRole(t *testing.T) {
 	}
 }
 
+func TestService_ValidatesProjectRootReferences(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{
+		Name: "Roots",
+		Roots: []Root{{
+			ID:     "root_main",
+			Path:   "/workspace/main",
+			Kind:   "local",
+			Active: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID: project.ID,
+		Title:     "Use valid root",
+		RootID:    "root_main",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() valid root error = %v", err)
+	}
+	if work.RootID != "root_main" {
+		t.Fatalf("work root = %q, want root_main", work.RootID)
+	}
+	if _, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID: project.ID,
+		Title:     "Use missing root",
+		RootID:    "root_missing",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateWorkItem() missing root error = %v, want ErrNotFound", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+		RootID:     "root_main",
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() valid root error = %v", err)
+	}
+	if assignment.RootID != "root_main" {
+		t.Fatalf("assignment root = %q, want root_main", assignment.RootID)
+	}
+	if _, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+		RootID:     "root_missing",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateAssignment() missing root error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestService_CreateReviewValidatesVerdict(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

@@ -355,11 +355,15 @@ func (s *Service) ListWorkItems(ctx context.Context, projectID string) ([]WorkIt
 func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem, error) {
 	projectID := strings.TrimSpace(input.ProjectID)
 	title := strings.TrimSpace(input.Title)
+	rootID := strings.TrimSpace(input.RootID)
 	if projectID == "" {
 		return WorkItem{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
 	if title == "" {
 		return WorkItem{}, errors.Join(ErrInvalid, errors.New("work item title is required"))
+	}
+	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
+		return WorkItem{}, err
 	}
 	priority := strings.TrimSpace(input.Priority)
 	if priority == "" {
@@ -379,7 +383,7 @@ func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		Priority:        priority,
 		OwnerRoleID:     strings.TrimSpace(input.OwnerRoleID),
 		ReviewerRoleIDs: input.ReviewerRoleIDs,
-		RootID:          strings.TrimSpace(input.RootID),
+		RootID:          rootID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -390,6 +394,7 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 	projectID := strings.TrimSpace(input.ProjectID)
 	id := strings.TrimSpace(input.ID)
 	title := strings.TrimSpace(input.Title)
+	rootID := strings.TrimSpace(input.RootID)
 	if projectID == "" {
 		return WorkItem{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -401,6 +406,9 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 	}
 	existing, err := s.store.GetWorkItem(ctx, projectID, id)
 	if err != nil {
+		return WorkItem{}, err
+	}
+	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
 		return WorkItem{}, err
 	}
 	priority := strings.TrimSpace(input.Priority)
@@ -420,7 +428,7 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		Priority:        priority,
 		OwnerRoleID:     strings.TrimSpace(input.OwnerRoleID),
 		ReviewerRoleIDs: compactStrings(input.ReviewerRoleIDs),
-		RootID:          strings.TrimSpace(input.RootID),
+		RootID:          rootID,
 		CreatedAt:       existing.CreatedAt,
 		UpdatedAt:       s.now(),
 	}
@@ -571,6 +579,7 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	projectID := strings.TrimSpace(input.ProjectID)
 	workItemID := strings.TrimSpace(input.WorkItemID)
 	roleID := strings.TrimSpace(input.RoleID)
+	rootID := strings.TrimSpace(input.RootID)
 	if projectID == "" {
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -579,6 +588,9 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	}
 	if roleID == "" {
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("role_id is required"))
+	}
+	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
+		return Assignment{}, err
 	}
 	profileID := strings.TrimSpace(input.ProfileID)
 	if profileID != "" {
@@ -608,6 +620,7 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 		ProjectID:          projectID,
 		WorkItemID:         workItemID,
 		RoleID:             roleID,
+		RootID:             rootID,
 		ProfileID:          profileID,
 		ExecutionProfileID: executionProfileID,
 		ExecutionMode:      executionMode,
@@ -1329,6 +1342,23 @@ func profileIDFromRole(role *Role) string {
 		return ""
 	}
 	return role.DefaultProfileID
+}
+
+func (s *Service) validateProjectRoot(ctx context.Context, projectID, rootID string) error {
+	rootID = strings.TrimSpace(rootID)
+	if rootID == "" {
+		return nil
+	}
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	for _, root := range project.Roots {
+		if root.ID == rootID {
+			return nil
+		}
+	}
+	return errors.Join(ErrNotFound, errors.New("root_id was not found in project"))
 }
 
 func (s *Service) resolveLaunchPacketSkills(ctx context.Context, projectID string, assignment Assignment, role *Role, profile *AgentProfile) ([]ProjectSkill, []string, error) {

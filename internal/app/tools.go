@@ -1201,6 +1201,9 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 		fmt.Fprintf(&b, "Assignments (%d):\n", len(items))
 		for _, item := range items {
 			fmt.Fprintf(&b, "- %s: [%s] work=%s role=%s mode=%s", item.ID, item.Status, item.WorkItemID, item.RoleID, item.ExecutionMode)
+			if item.RootID != "" {
+				fmt.Fprintf(&b, " root=%s", item.RootID)
+			}
 			if item.ClaimedBy != "" {
 				fmt.Fprintf(&b, " claimed_by=%s", item.ClaimedBy)
 			}
@@ -1252,6 +1255,7 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 		ProjectID          string   `json:"project_id"`
 		WorkItemID         string   `json:"work_item_id"`
 		RoleID             string   `json:"role_id"`
+		RootID             string   `json:"root_id"`
 		ProfileID          string   `json:"profile_id"`
 		ExecutionProfileID string   `json:"execution_profile_id"`
 		ExecutionMode      string   `json:"execution_mode"`
@@ -1267,6 +1271,7 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 			ProjectID:          input.ProjectID,
 			WorkItemID:         input.WorkItemID,
 			RoleID:             input.RoleID,
+			RootID:             input.RootID,
 			ProfileID:          input.ProfileID,
 			ExecutionProfileID: input.ExecutionProfileID,
 			ExecutionMode:      input.ExecutionMode,
@@ -1278,8 +1283,12 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		detail := fmt.Sprintf("Created assignment %s: work=%s role=%s mode=%s", item.ID, item.WorkItemID, item.RoleID, item.ExecutionMode)
+		if item.RootID != "" {
+			detail += " root=" + item.RootID
+		}
 		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Created assignment %s: work=%s role=%s mode=%s", item.ID, item.WorkItemID, item.RoleID, item.ExecutionMode)),
+			Content: mcp.TextContent(detail),
 		}, nil
 	}
 }
@@ -1686,6 +1695,9 @@ func formatAssignments(title string, items []core.Assignment) string {
 	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
 	for _, item := range items {
 		fmt.Fprintf(&b, "- %s: [%s] work=%s role=%s mode=%s", item.ID, item.Status, item.WorkItemID, item.RoleID, item.ExecutionMode)
+		if item.RootID != "" {
+			fmt.Fprintf(&b, " root=%s", item.RootID)
+		}
 		if item.DesiredAgent.Kind != "" {
 			fmt.Fprintf(&b, " desired=%s", item.DesiredAgent.Kind)
 		}
