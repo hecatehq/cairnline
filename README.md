@@ -94,7 +94,8 @@ Implemented now:
   assignments, blocked closeout, review follow-up, memory candidates, and open
   work
 - read-only project activity projections grouped by active, blocked, completed,
-  and recent assignment state
+  and recent assignment state; queued assignments are attention items until
+  claimed, while claimed/running/review assignments are active
 
 Planned next:
 

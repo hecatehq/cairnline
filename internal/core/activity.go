@@ -87,9 +87,9 @@ func projectActivityItem(assignment Assignment, workItem WorkItem, role Role) Pr
 
 func projectActivityBucket(status string) string {
 	switch strings.TrimSpace(status) {
-	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentReview:
+	case AssignmentClaimed, AssignmentRunning, AssignmentReview:
 		return ProjectActivityBucketActive
-	case AssignmentFailed, AssignmentCancelled:
+	case AssignmentQueued, AssignmentFailed, AssignmentCancelled:
 		return ProjectActivityBucketBlocked
 	case AssignmentCompleted:
 		return ProjectActivityBucketCompleted
