@@ -44,7 +44,7 @@ func (s *Service) CreateProject(ctx context.Context, input Project) (Project, er
 		Description:    strings.TrimSpace(input.Description),
 		Roots:          roots,
 		DefaultRootID:  defaultRootID,
-		ContextSources: input.ContextSources,
+		ContextSources: normalizeSources(input.ContextSources, nil, now),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -69,15 +69,16 @@ func (s *Service) UpdateProject(ctx context.Context, input Project) (Project, er
 	if err != nil {
 		return Project{}, err
 	}
+	now := s.now()
 	item := Project{
 		ID:             id,
 		Name:           name,
 		Description:    strings.TrimSpace(input.Description),
 		Roots:          roots,
 		DefaultRootID:  defaultRootID,
-		ContextSources: input.ContextSources,
+		ContextSources: normalizeSources(input.ContextSources, existingSourcesByID(existing.ContextSources), now),
 		CreatedAt:      existing.CreatedAt,
-		UpdatedAt:      s.now(),
+		UpdatedAt:      now,
 	}
 	return s.store.UpdateProject(ctx, item)
 }
@@ -1401,6 +1402,86 @@ func normalizeRoots(values []Root) []Root {
 			GitBranch: strings.TrimSpace(value.GitBranch),
 			Active:    value.Active,
 		})
+	}
+	return out
+}
+
+func normalizeSources(values []Source, existing map[string]Source, now time.Time) []Source {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]Source, 0, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value.ID)
+		kind := strings.TrimSpace(value.Kind)
+		title := strings.TrimSpace(value.Title)
+		locator := strings.TrimSpace(value.Locator)
+		if id == "" && kind == "" && title == "" && locator == "" {
+			continue
+		}
+		if id == "" {
+			id = newID("src")
+		}
+		createdAt := value.CreatedAt
+		if createdAt.IsZero() {
+			if prior, ok := existing[id]; ok {
+				createdAt = prior.CreatedAt
+			}
+		}
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		updatedAt := value.UpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = now
+		}
+		out = append(out, Source{
+			ID:             id,
+			Kind:           kind,
+			Title:          title,
+			Locator:        locator,
+			Enabled:        value.Enabled,
+			Format:         strings.TrimSpace(value.Format),
+			Scope:          strings.TrimSpace(value.Scope),
+			TrustLabel:     strings.TrimSpace(value.TrustLabel),
+			SourceCategory: strings.TrimSpace(value.SourceCategory),
+			Metadata:       normalizeStringMap(value.Metadata),
+			CreatedAt:      createdAt,
+			UpdatedAt:      updatedAt,
+		})
+	}
+	return out
+}
+
+func existingSourcesByID(values []Source) map[string]Source {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]Source, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value.ID)
+		if id == "" {
+			continue
+		}
+		out[id] = value
+	}
+	return out
+}
+
+func normalizeStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(value)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

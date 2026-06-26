@@ -38,7 +38,19 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"git_branch":{"type":"string"},
 					"active":{"type":"boolean"}
 				},"required":["path"]}},
-				"default_root_id":{"type":"string"}
+				"default_root_id":{"type":"string"},
+				"context_sources":{"type":"array","items":{"type":"object","properties":{
+					"id":{"type":"string"},
+					"kind":{"type":"string"},
+					"title":{"type":"string"},
+					"locator":{"type":"string"},
+					"enabled":{"type":"boolean"},
+					"format":{"type":"string"},
+					"scope":{"type":"string"},
+					"trust_label":{"type":"string"},
+					"source_category":{"type":"string"},
+					"metadata":{"type":"object","additionalProperties":{"type":"string"}}
+				}}}
 			},
 			"required":["name"]
 		}`),
@@ -62,7 +74,19 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"git_branch":{"type":"string"},
 					"active":{"type":"boolean"}
 				},"required":["path"]}},
-				"default_root_id":{"type":"string"}
+				"default_root_id":{"type":"string"},
+				"context_sources":{"type":"array","items":{"type":"object","properties":{
+					"id":{"type":"string"},
+					"kind":{"type":"string"},
+					"title":{"type":"string"},
+					"locator":{"type":"string"},
+					"enabled":{"type":"boolean"},
+					"format":{"type":"string"},
+					"scope":{"type":"string"},
+					"trust_label":{"type":"string"},
+					"source_category":{"type":"string"},
+					"metadata":{"type":"object","additionalProperties":{"type":"string"}}
+				}}}
 			},
 			"required":["id"]
 		}`),
@@ -817,12 +841,49 @@ func toCoreRoots(input []rootArgs) []core.Root {
 	return roots
 }
 
+type sourceArgs struct {
+	ID             string            `json:"id"`
+	Kind           string            `json:"kind"`
+	Title          string            `json:"title"`
+	Locator        string            `json:"locator"`
+	Enabled        *bool             `json:"enabled"`
+	Format         string            `json:"format"`
+	Scope          string            `json:"scope"`
+	TrustLabel     string            `json:"trust_label"`
+	SourceCategory string            `json:"source_category"`
+	Metadata       map[string]string `json:"metadata"`
+}
+
+func toCoreSources(input []sourceArgs) []core.Source {
+	sources := make([]core.Source, 0, len(input))
+	for _, source := range input {
+		enabled := true
+		if source.Enabled != nil {
+			enabled = *source.Enabled
+		}
+		sources = append(sources, core.Source{
+			ID:             source.ID,
+			Kind:           source.Kind,
+			Title:          source.Title,
+			Locator:        source.Locator,
+			Enabled:        enabled,
+			Format:         source.Format,
+			Scope:          source.Scope,
+			TrustLabel:     source.TrustLabel,
+			SourceCategory: source.SourceCategory,
+			Metadata:       source.Metadata,
+		})
+	}
+	return sources
+}
+
 func createProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		Name          string     `json:"name"`
-		Description   string     `json:"description"`
-		Roots         []rootArgs `json:"roots"`
-		DefaultRootID string     `json:"default_root_id"`
+		Name           string       `json:"name"`
+		Description    string       `json:"description"`
+		Roots          []rootArgs   `json:"roots"`
+		DefaultRootID  string       `json:"default_root_id"`
+		ContextSources []sourceArgs `json:"context_sources"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -830,10 +891,11 @@ func createProject(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateProject(ctx, core.Project{
-			Name:          input.Name,
-			Description:   input.Description,
-			Roots:         toCoreRoots(input.Roots),
-			DefaultRootID: input.DefaultRootID,
+			Name:           input.Name,
+			Description:    input.Description,
+			Roots:          toCoreRoots(input.Roots),
+			DefaultRootID:  input.DefaultRootID,
+			ContextSources: toCoreSources(input.ContextSources),
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -846,11 +908,12 @@ func createProject(service *core.Service) mcp.ToolHandler {
 
 func updateProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ID            string      `json:"id"`
-		Name          *string     `json:"name"`
-		Description   *string     `json:"description"`
-		Roots         *[]rootArgs `json:"roots"`
-		DefaultRootID *string     `json:"default_root_id"`
+		ID             string        `json:"id"`
+		Name           *string       `json:"name"`
+		Description    *string       `json:"description"`
+		Roots          *[]rootArgs   `json:"roots"`
+		DefaultRootID  *string       `json:"default_root_id"`
+		ContextSources *[]sourceArgs `json:"context_sources"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -885,6 +948,9 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		if input.DefaultRootID != nil {
 			existing.DefaultRootID = *input.DefaultRootID
+		}
+		if input.ContextSources != nil {
+			existing.ContextSources = toCoreSources(*input.ContextSources)
 		}
 		item, err := service.UpdateProject(ctx, existing)
 		if err != nil {

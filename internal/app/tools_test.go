@@ -17,7 +17,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	server := NewServer(service, "dev")
 
 	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.create","arguments":{"name":"Research notes","description":"Coordinate synthesis."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.create","arguments":{"name":"Research notes","description":"Coordinate synthesis.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"AGENTS.md","locator":"AGENTS.md","format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main"}}]}}}` + "\n",
 	)
 	var output bytes.Buffer
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -45,9 +45,12 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if len(projects) != 1 {
 		t.Fatalf("projects = %+v, want one project", projects)
 	}
+	if len(projects[0].ContextSources) != 1 || projects[0].ContextSources[0].Format != "agents_md" || projects[0].ContextSources[0].Metadata["root_id"] != "root_main" {
+		t.Fatalf("project sources = %+v, want MCP-created source metadata", projects[0].ContextSources)
+	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -55,6 +58,14 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Updated project "+projects[0].ID) {
 		t.Fatalf("update project response = %s", output.String())
+	}
+	projects, err = service.ListProjects(context.Background())
+	if err != nil {
+		t.Fatalf("ListProjects() after update error = %v", err)
+	}
+	updatedSource := projects[0].ContextSources[0]
+	if updatedSource.Title != "Repository guidance" || updatedSource.Enabled || updatedSource.Metadata["source"] != "manual" {
+		t.Fatalf("updated project source = %+v, want MCP-updated source metadata", updatedSource)
 	}
 
 	input = strings.NewReader(

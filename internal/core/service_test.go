@@ -18,12 +18,71 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	project, err := service.CreateProject(ctx, Project{
 		Name:        "Research notes",
 		Description: "Coordinate interview synthesis.",
+		ContextSources: []Source{{
+			ID:             " src_agents ",
+			Kind:           " workspace_instruction ",
+			Title:          " AGENTS.md ",
+			Locator:        " AGENTS.md ",
+			Enabled:        true,
+			Format:         " agents_md ",
+			Scope:          " workspace ",
+			TrustLabel:     " workspace_guidance ",
+			SourceCategory: " instructions ",
+			Metadata: map[string]string{
+				" root_id ": " root_main ",
+				"":          "ignored",
+			},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 	if project.ID == "" || len(project.Roots) != 0 {
 		t.Fatalf("project = %+v, want generated id and no roots", project)
+	}
+	if len(project.ContextSources) != 1 {
+		t.Fatalf("context sources = %+v, want one normalized source", project.ContextSources)
+	}
+	source := project.ContextSources[0]
+	if source.ID != "src_agents" || source.Kind != "workspace_instruction" || source.Title != "AGENTS.md" || source.Locator != "AGENTS.md" {
+		t.Fatalf("source identity = %+v, want normalized source fields", source)
+	}
+	if !source.Enabled || source.Format != "agents_md" || source.Scope != "workspace" || source.TrustLabel != "workspace_guidance" || source.SourceCategory != "instructions" {
+		t.Fatalf("source metadata = %+v, want normalized metadata fields", source)
+	}
+	if source.Metadata["root_id"] != "root_main" || len(source.Metadata) != 1 {
+		t.Fatalf("source metadata map = %+v, want trimmed root_id only", source.Metadata)
+	}
+	if source.CreatedAt.IsZero() || source.UpdatedAt.IsZero() {
+		t.Fatalf("source timestamps = %+v, want set timestamps", source)
+	}
+
+	updatedProject, err := service.UpdateProject(ctx, Project{
+		ID:          project.ID,
+		Name:        project.Name,
+		Description: project.Description,
+		ContextSources: []Source{{
+			ID:             "src_agents",
+			Kind:           "workspace_instruction",
+			Title:          "Repository guidance",
+			Locator:        "AGENTS.md",
+			Enabled:        false,
+			Format:         "agents_md",
+			Scope:          "workspace",
+			TrustLabel:     "workspace_guidance",
+			SourceCategory: "instructions",
+			Metadata:       map[string]string{"root_id": "root_main", "source": "manual"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProject() error = %v", err)
+	}
+	updatedSource := updatedProject.ContextSources[0]
+	if updatedSource.CreatedAt.IsZero() || !updatedSource.CreatedAt.Equal(source.CreatedAt) || updatedSource.Title != "Repository guidance" || updatedSource.Enabled {
+		t.Fatalf("updated source = %+v, want preserved created_at and replacement metadata", updatedSource)
+	}
+	if updatedSource.Metadata["source"] != "manual" || updatedSource.Metadata["root_id"] != "root_main" {
+		t.Fatalf("updated source metadata = %+v, want replacement metadata", updatedSource.Metadata)
 	}
 
 	item, err := service.CreateWorkItem(ctx, WorkItem{
