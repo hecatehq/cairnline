@@ -67,6 +67,18 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, updateProject(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "projects.operations_brief",
+		Title:       "Project operations brief",
+		Description: "Return a read-only project operations summary for operator attention and next-action routing.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string","minLength":1}},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, projectOperationsBrief(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "profiles.list",
 		Title:       "List agent profiles",
 		Description: "List portable agent behavior and context-policy profiles.",
@@ -857,6 +869,26 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated project %s: %s", item.ID, item.Name)),
+		}, nil
+	}
+}
+
+func projectOperationsBrief(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		brief, err := service.ProjectOperationsBrief(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatProjectOperationsBrief(brief)),
+			StructuredContent: brief,
 		}, nil
 	}
 }
@@ -2279,6 +2311,57 @@ func formatWorkItemCloseoutReadiness(readiness core.WorkItemCloseoutReadiness) s
 	}
 	if len(readiness.MissingEvidenceAssignmentIDs) > 0 {
 		fmt.Fprintf(&b, "Missing evidence assignments: %s\n", strings.Join(readiness.MissingEvidenceAssignmentIDs, ", "))
+	}
+	return b.String()
+}
+
+func formatProjectOperationsBrief(brief core.ProjectOperationsBrief) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Operations brief %s: %s\n", brief.ProjectID, brief.Status)
+	fmt.Fprintf(&b, "%s\n", brief.Title)
+	if brief.Detail != "" {
+		fmt.Fprintf(&b, "%s\n", brief.Detail)
+	}
+	fmt.Fprintf(&b, "Counts: work_items=%d open=%d assignments=%d active=%d blocked=%d memory_candidates=%d review_follow_ups=%d missing_evidence=%d open_handoffs=%d closeout_ready=%d\n",
+		brief.Counts.WorkItems,
+		brief.Counts.OpenWorkItems,
+		brief.Counts.Assignments,
+		brief.Counts.ActiveAssignments,
+		brief.Counts.BlockedAssignments,
+		brief.Counts.PendingMemoryCandidates,
+		brief.Counts.ReviewFollowUps,
+		brief.Counts.MissingEvidence,
+		brief.Counts.OpenHandoffs,
+		brief.Counts.CloseoutReady,
+	)
+	if brief.Next != nil {
+		fmt.Fprintf(&b, "Next: [%s/%s] %s\n", brief.Next.Kind, brief.Next.Severity, brief.Next.Title)
+	}
+	if len(brief.Items) > 0 {
+		b.WriteString("Items:\n")
+		for _, item := range brief.Items {
+			fmt.Fprintf(&b, "- [%s/%s]", item.Kind, item.Severity)
+			if item.Status != "" {
+				fmt.Fprintf(&b, " %s", item.Status)
+			}
+			fmt.Fprintf(&b, " %s", item.Title)
+			if item.WorkItemID != "" {
+				fmt.Fprintf(&b, " work=%s", item.WorkItemID)
+			}
+			if item.AssignmentID != "" {
+				fmt.Fprintf(&b, " assignment=%s", item.AssignmentID)
+			}
+			if item.ArtifactID != "" {
+				fmt.Fprintf(&b, " artifact=%s", item.ArtifactID)
+			}
+			if item.MemoryCandidateID != "" {
+				fmt.Fprintf(&b, " memory_candidate=%s", item.MemoryCandidateID)
+			}
+			if item.Detail != "" {
+				fmt.Fprintf(&b, " — %s", item.Detail)
+			}
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }

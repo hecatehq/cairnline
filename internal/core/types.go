@@ -117,6 +117,44 @@ type WorkItemCloseoutReadiness struct {
 	ReviewFollowUpArtifactIDs    []string                  `json:"review_follow_up_artifact_ids,omitempty"`
 	ReviewFollowUps              []ReviewFollowUpReadiness `json:"review_follow_ups,omitempty"`
 	MissingEvidenceAssignmentIDs []string                  `json:"missing_evidence_assignment_ids,omitempty"`
+	OpenHandoffIDs               []string                  `json:"open_handoff_ids,omitempty"`
+}
+
+type ProjectOperationsBrief struct {
+	ProjectID string                  `json:"project_id"`
+	Status    string                  `json:"status"`
+	Title     string                  `json:"title"`
+	Detail    string                  `json:"detail,omitempty"`
+	Counts    ProjectOperationsCounts `json:"counts"`
+	Next      *ProjectOperationItem   `json:"next,omitempty"`
+	Items     []ProjectOperationItem  `json:"items,omitempty"`
+	CreatedAt time.Time               `json:"created_at"`
+}
+
+type ProjectOperationsCounts struct {
+	WorkItems               int `json:"work_items"`
+	OpenWorkItems           int `json:"open_work_items"`
+	Assignments             int `json:"assignments"`
+	ActiveAssignments       int `json:"active_assignments"`
+	BlockedAssignments      int `json:"blocked_assignments"`
+	PendingMemoryCandidates int `json:"pending_memory_candidates"`
+	ReviewFollowUps         int `json:"review_follow_ups"`
+	MissingEvidence         int `json:"missing_evidence"`
+	OpenHandoffs            int `json:"open_handoffs"`
+	CloseoutReady           int `json:"closeout_ready"`
+}
+
+type ProjectOperationItem struct {
+	Kind              string    `json:"kind"`
+	Severity          string    `json:"severity"`
+	Status            string    `json:"status,omitempty"`
+	Title             string    `json:"title"`
+	Detail            string    `json:"detail,omitempty"`
+	WorkItemID        string    `json:"work_item_id,omitempty"`
+	AssignmentID      string    `json:"assignment_id,omitempty"`
+	ArtifactID        string    `json:"artifact_id,omitempty"`
+	MemoryCandidateID string    `json:"memory_candidate_id,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
 type ReviewFollowUpReadiness struct {
@@ -351,6 +389,23 @@ const (
 	MemoryCandidateRejected = "rejected"
 
 	MemoryCandidateProposed = MemoryCandidatePending
+
+	ProjectOperationsStatusClear     = "clear"
+	ProjectOperationsStatusAttention = "attention"
+
+	ProjectOperationKindAssignment      = "assignment"
+	ProjectOperationKindCloseoutReady   = "closeout_ready"
+	ProjectOperationKindHandoff         = "handoff"
+	ProjectOperationKindMemoryCandidate = "memory_candidate"
+	ProjectOperationKindMissingEvidence = "missing_evidence"
+	ProjectOperationKindReviewFollowUp  = "review_follow_up"
+	ProjectOperationKindWorkItem        = "work_item"
+
+	ProjectOperationSeverityBlocked = "blocked"
+	ProjectOperationSeverityAction  = "action"
+	ProjectOperationSeverityActive  = "active"
+	ProjectOperationSeverityReady   = "ready"
+	ProjectOperationSeverityInfo    = "info"
 
 	LaunchPacketKindAssignment = "assignment_launch_packet"
 )

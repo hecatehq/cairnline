@@ -43,6 +43,7 @@ Implemented now:
   - `projects.list`
   - `projects.create`
   - `projects.update`
+  - `projects.operations_brief`
   - `profiles.list`
   - `profiles.create`
   - `profiles.update`
@@ -86,6 +87,9 @@ Implemented now:
   artifact, handoff, accepted-memory, and memory-candidate metadata
 - read-only work-item closeout readiness summaries derived from assignment,
   evidence, review, and handoff metadata
+- read-only project operations briefs for attention routing across active
+  assignments, blocked closeout, review follow-up, memory candidates, and open
+  work
 
 Planned next:
 
