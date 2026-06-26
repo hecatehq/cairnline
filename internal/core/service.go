@@ -956,6 +956,10 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 	workItemID := strings.TrimSpace(input.WorkItemID)
 	title := strings.TrimSpace(input.Title)
 	body := strings.TrimSpace(input.Body)
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = HandoffStatusOpen
+	}
 	if projectID == "" {
 		return Handoff{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -968,18 +972,33 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 	if body == "" {
 		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff body is required"))
 	}
+	if !isHandoffStatus(status) {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff status is invalid"))
+	}
 	now := s.now()
 	item := Handoff{
-		ID:         firstNonEmpty(strings.TrimSpace(input.ID), newID("handoff")),
-		ProjectID:  projectID,
-		WorkItemID: workItemID,
-		FromRoleID: strings.TrimSpace(input.FromRoleID),
-		ToRoleID:   strings.TrimSpace(input.ToRoleID),
-		Title:      title,
-		Body:       body,
-		Status:     HandoffStatusOpen,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:                    firstNonEmpty(strings.TrimSpace(input.ID), newID("handoff")),
+		ProjectID:             projectID,
+		WorkItemID:            workItemID,
+		SourceAssignmentID:    strings.TrimSpace(input.SourceAssignmentID),
+		SourceRunID:           strings.TrimSpace(input.SourceRunID),
+		SourceChatSessionID:   strings.TrimSpace(input.SourceChatSessionID),
+		SourceMessageID:       strings.TrimSpace(input.SourceMessageID),
+		FromRoleID:            strings.TrimSpace(input.FromRoleID),
+		ToRoleID:              strings.TrimSpace(input.ToRoleID),
+		TargetAssignmentID:    strings.TrimSpace(input.TargetAssignmentID),
+		TargetWorkItemID:      strings.TrimSpace(input.TargetWorkItemID),
+		Title:                 title,
+		Body:                  body,
+		RecommendedNextAction: strings.TrimSpace(input.RecommendedNextAction),
+		LinkedArtifactIDs:     compactStrings(input.LinkedArtifactIDs),
+		LinkedMemoryIDs:       compactStrings(input.LinkedMemoryIDs),
+		ContextRefs:           compactStrings(input.ContextRefs),
+		Status:                status,
+		ProvenanceKind:        strings.TrimSpace(input.ProvenanceKind),
+		TrustLabel:            strings.TrimSpace(input.TrustLabel),
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 	return s.store.CreateHandoff(ctx, item)
 }
@@ -1645,6 +1664,15 @@ func normalizeReviewRisk(value string) (string, error) {
 		return value, nil
 	default:
 		return "", errors.Join(ErrInvalid, errors.New("unsupported review risk"))
+	}
+}
+
+func isHandoffStatus(value string) bool {
+	switch strings.TrimSpace(value) {
+	case HandoffStatusOpen, HandoffStatusAccepted, HandoffStatusSuperseded, HandoffStatusDismissed:
+		return true
+	default:
+		return false
 	}
 }
 

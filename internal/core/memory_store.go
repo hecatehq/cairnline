@@ -596,6 +596,25 @@ func (s *MemoryStore) CreateHandoff(ctx context.Context, handoff Handoff) (Hando
 			return Handoff{}, ErrNotFound
 		}
 	}
+	if handoff.SourceAssignmentID != "" {
+		if assignment, ok := s.assignments[handoff.ProjectID][handoff.SourceAssignmentID]; !ok || assignment.WorkItemID != handoff.WorkItemID {
+			return Handoff{}, ErrNotFound
+		}
+	}
+	if handoff.TargetAssignmentID != "" {
+		assignment, ok := s.assignments[handoff.ProjectID][handoff.TargetAssignmentID]
+		if !ok {
+			return Handoff{}, ErrNotFound
+		}
+		if handoff.TargetWorkItemID != "" && assignment.WorkItemID != handoff.TargetWorkItemID {
+			return Handoff{}, ErrNotFound
+		}
+	}
+	if handoff.TargetWorkItemID != "" {
+		if _, ok := s.workItems[handoff.ProjectID][handoff.TargetWorkItemID]; !ok {
+			return Handoff{}, ErrNotFound
+		}
+	}
 	if s.handoffs[handoff.ProjectID] == nil {
 		s.handoffs[handoff.ProjectID] = make(map[string]Handoff)
 	}

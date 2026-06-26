@@ -287,15 +287,22 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "Recorded review rev_") || !strings.Contains(output.String(), "verdict=pass") {
 		t.Fatalf("record review response = %s", output.String())
 	}
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListReviews() after record error = %v", err)
+	}
+	if len(reviews) != 1 {
+		t.Fatalf("reviews after record = %+v, want one review", reviews)
+	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"handoffs.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","from_role_id":"` + role.ID + `","to_role_id":"` + role.ID + `","title":"Next pass","body":"Use the recorded evidence."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"handoffs.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","source_assignment_id":"` + assignmentID + `","source_run_id":"run-1","from_role_id":"` + role.ID + `","to_role_id":"` + role.ID + `","target_assignment_id":"` + assignmentID + `","target_work_item_id":"` + work.ID + `","title":"Next pass","body":"Use the recorded evidence.","recommended_next_action":"Inspect the launch packet.","linked_artifact_ids":["` + reviews[0].ID + `"],"linked_memory_ids":["mem_later"],"context_refs":["ctx_1"],"status":"accepted","provenance_kind":"operator","trust_label":"operator_reviewed"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
 		t.Fatalf("Serve() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Created handoff handoff_") {
+	if !strings.Contains(output.String(), "Created handoff handoff_") || !strings.Contains(output.String(), "status=accepted") {
 		t.Fatalf("create handoff response = %s", output.String())
 	}
 
@@ -368,13 +375,12 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
 	}
-	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
-	if err != nil {
-		t.Fatalf("ListReviews() error = %v", err)
-	}
 	handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListHandoffs() error = %v", err)
+	}
+	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusAccepted || handoffs[0].SourceAssignmentID != assignmentID || handoffs[0].TargetAssignmentID != assignmentID || len(handoffs[0].LinkedArtifactIDs) != 1 || len(handoffs[0].ContextRefs) != 1 {
+		t.Fatalf("handoffs = %+v, want metadata from MCP tool", handoffs)
 	}
 	memory, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
 	if err != nil {

@@ -116,15 +116,16 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
 		t.Fatalf("ClaimAssignment() error = %v", err)
 	}
-	if _, err := service.CreateEvidence(ctx, core.Evidence{
+	evidenceRecord, err := service.CreateEvidence(ctx, core.Evidence{
 		ProjectID:  project.ID,
 		WorkItemID: work.ID,
 		Title:      "Output link",
 		Locator:    "https://example.test/report",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
 	}
-	if _, err := service.CreateReview(ctx, core.Review{
+	reviewRecord, err := service.CreateReview(ctx, core.Review{
 		ProjectID:      project.ID,
 		WorkItemID:     work.ID,
 		AssignmentID:   assignment.ID,
@@ -133,16 +134,28 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		Body:           "The persistence flow works.",
 		Verdict:        core.ReviewVerdictPass,
 		Risk:           core.ReviewRiskLow,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("CreateReview() error = %v", err)
 	}
 	if _, err := service.CreateHandoff(ctx, core.Handoff{
-		ProjectID:  project.ID,
-		WorkItemID: work.ID,
-		FromRoleID: role.ID,
-		ToRoleID:   role.ID,
-		Title:      "Next pass",
-		Body:       "Use the persisted context.",
+		ProjectID:             project.ID,
+		WorkItemID:            work.ID,
+		SourceAssignmentID:    assignment.ID,
+		SourceRunID:           "run-1",
+		FromRoleID:            role.ID,
+		ToRoleID:              role.ID,
+		TargetAssignmentID:    assignment.ID,
+		TargetWorkItemID:      work.ID,
+		Title:                 "Next pass",
+		Body:                  "Use the persisted context.",
+		RecommendedNextAction: "Inspect the launch packet.",
+		LinkedArtifactIDs:     []string{evidenceRecord.ID, reviewRecord.ID},
+		LinkedMemoryIDs:       []string{"mem_later"},
+		ContextRefs:           []string{"ctx_1"},
+		Status:                core.HandoffStatusAccepted,
+		ProvenanceKind:        "operator",
+		TrustLabel:            "operator_reviewed",
 	}); err != nil {
 		t.Fatalf("CreateHandoff() error = %v", err)
 	}
@@ -235,12 +248,12 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if packet.WorkItem.RootID != "root_main" || packet.Assignment.RootID != "root_main" {
 		t.Fatalf("packet roots work=%q assignment=%q, want root_main", packet.WorkItem.RootID, packet.Assignment.RootID)
 	}
-	evidence, err := reopenedService.ListEvidence(ctx, project.ID, work.ID)
+	evidenceItems, err := reopenedService.ListEvidence(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
 	}
-	if len(evidence) != 1 || evidence[0].Title != "Output link" || evidence[0].TrustLabel != core.EvidenceTrustOperator {
-		t.Fatalf("evidence = %+v, want persisted evidence", evidence)
+	if len(evidenceItems) != 1 || evidenceItems[0].Title != "Output link" || evidenceItems[0].TrustLabel != core.EvidenceTrustOperator {
+		t.Fatalf("evidence = %+v, want persisted evidence", evidenceItems)
 	}
 	reviews, err := reopenedService.ListReviews(ctx, project.ID, work.ID)
 	if err != nil {
@@ -253,7 +266,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListHandoffs() error = %v", err)
 	}
-	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusOpen {
+	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusAccepted || handoffs[0].SourceAssignmentID != assignment.ID || handoffs[0].TargetAssignmentID != assignment.ID || handoffs[0].RecommendedNextAction == "" || len(handoffs[0].LinkedArtifactIDs) != 2 || len(handoffs[0].LinkedMemoryIDs) != 1 || len(handoffs[0].ContextRefs) != 1 {
 		t.Fatalf("handoffs = %+v, want persisted handoff", handoffs)
 	}
 	memory, err := reopenedService.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})

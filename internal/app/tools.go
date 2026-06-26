@@ -515,10 +515,23 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"work_item_id":{"type":"string","minLength":1},
+				"source_assignment_id":{"type":"string"},
+				"source_run_id":{"type":"string"},
+				"source_chat_session_id":{"type":"string"},
+				"source_message_id":{"type":"string"},
 				"from_role_id":{"type":"string"},
 				"to_role_id":{"type":"string"},
+				"target_assignment_id":{"type":"string"},
+				"target_work_item_id":{"type":"string"},
 				"title":{"type":"string","minLength":1},
-				"body":{"type":"string","minLength":1}
+				"body":{"type":"string","minLength":1},
+				"recommended_next_action":{"type":"string"},
+				"linked_artifact_ids":{"type":"array","items":{"type":"string"}},
+				"linked_memory_ids":{"type":"array","items":{"type":"string"}},
+				"context_refs":{"type":"array","items":{"type":"string"}},
+				"status":{"type":"string","enum":["open","accepted","superseded","dismissed"]},
+				"provenance_kind":{"type":"string"},
+				"trust_label":{"type":"string"}
 			},
 			"required":["project_id","work_item_id","title","body"]
 		}`),
@@ -1635,12 +1648,25 @@ func recordReview(service *core.Service) mcp.ToolHandler {
 
 func createHandoff(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID  string `json:"project_id"`
-		WorkItemID string `json:"work_item_id"`
-		FromRoleID string `json:"from_role_id"`
-		ToRoleID   string `json:"to_role_id"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
+		ProjectID             string   `json:"project_id"`
+		WorkItemID            string   `json:"work_item_id"`
+		SourceAssignmentID    string   `json:"source_assignment_id"`
+		SourceRunID           string   `json:"source_run_id"`
+		SourceChatSessionID   string   `json:"source_chat_session_id"`
+		SourceMessageID       string   `json:"source_message_id"`
+		FromRoleID            string   `json:"from_role_id"`
+		ToRoleID              string   `json:"to_role_id"`
+		TargetAssignmentID    string   `json:"target_assignment_id"`
+		TargetWorkItemID      string   `json:"target_work_item_id"`
+		Title                 string   `json:"title"`
+		Body                  string   `json:"body"`
+		RecommendedNextAction string   `json:"recommended_next_action"`
+		LinkedArtifactIDs     []string `json:"linked_artifact_ids"`
+		LinkedMemoryIDs       []string `json:"linked_memory_ids"`
+		ContextRefs           []string `json:"context_refs"`
+		Status                string   `json:"status"`
+		ProvenanceKind        string   `json:"provenance_kind"`
+		TrustLabel            string   `json:"trust_label"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1648,18 +1674,35 @@ func createHandoff(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateHandoff(ctx, core.Handoff{
-			ProjectID:  input.ProjectID,
-			WorkItemID: input.WorkItemID,
-			FromRoleID: input.FromRoleID,
-			ToRoleID:   input.ToRoleID,
-			Title:      input.Title,
-			Body:       input.Body,
+			ProjectID:             input.ProjectID,
+			WorkItemID:            input.WorkItemID,
+			SourceAssignmentID:    input.SourceAssignmentID,
+			SourceRunID:           input.SourceRunID,
+			SourceChatSessionID:   input.SourceChatSessionID,
+			SourceMessageID:       input.SourceMessageID,
+			FromRoleID:            input.FromRoleID,
+			ToRoleID:              input.ToRoleID,
+			TargetAssignmentID:    input.TargetAssignmentID,
+			TargetWorkItemID:      input.TargetWorkItemID,
+			Title:                 input.Title,
+			Body:                  input.Body,
+			RecommendedNextAction: input.RecommendedNextAction,
+			LinkedArtifactIDs:     input.LinkedArtifactIDs,
+			LinkedMemoryIDs:       input.LinkedMemoryIDs,
+			ContextRefs:           input.ContextRefs,
+			Status:                input.Status,
+			ProvenanceKind:        input.ProvenanceKind,
+			TrustLabel:            input.TrustLabel,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		detail := fmt.Sprintf("Created handoff %s: %s", item.ID, item.Title)
+		if item.Status != "" {
+			detail += " status=" + item.Status
+		}
 		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Created handoff %s: %s", item.ID, item.Title)),
+			Content: mcp.TextContent(detail),
 		}, nil
 	}
 }

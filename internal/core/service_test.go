@@ -454,18 +454,60 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		t.Fatalf("review = %+v, want default title and recorded status", review)
 	}
 	handoff, err := service.CreateHandoff(ctx, Handoff{
-		ProjectID:  project.ID,
-		WorkItemID: work.ID,
-		FromRoleID: role.ID,
-		ToRoleID:   role.ID,
-		Title:      "Follow-up",
-		Body:       "Carry this into the next pass.",
+		ProjectID:             project.ID,
+		WorkItemID:            work.ID,
+		SourceAssignmentID:    assignment.ID,
+		SourceRunID:           "run-123",
+		FromRoleID:            role.ID,
+		ToRoleID:              role.ID,
+		TargetAssignmentID:    assignment.ID,
+		TargetWorkItemID:      work.ID,
+		Title:                 "Follow-up",
+		Body:                  "Carry this into the next pass.",
+		RecommendedNextAction: "Verify the recorded evidence.",
+		LinkedArtifactIDs:     []string{evidence.ID, review.ID, review.ID},
+		ContextRefs:           []string{"ctx_1"},
+		Status:                HandoffStatusAccepted,
+		ProvenanceKind:        "operator",
+		TrustLabel:            "operator_reviewed",
 	})
 	if err != nil {
 		t.Fatalf("CreateHandoff() error = %v", err)
 	}
-	if handoff.Status != HandoffStatusOpen {
-		t.Fatalf("handoff = %+v, want open status", handoff)
+	if handoff.Status != HandoffStatusAccepted || handoff.SourceAssignmentID != assignment.ID || handoff.TargetAssignmentID != assignment.ID || handoff.RecommendedNextAction == "" || len(handoff.LinkedArtifactIDs) != 2 || len(handoff.ContextRefs) != 1 {
+		t.Fatalf("handoff = %+v, want metadata preserved", handoff)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		Title:      "Invalid status",
+		Body:       "Invalid handoff status should be rejected.",
+		Status:     "paused",
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CreateHandoff(invalid status) error = %v, want ErrInvalid", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:          project.ID,
+		WorkItemID:         work.ID,
+		SourceAssignmentID: "missing",
+		Title:              "Missing source",
+		Body:               "Missing source assignment should be rejected.",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateHandoff(missing source assignment) error = %v, want ErrNotFound", err)
+	}
+	otherWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Different follow-up target"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(other) error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:          project.ID,
+		WorkItemID:         work.ID,
+		TargetAssignmentID: assignment.ID,
+		TargetWorkItemID:   otherWork.ID,
+		Title:              "Mismatched target",
+		Body:               "Target assignment and work item should agree.",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateHandoff(mismatched target) error = %v, want ErrNotFound", err)
 	}
 	memory, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
 		ProjectID:           project.ID,

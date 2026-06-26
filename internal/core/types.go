@@ -191,16 +191,28 @@ type Review struct {
 }
 
 type Handoff struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"project_id"`
-	WorkItemID string    `json:"work_item_id"`
-	FromRoleID string    `json:"from_role_id,omitempty"`
-	ToRoleID   string    `json:"to_role_id,omitempty"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	ProjectID             string    `json:"project_id"`
+	WorkItemID            string    `json:"work_item_id"`
+	SourceAssignmentID    string    `json:"source_assignment_id,omitempty"`
+	SourceRunID           string    `json:"source_run_id,omitempty"`
+	SourceChatSessionID   string    `json:"source_chat_session_id,omitempty"`
+	SourceMessageID       string    `json:"source_message_id,omitempty"`
+	FromRoleID            string    `json:"from_role_id,omitempty"`
+	ToRoleID              string    `json:"to_role_id,omitempty"`
+	TargetAssignmentID    string    `json:"target_assignment_id,omitempty"`
+	TargetWorkItemID      string    `json:"target_work_item_id,omitempty"`
+	Title                 string    `json:"title"`
+	Body                  string    `json:"body"`
+	RecommendedNextAction string    `json:"recommended_next_action,omitempty"`
+	LinkedArtifactIDs     []string  `json:"linked_artifact_ids,omitempty"`
+	LinkedMemoryIDs       []string  `json:"linked_memory_ids,omitempty"`
+	ContextRefs           []string  `json:"context_refs,omitempty"`
+	Status                string    `json:"status"`
+	ProvenanceKind        string    `json:"provenance_kind,omitempty"`
+	TrustLabel            string    `json:"trust_label,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type MemoryEntry struct {
@@ -300,7 +312,10 @@ const (
 	MemorySourceOperator  = "operator"
 	MemorySourceGenerated = "generated"
 
-	HandoffStatusOpen = "open"
+	HandoffStatusOpen       = "open"
+	HandoffStatusAccepted   = "accepted"
+	HandoffStatusSuperseded = "superseded"
+	HandoffStatusDismissed  = "dismissed"
 
 	MemoryCandidatePending  = "pending"
 	MemoryCandidatePromoted = "promoted"
