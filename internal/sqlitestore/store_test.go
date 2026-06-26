@@ -117,10 +117,11 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("ClaimAssignment() error = %v", err)
 	}
 	evidenceRecord, err := service.CreateEvidence(ctx, core.Evidence{
-		ProjectID:  project.ID,
-		WorkItemID: work.ID,
-		Title:      "Output link",
-		Locator:    "https://example.test/report",
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Title:        "Output link",
+		Locator:      "https://example.test/report",
 	})
 	if err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
@@ -252,7 +253,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
 	}
-	if len(evidenceItems) != 1 || evidenceItems[0].Title != "Output link" || evidenceItems[0].TrustLabel != core.EvidenceTrustOperator {
+	if len(evidenceItems) != 1 || evidenceItems[0].Title != "Output link" || evidenceItems[0].AssignmentID != assignment.ID || evidenceItems[0].TrustLabel != core.EvidenceTrustOperator {
 		t.Fatalf("evidence = %+v, want persisted evidence", evidenceItems)
 	}
 	reviews, err := reopenedService.ListReviews(ctx, project.ID, work.ID)

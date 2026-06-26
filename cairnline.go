@@ -32,6 +32,8 @@ type Role = core.Role
 type AgentProfile = core.AgentProfile
 type ExecutionProfile = core.ExecutionProfile
 type WorkItem = core.WorkItem
+type WorkItemCloseoutReadiness = core.WorkItemCloseoutReadiness
+type ReviewFollowUpReadiness = core.ReviewFollowUpReadiness
 type DesiredAgent = core.DesiredAgent
 type Assignment = core.Assignment
 type AssignmentCompatibilityFilter = core.AssignmentCompatibilityFilter
@@ -48,6 +50,7 @@ type MemoryCandidatePromotion = core.MemoryCandidatePromotion
 
 const (
 	WorkStatusReady = core.WorkStatusReady
+	WorkStatusDone  = core.WorkStatusDone
 	PriorityNormal  = core.PriorityNormal
 
 	ExecutionManual          = core.ExecutionManual

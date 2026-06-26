@@ -267,7 +267,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","title":"Test output","locator":"file://report.md"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","title":"Test output","locator":"file://report.md"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -371,6 +371,28 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("complete assignment response = %s", output.String())
 	}
 
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"work_items.closeout_readiness","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() closeout readiness error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Closeout readiness "+work.ID+": ready") || !strings.Contains(output.String(), "1/1 complete") {
+		t.Fatalf("closeout readiness response = %s", output.String())
+	}
+	var readinessResponse struct {
+		Result struct {
+			StructuredContent core.WorkItemCloseoutReadiness `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &readinessResponse); err != nil {
+		t.Fatalf("closeout readiness response did not unmarshal: %v\n%s", err, output.String())
+	}
+	if !readinessResponse.Result.StructuredContent.Ready || readinessResponse.Result.StructuredContent.CompletedAssignments != 1 {
+		t.Fatalf("closeout readiness = %+v, want ready with completed assignment", readinessResponse.Result.StructuredContent)
+	}
+
 	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
@@ -393,9 +415,12 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if len(evidence) != 1 || len(reviews) != 1 || len(handoffs) != 1 || len(memoryEntries) != 1 || len(memory) != 1 {
 		t.Fatalf("artifact counts evidence=%d reviews=%d handoffs=%d memory_entries=%d memory_candidates=%d, want all one", len(evidence), len(reviews), len(handoffs), len(memoryEntries), len(memory))
 	}
+	if evidence[0].AssignmentID != assignmentID {
+		t.Fatalf("evidence = %+v, want assignment-scoped evidence from MCP tool", evidence[0])
+	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":17,"method":"resources/list"}` + "\n",
+		`{"jsonrpc":"2.0","id":18,"method":"resources/list"}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -408,7 +433,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":18,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":19,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -420,7 +445,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":19,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":20,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

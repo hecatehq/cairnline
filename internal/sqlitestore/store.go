@@ -149,6 +149,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			project_id TEXT NOT NULL,
 			id TEXT NOT NULL,
 			work_item_id TEXT NOT NULL,
+			assignment_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL,
 			body TEXT NOT NULL DEFAULT '',
 			locator TEXT NOT NULL DEFAULT '',
@@ -242,6 +243,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := s.ensureColumn(ctx, "assignments", "root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	if err := s.ensureColumn(ctx, "evidence", "assignment_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	for _, column := range []struct {
@@ -725,7 +729,7 @@ func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) 
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, title, body, locator, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
 	if err != nil {
 		return nil, err
 	}
@@ -743,8 +747,8 @@ func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) 
 }
 
 func (s *Store) CreateEvidence(ctx context.Context, evidence core.Evidence) (core.Evidence, error) {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, title, body, locator, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.Title, evidence.Body, evidence.Locator, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.AssignmentID, evidence.Title, evidence.Body, evidence.Locator, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
 	if err != nil {
 		return core.Evidence{}, mapSQLiteWriteError(err)
 	}
@@ -1203,7 +1207,7 @@ func scanAssignment(row scanner) (core.Assignment, error) {
 func scanEvidence(row scanner) (core.Evidence, error) {
 	var item core.Evidence
 	var createdAt, updatedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.Title, &item.Body, &item.Locator, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.AssignmentID, &item.Title, &item.Body, &item.Locator, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
 		return core.Evidence{}, mapSQLiteReadError(err)
 	}
 	var err error

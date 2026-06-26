@@ -290,6 +290,21 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, updateWorkItem(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "work_items.closeout_readiness",
+		Title:       "Work item closeout readiness",
+		Description: "Return the read-only closeout readiness summary for a work item.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id"]
+		}`),
+		Annotations: readOnly,
+	}, workItemCloseoutReadiness(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "roles.list",
 		Title:       "List roles",
 		Description: "List project roles.",
@@ -477,6 +492,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"work_item_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string"},
 				"title":{"type":"string","minLength":1},
 				"body":{"type":"string"},
 				"locator":{"type":"string"},
@@ -1241,6 +1257,27 @@ func updateWorkItem(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func workItemCloseoutReadiness(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		readiness, err := service.WorkItemCloseoutReadiness(ctx, input.ProjectID, input.WorkItemID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatWorkItemCloseoutReadiness(readiness)),
+			StructuredContent: readiness,
+		}, nil
+	}
+}
+
 func listRoles(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID string `json:"project_id"`
@@ -1582,12 +1619,13 @@ func completeAssignment(service *core.Service) mcp.ToolHandler {
 
 func recordEvidence(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID  string `json:"project_id"`
-		WorkItemID string `json:"work_item_id"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		Locator    string `json:"locator"`
-		TrustLabel string `json:"trust_label"`
+		ProjectID    string `json:"project_id"`
+		WorkItemID   string `json:"work_item_id"`
+		AssignmentID string `json:"assignment_id"`
+		Title        string `json:"title"`
+		Body         string `json:"body"`
+		Locator      string `json:"locator"`
+		TrustLabel   string `json:"trust_label"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1595,12 +1633,13 @@ func recordEvidence(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateEvidence(ctx, core.Evidence{
-			ProjectID:  input.ProjectID,
-			WorkItemID: input.WorkItemID,
-			Title:      input.Title,
-			Body:       input.Body,
-			Locator:    input.Locator,
-			TrustLabel: input.TrustLabel,
+			ProjectID:    input.ProjectID,
+			WorkItemID:   input.WorkItemID,
+			AssignmentID: input.AssignmentID,
+			Title:        input.Title,
+			Body:         input.Body,
+			Locator:      input.Locator,
+			TrustLabel:   input.TrustLabel,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -2208,6 +2247,38 @@ func formatAssignments(title string, items []core.Assignment) string {
 			fmt.Fprintf(&b, " skills=%s", strings.Join(item.DesiredAgent.SkillIDs, ","))
 		}
 		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatWorkItemCloseoutReadiness(readiness core.WorkItemCloseoutReadiness) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Closeout readiness %s: %s\n", readiness.WorkItemID, readiness.Status)
+	fmt.Fprintf(&b, "%s\n", readiness.Title)
+	if readiness.Detail != "" {
+		fmt.Fprintf(&b, "%s\n", readiness.Detail)
+	}
+	fmt.Fprintf(&b, "Assignments: %d/%d complete\n", readiness.CompletedAssignments, readiness.AssignmentCount)
+	if len(readiness.Blockers) > 0 {
+		b.WriteString("Blockers:\n")
+		for _, blocker := range readiness.Blockers {
+			fmt.Fprintf(&b, "- %s\n", blocker)
+		}
+	}
+	if len(readiness.Warnings) > 0 {
+		b.WriteString("Warnings:\n")
+		for _, warning := range readiness.Warnings {
+			fmt.Fprintf(&b, "- %s\n", warning)
+		}
+	}
+	if len(readiness.ReviewFollowUps) > 0 {
+		b.WriteString("Review follow-ups:\n")
+		for _, followUp := range readiness.ReviewFollowUps {
+			fmt.Fprintf(&b, "- %s: %s\n", followUp.ArtifactID, followUp.Blocker)
+		}
+	}
+	if len(readiness.MissingEvidenceAssignmentIDs) > 0 {
+		fmt.Fprintf(&b, "Missing evidence assignments: %s\n", strings.Join(readiness.MissingEvidenceAssignmentIDs, ", "))
 	}
 	return b.String()
 }
