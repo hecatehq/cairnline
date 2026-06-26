@@ -38,6 +38,7 @@ type Store interface {
 	GetWorkItem(ctx context.Context, projectID, id string) (WorkItem, error)
 	CreateWorkItem(ctx context.Context, item WorkItem) (WorkItem, error)
 	UpdateWorkItem(ctx context.Context, item WorkItem) (WorkItem, error)
+	DeleteWorkItem(ctx context.Context, projectID, id string) error
 
 	ListRoles(ctx context.Context, projectID string) ([]Role, error)
 	GetRole(ctx context.Context, projectID, id string) (Role, error)

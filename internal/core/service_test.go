@@ -47,6 +47,107 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	}
 }
 
+func TestService_GetAndDeleteWorkItemCascadesCoordinationState(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	project, err := service.CreateProject(ctx, Project{Name: "Work delete"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Delete scoped work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	keepWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Keep this work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(keep) error = %v", err)
+	}
+	got, err := service.GetWorkItem(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("GetWorkItem() error = %v", err)
+	}
+	if got.ID != work.ID || got.Title != work.Title {
+		t.Fatalf("GetWorkItem() = %+v, want created work item", got)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	keepAssignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: keepWork.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(keep) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Looks good", Verdict: ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{ProjectID: project.ID, WorkItemID: work.ID, ToRoleID: role.ID, Title: "Handoff", Body: "Continue elsewhere"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	memory, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{ProjectID: project.ID, Title: "Keep project memory", Body: "Project-level candidate stays.", SourceRef: assignment.ID})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteWorkItem(ctx, project.ID, work.ID); err != nil {
+		t.Fatalf("DeleteWorkItem() error = %v", err)
+	}
+	if _, err := service.GetWorkItem(ctx, project.ID, work.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetWorkItem() after delete error = %v, want ErrNotFound", err)
+	}
+	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListEvidence() after delete evidence=%+v error=%v, want ErrNotFound", evidence, err)
+	}
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListReviews() after delete reviews=%+v error=%v, want ErrNotFound", reviews, err)
+	}
+	handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListHandoffs() after delete handoffs=%+v error=%v, want ErrNotFound", handoffs, err)
+	}
+	assignments, err := service.ListAssignments(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() after delete error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != keepAssignment.ID {
+		t.Fatalf("assignments after delete = %+v, want only kept assignment", assignments)
+	}
+	workItems, err := service.ListWorkItems(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListWorkItems() after delete error = %v", err)
+	}
+	if len(workItems) != 1 || workItems[0].ID != keepWork.ID {
+		t.Fatalf("work items after delete = %+v, want only kept work item", workItems)
+	}
+	memoryCandidates, err := service.ListMemoryCandidates(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() after delete error = %v", err)
+	}
+	if len(memoryCandidates) != 1 || memoryCandidates[0].ID != memory.ID {
+		t.Fatalf("memory candidates after delete = %+v, want project-level candidate preserved", memoryCandidates)
+	}
+	if err := service.DeleteWorkItem(ctx, project.ID, work.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteWorkItem() second error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestService_CreateWorkItemValidatesProject(t *testing.T) {
 	service := NewService(NewMemoryStore())
 

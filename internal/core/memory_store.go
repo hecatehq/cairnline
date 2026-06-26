@@ -305,6 +305,40 @@ func (s *MemoryStore) UpdateWorkItem(ctx context.Context, item WorkItem) (WorkIt
 	return item, nil
 }
 
+func (s *MemoryStore) DeleteWorkItem(ctx context.Context, projectID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := s.workItems[projectID][id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.workItems[projectID], id)
+	for assignmentID, item := range s.assignments[projectID] {
+		if item.WorkItemID == id {
+			delete(s.assignments[projectID], assignmentID)
+		}
+	}
+	for evidenceID, item := range s.evidence[projectID] {
+		if item.WorkItemID == id {
+			delete(s.evidence[projectID], evidenceID)
+		}
+	}
+	for reviewID, item := range s.reviews[projectID] {
+		if item.WorkItemID == id {
+			delete(s.reviews[projectID], reviewID)
+		}
+	}
+	for handoffID, item := range s.handoffs[projectID] {
+		if item.WorkItemID == id {
+			delete(s.handoffs[projectID], handoffID)
+		}
+	}
+	return nil
+}
+
 func (s *MemoryStore) ListRoles(ctx context.Context, projectID string) ([]Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

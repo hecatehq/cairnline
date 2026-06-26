@@ -514,6 +514,35 @@ func (s *Store) UpdateWorkItem(ctx context.Context, item core.WorkItem) (core.Wo
 	return item, requireAffected(result)
 }
 
+func (s *Store) DeleteWorkItem(ctx context.Context, projectID, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	rollback := func() {
+		_ = tx.Rollback()
+	}
+	for _, table := range []string{"evidence", "reviews", "handoffs", "assignments"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = ? AND work_item_id = ?`, projectID, id); err != nil {
+			rollback()
+			return mapSQLiteWriteError(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM work_items WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ListRoles(ctx context.Context, projectID string) ([]core.Role, error) {
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return nil, err

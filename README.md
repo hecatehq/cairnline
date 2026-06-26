@@ -55,8 +55,10 @@ Implemented now:
   - `roles.create`
   - `roles.update`
   - `work_items.list`
+  - `work_items.get`
   - `work_items.create`
   - `work_items.update`
+  - `work_items.delete`
   - `assignments.list`
   - `assignments.next`
   - `assignments.create`

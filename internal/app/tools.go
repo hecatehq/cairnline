@@ -252,6 +252,21 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, listWorkItems(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "work_items.get",
+		Title:       "Get work item",
+		Description: "Return one work item for a project.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","id"]
+		}`),
+		Annotations: readOnly,
+	}, getWorkItem(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "work_items.create",
 		Title:       "Create work item",
 		Description: "Create a reviewable work item under a project.",
@@ -288,6 +303,20 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","id"]
 		}`),
 	}, updateWorkItem(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "work_items.delete",
+		Title:       "Delete work item",
+		Description: "Delete a work item and its assignments, evidence, reviews, and handoffs.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","id"]
+		}`),
+	}, deleteWorkItem(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "roles.list",
@@ -967,6 +996,32 @@ func listWorkItems(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func getWorkItem(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		ID        string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetWorkItem(ctx, input.ProjectID, input.ID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		var detail strings.Builder
+		fmt.Fprintf(&detail, "Work item %s: [%s] %s", item.ID, item.Status, item.Title)
+		if item.Brief != "" {
+			fmt.Fprintf(&detail, " — %s", item.Brief)
+		}
+		if item.RootID != "" {
+			fmt.Fprintf(&detail, "\nRoot: %s", item.RootID)
+		}
+		return mcp.CallToolResult{Content: mcp.TextContent(detail.String())}, nil
+	}
+}
+
 func createWorkItem(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID   string `json:"project_id"`
@@ -1013,19 +1068,9 @@ func updateWorkItem(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
-		workItems, err := service.ListWorkItems(ctx, input.ProjectID)
+		existing, err := service.GetWorkItem(ctx, input.ProjectID, input.ID)
 		if err != nil {
 			return mcp.CallToolResult{}, err
-		}
-		var existing core.WorkItem
-		for _, item := range workItems {
-			if item.ID == input.ID {
-				existing = item
-				break
-			}
-		}
-		if existing.ID == "" {
-			return mcp.CallToolResult{}, core.ErrNotFound
 		}
 		if input.Title != nil {
 			existing.Title = *input.Title
@@ -1054,6 +1099,25 @@ func updateWorkItem(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated work item %s: %s", item.ID, item.Title)),
+		}, nil
+	}
+}
+
+func deleteWorkItem(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		ID        string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteWorkItem(ctx, input.ProjectID, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted work item %s", strings.TrimSpace(input.ID))),
 		}, nil
 	}
 }

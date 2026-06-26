@@ -84,7 +84,18 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 		t.Fatalf("ListWorkItems() error = %v", err)
 	}
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"work_items.update","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `","brief":"Updated themes."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"work_items.get","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Work item "+workItems[0].ID+": [ready] Summarize interviews") {
+		t.Fatalf("get work item response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"work_items.update","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `","brief":"Updated themes."}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -99,6 +110,24 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 	if workItems[0].Title != "Summarize interviews" || workItems[0].Brief != "Updated themes." {
 		t.Fatalf("updated work item = %+v, want patch preserving title and replacing brief", workItems[0])
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"work_items.delete","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted work item "+workItems[0].ID) {
+		t.Fatalf("delete work item response = %s", output.String())
+	}
+	workItems, err = service.ListWorkItems(context.Background(), projects[0].ID)
+	if err != nil {
+		t.Fatalf("ListWorkItems() after delete error = %v", err)
+	}
+	if len(workItems) != 0 {
+		t.Fatalf("work items after delete = %+v, want empty", workItems)
 	}
 }
 

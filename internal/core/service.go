@@ -352,6 +352,18 @@ func (s *Service) ListWorkItems(ctx context.Context, projectID string) ([]WorkIt
 	return s.store.ListWorkItems(ctx, projectID)
 }
 
+func (s *Service) GetWorkItem(ctx context.Context, projectID, id string) (WorkItem, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return WorkItem{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return WorkItem{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	return s.store.GetWorkItem(ctx, projectID, id)
+}
+
 func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem, error) {
 	projectID := strings.TrimSpace(input.ProjectID)
 	title := strings.TrimSpace(input.Title)
@@ -433,6 +445,18 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		UpdatedAt:       s.now(),
 	}
 	return s.store.UpdateWorkItem(ctx, item)
+}
+
+func (s *Service) DeleteWorkItem(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	return s.store.DeleteWorkItem(ctx, projectID, id)
 }
 
 func (s *Service) ListRoles(ctx context.Context, projectID string) ([]Role, error) {

@@ -273,6 +273,99 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestStore_DeleteWorkItemCascadesCoordinationRows(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "cairnline.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+
+	project, err := service.CreateProject(ctx, core.Project{Name: "Work delete"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Delete scoped work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	keepWork, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Keep this work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(keep) error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	keepAssignment, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: keepWork.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(keep) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, core.Evidence{ProjectID: project.ID, WorkItemID: work.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Looks good", Verdict: core.ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, ToRoleID: role.ID, Title: "Handoff", Body: "Continue elsewhere"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	memory, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{ProjectID: project.ID, Title: "Keep project memory", Body: "Project-level candidate stays.", SourceRef: assignment.ID})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteWorkItem(ctx, project.ID, work.ID); err != nil {
+		t.Fatalf("DeleteWorkItem() error = %v", err)
+	}
+	if _, err := service.GetWorkItem(ctx, project.ID, work.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetWorkItem() after delete error = %v, want ErrNotFound", err)
+	}
+	if evidence, err := service.ListEvidence(ctx, project.ID, work.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListEvidence() after delete evidence=%+v error=%v, want ErrNotFound", evidence, err)
+	}
+	if reviews, err := service.ListReviews(ctx, project.ID, work.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListReviews() after delete reviews=%+v error=%v, want ErrNotFound", reviews, err)
+	}
+	if handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListHandoffs() after delete handoffs=%+v error=%v, want ErrNotFound", handoffs, err)
+	}
+	assignments, err := service.ListAssignments(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() after delete error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != keepAssignment.ID {
+		t.Fatalf("assignments after delete = %+v, want only kept assignment", assignments)
+	}
+	workItems, err := service.ListWorkItems(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListWorkItems() after delete error = %v", err)
+	}
+	if len(workItems) != 1 || workItems[0].ID != keepWork.ID {
+		t.Fatalf("work items after delete = %+v, want only kept work item", workItems)
+	}
+	memoryCandidates, err := service.ListMemoryCandidates(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() after delete error = %v", err)
+	}
+	if len(memoryCandidates) != 1 || memoryCandidates[0].ID != memory.ID {
+		t.Fatalf("memory candidates after delete = %+v, want project-level candidate preserved", memoryCandidates)
+	}
+}
+
 func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old.db")
