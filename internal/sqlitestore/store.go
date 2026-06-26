@@ -1,0 +1,1063 @@
+package sqlitestore
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/hecatehq/cairnline/internal/core"
+	_ "modernc.org/sqlite"
+)
+
+type Store struct {
+	db *sql.DB
+}
+
+func Open(ctx context.Context, path string) (*Store, error) {
+	if path == "" {
+		return nil, errors.Join(core.ErrInvalid, errors.New("sqlite path is required"))
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	store := &Store{db: db}
+	if err := store.migrate(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+
+func (s *Store) migrate(ctx context.Context) error {
+	statements := []string{
+		`PRAGMA foreign_keys = ON`,
+		`PRAGMA busy_timeout = 5000`,
+		`CREATE TABLE IF NOT EXISTS agent_profiles (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			instructions TEXT NOT NULL DEFAULT '',
+			context_policy TEXT NOT NULL DEFAULT '',
+			memory_policy TEXT NOT NULL DEFAULT '',
+			source_policy TEXT NOT NULL DEFAULT '',
+			skill_ids_json TEXT NOT NULL DEFAULT '[]',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS execution_profiles (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			agent_kind TEXT NOT NULL DEFAULT '',
+			model_hint TEXT NOT NULL DEFAULT '',
+			provider_hint TEXT NOT NULL DEFAULT '',
+			tools_policy TEXT NOT NULL DEFAULT '',
+			writes_policy TEXT NOT NULL DEFAULT '',
+			network_policy TEXT NOT NULL DEFAULT '',
+			approval_policy TEXT NOT NULL DEFAULT '',
+			adapter_options_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS projects (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			roots_json TEXT NOT NULL DEFAULT '[]',
+			context_sources_json TEXT NOT NULL DEFAULT '[]',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS project_skills (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			root_id TEXT NOT NULL DEFAULT '',
+			format TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL,
+			trust_label TEXT NOT NULL DEFAULT '',
+			source_refs_json TEXT NOT NULL DEFAULT '[]',
+			warnings_json TEXT NOT NULL DEFAULT '[]',
+			discovered_at TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS work_items (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			brief TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			priority TEXT NOT NULL,
+			owner_role_id TEXT NOT NULL DEFAULT '',
+			reviewer_role_ids_json TEXT NOT NULL DEFAULT '[]',
+			root_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS roles (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			instructions TEXT NOT NULL DEFAULT '',
+			default_profile_id TEXT NOT NULL DEFAULT '',
+			default_skill_ids_json TEXT NOT NULL DEFAULT '[]',
+			default_execution_mode TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS assignments (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			work_item_id TEXT NOT NULL,
+			role_id TEXT NOT NULL,
+			profile_id TEXT NOT NULL DEFAULT '',
+			execution_profile_id TEXT NOT NULL DEFAULT '',
+			execution_mode TEXT NOT NULL,
+			status TEXT NOT NULL,
+			desired_agent_json TEXT NOT NULL DEFAULT '{}',
+			claimed_by TEXT NOT NULL DEFAULT '',
+			execution_ref TEXT NOT NULL DEFAULT '',
+			context_snapshot_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, role_id) REFERENCES roles(project_id, id) ON DELETE RESTRICT
+		)`,
+		`CREATE TABLE IF NOT EXISTS evidence (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			work_item_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL DEFAULT '',
+			locator TEXT NOT NULL DEFAULT '',
+			trust_label TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS reviews (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			work_item_id TEXT NOT NULL,
+			assignment_id TEXT NOT NULL DEFAULT '',
+			reviewer_role_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			verdict TEXT NOT NULL,
+			risk TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS handoffs (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			work_item_id TEXT NOT NULL,
+			from_role_id TEXT NOT NULL DEFAULT '',
+			to_role_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS memory_candidates (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			status TEXT NOT NULL,
+			trust_label TEXT NOT NULL DEFAULT '',
+			source_ref TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)`,
+	}
+	for _, statement := range statements {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("migrate sqlite: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListProjects(ctx context.Context) ([]core.Project, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, roots_json, context_sources_json, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Project
+	for rows.Next() {
+		item, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetProject(ctx context.Context, id string) (core.Project, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, roots_json, context_sources_json, created_at, updated_at FROM projects WHERE id = ?`, id)
+	return scanProject(row)
+}
+
+func (s *Store) CreateProject(ctx context.Context, project core.Project) (core.Project, error) {
+	roots, err := encodeJSON(project.Roots)
+	if err != nil {
+		return core.Project{}, err
+	}
+	sources, err := encodeJSON(project.ContextSources)
+	if err != nil {
+		return core.Project{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO projects (id, name, description, roots_json, context_sources_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		project.ID, project.Name, project.Description, roots, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt))
+	if err != nil {
+		return core.Project{}, mapSQLiteWriteError(err)
+	}
+	return project, nil
+}
+
+func (s *Store) UpdateProject(ctx context.Context, project core.Project) (core.Project, error) {
+	roots, err := encodeJSON(project.Roots)
+	if err != nil {
+		return core.Project{}, err
+	}
+	sources, err := encodeJSON(project.ContextSources)
+	if err != nil {
+		return core.Project{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE projects SET name = ?, description = ?, roots_json = ?, context_sources_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		project.Name, project.Description, roots, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt), project.ID)
+	if err != nil {
+		return core.Project{}, err
+	}
+	return project, requireAffected(result)
+}
+
+func (s *Store) ListAgentProfiles(ctx context.Context) ([]core.AgentProfile, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at FROM agent_profiles ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.AgentProfile
+	for rows.Next() {
+		item, err := scanAgentProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetAgentProfile(ctx context.Context, id string) (core.AgentProfile, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at FROM agent_profiles WHERE id = ?`, id)
+	return scanAgentProfile(row)
+}
+
+func (s *Store) CreateAgentProfile(ctx context.Context, profile core.AgentProfile) (core.AgentProfile, error) {
+	skills, err := encodeJSON(profile.SkillIDs)
+	if err != nil {
+		return core.AgentProfile{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_profiles (id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		profile.ID, profile.Name, profile.Description, profile.Instructions, profile.ContextPolicy, profile.MemoryPolicy, profile.SourcePolicy, skills, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt))
+	if err != nil {
+		return core.AgentProfile{}, mapSQLiteWriteError(err)
+	}
+	return profile, nil
+}
+
+func (s *Store) UpdateAgentProfile(ctx context.Context, profile core.AgentProfile) (core.AgentProfile, error) {
+	skills, err := encodeJSON(profile.SkillIDs)
+	if err != nil {
+		return core.AgentProfile{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, context_policy = ?, memory_policy = ?, source_policy = ?, skill_ids_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		profile.Name, profile.Description, profile.Instructions, profile.ContextPolicy, profile.MemoryPolicy, profile.SourcePolicy, skills, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt), profile.ID)
+	if err != nil {
+		return core.AgentProfile{}, err
+	}
+	return profile, requireAffected(result)
+}
+
+func (s *Store) ListExecutionProfiles(ctx context.Context) ([]core.ExecutionProfile, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at FROM execution_profiles ORDER BY name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.ExecutionProfile
+	for rows.Next() {
+		item, err := scanExecutionProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetExecutionProfile(ctx context.Context, id string) (core.ExecutionProfile, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at FROM execution_profiles WHERE id = ?`, id)
+	return scanExecutionProfile(row)
+}
+
+func (s *Store) CreateExecutionProfile(ctx context.Context, profile core.ExecutionProfile) (core.ExecutionProfile, error) {
+	options, err := encodeJSON(profile.AdapterOptions)
+	if err != nil {
+		return core.ExecutionProfile{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO execution_profiles (id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		profile.ID, profile.Name, profile.Description, profile.AgentKind, profile.ModelHint, profile.ProviderHint, profile.ToolsPolicy, profile.WritesPolicy, profile.NetworkPolicy, profile.ApprovalPolicy, options, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt))
+	if err != nil {
+		return core.ExecutionProfile{}, mapSQLiteWriteError(err)
+	}
+	return profile, nil
+}
+
+func (s *Store) UpdateExecutionProfile(ctx context.Context, profile core.ExecutionProfile) (core.ExecutionProfile, error) {
+	options, err := encodeJSON(profile.AdapterOptions)
+	if err != nil {
+		return core.ExecutionProfile{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE execution_profiles SET name = ?, description = ?, agent_kind = ?, model_hint = ?, provider_hint = ?, tools_policy = ?, writes_policy = ?, network_policy = ?, approval_policy = ?, adapter_options_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		profile.Name, profile.Description, profile.AgentKind, profile.ModelHint, profile.ProviderHint, profile.ToolsPolicy, profile.WritesPolicy, profile.NetworkPolicy, profile.ApprovalPolicy, options, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt), profile.ID)
+	if err != nil {
+		return core.ExecutionProfile{}, err
+	}
+	return profile, requireAffected(result)
+}
+
+func (s *Store) ListProjectSkills(ctx context.Context, projectID string) ([]core.ProjectSkill, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, title, description, path, root_id, format, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at FROM project_skills WHERE project_id = ? ORDER BY id ASC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.ProjectSkill
+	for rows.Next() {
+		item, err := scanProjectSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetProjectSkill(ctx context.Context, projectID, id string) (core.ProjectSkill, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, title, description, path, root_id, format, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at FROM project_skills WHERE project_id = ? AND id = ?`, projectID, id)
+	return scanProjectSkill(row)
+}
+
+func (s *Store) CreateProjectSkill(ctx context.Context, skill core.ProjectSkill) (core.ProjectSkill, error) {
+	sourceRefs, err := encodeJSON(skill.SourceRefs)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	warnings, err := encodeJSON(skill.Warnings)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO project_skills (project_id, id, title, description, path, root_id, format, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		skill.ProjectID, skill.ID, skill.Title, skill.Description, skill.Path, skill.RootID, skill.Format, skill.Enabled, skill.Status, skill.TrustLabel, sourceRefs, warnings, encodeOptionalTime(skill.DiscoveredAt), encodeTime(skill.CreatedAt), encodeTime(skill.UpdatedAt))
+	if err != nil {
+		return core.ProjectSkill{}, mapSQLiteWriteError(err)
+	}
+	return skill, nil
+}
+
+func (s *Store) UpdateProjectSkill(ctx context.Context, skill core.ProjectSkill) (core.ProjectSkill, error) {
+	sourceRefs, err := encodeJSON(skill.SourceRefs)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	warnings, err := encodeJSON(skill.Warnings)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE project_skills SET title = ?, description = ?, path = ?, root_id = ?, format = ?, enabled = ?, status = ?, trust_label = ?, source_refs_json = ?, warnings_json = ?, discovered_at = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		skill.Title, skill.Description, skill.Path, skill.RootID, skill.Format, skill.Enabled, skill.Status, skill.TrustLabel, sourceRefs, warnings, encodeOptionalTime(skill.DiscoveredAt), encodeTime(skill.CreatedAt), encodeTime(skill.UpdatedAt), skill.ProjectID, skill.ID)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	return skill, requireAffected(result)
+}
+
+func (s *Store) ListWorkItems(ctx context.Context, projectID string) ([]core.WorkItem, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, title, brief, status, priority, owner_role_id, reviewer_role_ids_json, root_id, created_at, updated_at FROM work_items WHERE project_id = ? ORDER BY updated_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.WorkItem
+	for rows.Next() {
+		item, err := scanWorkItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetWorkItem(ctx context.Context, projectID, id string) (core.WorkItem, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.WorkItem{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, title, brief, status, priority, owner_role_id, reviewer_role_ids_json, root_id, created_at, updated_at FROM work_items WHERE project_id = ? AND id = ?`, projectID, id)
+	return scanWorkItem(row)
+}
+
+func (s *Store) CreateWorkItem(ctx context.Context, item core.WorkItem) (core.WorkItem, error) {
+	reviewers, err := encodeJSON(item.ReviewerRoleIDs)
+	if err != nil {
+		return core.WorkItem{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO work_items (project_id, id, title, brief, status, priority, owner_role_id, reviewer_role_ids_json, root_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ProjectID, item.ID, item.Title, item.Brief, item.Status, item.Priority, item.OwnerRoleID, reviewers, item.RootID, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
+	if err != nil {
+		return core.WorkItem{}, mapSQLiteWriteError(err)
+	}
+	return item, nil
+}
+
+func (s *Store) UpdateWorkItem(ctx context.Context, item core.WorkItem) (core.WorkItem, error) {
+	reviewers, err := encodeJSON(item.ReviewerRoleIDs)
+	if err != nil {
+		return core.WorkItem{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE work_items SET title = ?, brief = ?, status = ?, priority = ?, owner_role_id = ?, reviewer_role_ids_json = ?, root_id = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		item.Title, item.Brief, item.Status, item.Priority, item.OwnerRoleID, reviewers, item.RootID, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt), item.ProjectID, item.ID)
+	if err != nil {
+		return core.WorkItem{}, err
+	}
+	return item, requireAffected(result)
+}
+
+func (s *Store) ListRoles(ctx context.Context, projectID string) ([]core.Role, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? ORDER BY name ASC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Role
+	for rows.Next() {
+		item, err := scanRole(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetRole(ctx context.Context, projectID, id string) (core.Role, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.Role{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
+	return scanRole(row)
+}
+
+func (s *Store) CreateRole(ctx context.Context, role core.Role) (core.Role, error) {
+	skills, err := encodeJSON(role.DefaultSkillIDs)
+	if err != nil {
+		return core.Role{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO roles (project_id, id, name, description, instructions, default_profile_id, default_skill_ids_json, default_execution_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		role.ProjectID, role.ID, role.Name, role.Description, role.Instructions, role.DefaultProfileID, skills, role.DefaultExecutionMode)
+	if err != nil {
+		return core.Role{}, mapSQLiteWriteError(err)
+	}
+	return role, nil
+}
+
+func (s *Store) UpdateRole(ctx context.Context, role core.Role) (core.Role, error) {
+	skills, err := encodeJSON(role.DefaultSkillIDs)
+	if err != nil {
+		return core.Role{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, description = ?, instructions = ?, default_profile_id = ?, default_skill_ids_json = ?, default_execution_mode = ? WHERE project_id = ? AND id = ?`,
+		role.Name, role.Description, role.Instructions, role.DefaultProfileID, skills, role.DefaultExecutionMode, role.ProjectID, role.ID)
+	if err != nil {
+		return core.Role{}, err
+	}
+	return role, requireAffected(result)
+}
+
+func (s *Store) ListAssignments(ctx context.Context, projectID string) ([]core.Assignment, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, assignmentSelectSQL+` WHERE project_id = ? ORDER BY updated_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Assignment
+	for rows.Next() {
+		item, err := scanAssignment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetAssignment(ctx context.Context, projectID, id string) (core.Assignment, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.Assignment{}, err
+	}
+	row := s.db.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, projectID, id)
+	return scanAssignment(row)
+}
+
+func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+	desiredAgent, err := encodeJSON(assignment.DesiredAgent)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt))
+	if err != nil {
+		return core.Assignment{}, mapSQLiteWriteError(err)
+	}
+	return assignment, nil
+}
+
+func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+	desiredAgent, err := encodeJSON(assignment.DesiredAgent)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, profile_id = ?, execution_profile_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		assignment.WorkItemID, assignment.RoleID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), assignment.ProjectID, assignment.ID)
+	if err != nil {
+		return core.Assignment{}, mapSQLiteWriteError(err)
+	}
+	return assignment, requireAffected(result)
+}
+
+func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (core.Assignment, error) {
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now()
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET status = ?, claimed_by = ?, updated_at = ? WHERE project_id = ? AND id = ? AND status = ?`,
+		core.AssignmentClaimed, claimedBy, encodeTime(stamp), projectID, id, core.AssignmentQueued)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 1 {
+		return s.GetAssignment(ctx, projectID, id)
+	}
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.Assignment{}, err
+	}
+	item, err := s.GetAssignment(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if item.Status != core.AssignmentQueued {
+		return core.Assignment{}, core.ErrConflict
+	}
+	return core.Assignment{}, core.ErrConflict
+}
+
+func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) ([]core.Evidence, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, title, body, locator, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Evidence
+	for rows.Next() {
+		item, err := scanEvidence(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateEvidence(ctx context.Context, evidence core.Evidence) (core.Evidence, error) {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, title, body, locator, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.Title, evidence.Body, evidence.Locator, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
+	if err != nil {
+		return core.Evidence{}, mapSQLiteWriteError(err)
+	}
+	return evidence, nil
+}
+
+func (s *Store) ListReviews(ctx context.Context, projectID, workItemID string) ([]core.Review, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, reviewer_role_id, title, body, verdict, risk, status, created_at, updated_at FROM reviews WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Review
+	for rows.Next() {
+		item, err := scanReview(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateReview(ctx context.Context, review core.Review) (core.Review, error) {
+	if review.AssignmentID != "" {
+		assignment, err := s.GetAssignment(ctx, review.ProjectID, review.AssignmentID)
+		if err != nil {
+			return core.Review{}, err
+		}
+		if assignment.WorkItemID != review.WorkItemID {
+			return core.Review{}, core.ErrNotFound
+		}
+	}
+	if review.ReviewerRoleID != "" {
+		if _, err := s.GetRole(ctx, review.ProjectID, review.ReviewerRoleID); err != nil {
+			return core.Review{}, err
+		}
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO reviews (project_id, id, work_item_id, assignment_id, reviewer_role_id, title, body, verdict, risk, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		review.ProjectID, review.ID, review.WorkItemID, review.AssignmentID, review.ReviewerRoleID, review.Title, review.Body, review.Verdict, review.Risk, review.Status, encodeTime(review.CreatedAt), encodeTime(review.UpdatedAt))
+	if err != nil {
+		return core.Review{}, mapSQLiteWriteError(err)
+	}
+	return review, nil
+}
+
+func (s *Store) ListHandoffs(ctx context.Context, projectID, workItemID string) ([]core.Handoff, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, from_role_id, to_role_id, title, body, status, created_at, updated_at FROM handoffs WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Handoff
+	for rows.Next() {
+		item, err := scanHandoff(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
+	if handoff.FromRoleID != "" {
+		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.FromRoleID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	if handoff.ToRoleID != "" {
+		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.ToRoleID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO handoffs (project_id, id, work_item_id, from_role_id, to_role_id, title, body, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		handoff.ProjectID, handoff.ID, handoff.WorkItemID, handoff.FromRoleID, handoff.ToRoleID, handoff.Title, handoff.Body, handoff.Status, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt))
+	if err != nil {
+		return core.Handoff{}, mapSQLiteWriteError(err)
+	}
+	return handoff, nil
+}
+
+func (s *Store) ListMemoryCandidates(ctx context.Context, projectID string) ([]core.MemoryCandidate, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, title, body, status, trust_label, source_ref, created_at, updated_at FROM memory_candidates WHERE project_id = ? ORDER BY updated_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.MemoryCandidate
+	for rows.Next() {
+		item, err := scanMemoryCandidate(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateMemoryCandidate(ctx context.Context, candidate core.MemoryCandidate) (core.MemoryCandidate, error) {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO memory_candidates (project_id, id, title, body, status, trust_label, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		candidate.ProjectID, candidate.ID, candidate.Title, candidate.Body, candidate.Status, candidate.TrustLabel, candidate.SourceRef, encodeTime(candidate.CreatedAt), encodeTime(candidate.UpdatedAt))
+	if err != nil {
+		return core.MemoryCandidate{}, mapSQLiteWriteError(err)
+	}
+	return candidate, nil
+}
+
+const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at FROM assignments`
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAgentProfile(row scanner) (core.AgentProfile, error) {
+	var item core.AgentProfile
+	var skillIDsJSON, createdAt, updatedAt string
+	if err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Instructions, &item.ContextPolicy, &item.MemoryPolicy, &item.SourcePolicy, &skillIDsJSON, &createdAt, &updatedAt); err != nil {
+		return core.AgentProfile{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(skillIDsJSON, &item.SkillIDs); err != nil {
+		return core.AgentProfile{}, err
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.AgentProfile{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.AgentProfile{}, err
+	}
+	return item, nil
+}
+
+func scanExecutionProfile(row scanner) (core.ExecutionProfile, error) {
+	var item core.ExecutionProfile
+	var adapterOptionsJSON, createdAt, updatedAt string
+	if err := row.Scan(&item.ID, &item.Name, &item.Description, &item.AgentKind, &item.ModelHint, &item.ProviderHint, &item.ToolsPolicy, &item.WritesPolicy, &item.NetworkPolicy, &item.ApprovalPolicy, &adapterOptionsJSON, &createdAt, &updatedAt); err != nil {
+		return core.ExecutionProfile{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(adapterOptionsJSON, &item.AdapterOptions); err != nil {
+		return core.ExecutionProfile{}, err
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.ExecutionProfile{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.ExecutionProfile{}, err
+	}
+	return item, nil
+}
+
+func scanProject(row scanner) (core.Project, error) {
+	var item core.Project
+	var rootsJSON, sourcesJSON, createdAt, updatedAt string
+	if err := row.Scan(&item.ID, &item.Name, &item.Description, &rootsJSON, &sourcesJSON, &createdAt, &updatedAt); err != nil {
+		return core.Project{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(rootsJSON, &item.Roots); err != nil {
+		return core.Project{}, err
+	}
+	if err := decodeJSON(sourcesJSON, &item.ContextSources); err != nil {
+		return core.Project{}, err
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.Project{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Project{}, err
+	}
+	return item, nil
+}
+
+func scanProjectSkill(row scanner) (core.ProjectSkill, error) {
+	var item core.ProjectSkill
+	var sourceRefsJSON, warningsJSON, discoveredAt, createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Description, &item.Path, &item.RootID, &item.Format, &item.Enabled, &item.Status, &item.TrustLabel, &sourceRefsJSON, &warningsJSON, &discoveredAt, &createdAt, &updatedAt); err != nil {
+		return core.ProjectSkill{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(sourceRefsJSON, &item.SourceRefs); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	if err := decodeJSON(warningsJSON, &item.Warnings); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	var err error
+	if item.DiscoveredAt, err = decodeOptionalTime(discoveredAt); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	return item, nil
+}
+
+func scanWorkItem(row scanner) (core.WorkItem, error) {
+	var item core.WorkItem
+	var reviewerIDsJSON, createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Brief, &item.Status, &item.Priority, &item.OwnerRoleID, &reviewerIDsJSON, &item.RootID, &createdAt, &updatedAt); err != nil {
+		return core.WorkItem{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(reviewerIDsJSON, &item.ReviewerRoleIDs); err != nil {
+		return core.WorkItem{}, err
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.WorkItem{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.WorkItem{}, err
+	}
+	return item, nil
+}
+
+func scanRole(row scanner) (core.Role, error) {
+	var item core.Role
+	var skillIDsJSON string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Name, &item.Description, &item.Instructions, &item.DefaultProfileID, &skillIDsJSON, &item.DefaultExecutionMode); err != nil {
+		return core.Role{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(skillIDsJSON, &item.DefaultSkillIDs); err != nil {
+		return core.Role{}, err
+	}
+	return item, nil
+}
+
+func scanAssignment(row scanner) (core.Assignment, error) {
+	var item core.Assignment
+	var desiredAgentJSON, createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.ProfileID, &item.ExecutionProfileID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &item.ExecutionRef, &item.ContextSnapshotID, &createdAt, &updatedAt); err != nil {
+		return core.Assignment{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(desiredAgentJSON, &item.DesiredAgent); err != nil {
+		return core.Assignment{}, err
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.Assignment{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Assignment{}, err
+	}
+	return item, nil
+}
+
+func scanEvidence(row scanner) (core.Evidence, error) {
+	var item core.Evidence
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.Title, &item.Body, &item.Locator, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
+		return core.Evidence{}, mapSQLiteReadError(err)
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.Evidence{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Evidence{}, err
+	}
+	return item, nil
+}
+
+func scanReview(row scanner) (core.Review, error) {
+	var item core.Review
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.AssignmentID, &item.ReviewerRoleID, &item.Title, &item.Body, &item.Verdict, &item.Risk, &item.Status, &createdAt, &updatedAt); err != nil {
+		return core.Review{}, mapSQLiteReadError(err)
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.Review{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Review{}, err
+	}
+	return item, nil
+}
+
+func scanHandoff(row scanner) (core.Handoff, error) {
+	var item core.Handoff
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.FromRoleID, &item.ToRoleID, &item.Title, &item.Body, &item.Status, &createdAt, &updatedAt); err != nil {
+		return core.Handoff{}, mapSQLiteReadError(err)
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.Handoff{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Handoff{}, err
+	}
+	return item, nil
+}
+
+func scanMemoryCandidate(row scanner) (core.MemoryCandidate, error) {
+	var item core.MemoryCandidate
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Body, &item.Status, &item.TrustLabel, &item.SourceRef, &createdAt, &updatedAt); err != nil {
+		return core.MemoryCandidate{}, mapSQLiteReadError(err)
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.MemoryCandidate{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.MemoryCandidate{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) requireProject(ctx context.Context, projectID string) error {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM projects WHERE id = ?`, projectID).Scan(&id)
+	return mapSQLiteReadError(err)
+}
+
+func (s *Store) requireWorkItem(ctx context.Context, projectID, workItemID string) error {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM work_items WHERE project_id = ? AND id = ?`, projectID, workItemID).Scan(&id)
+	return mapSQLiteReadError(err)
+}
+
+func requireAffected(result sql.Result) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}
+
+func encodeJSON(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func decodeJSON(raw string, target any) error {
+	if raw == "" {
+		raw = "null"
+	}
+	if err := json.Unmarshal([]byte(raw), target); err != nil {
+		return fmt.Errorf("decode sqlite json: %w", err)
+	}
+	return nil
+}
+
+func encodeTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func encodeOptionalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return encodeTime(value)
+}
+
+func decodeTime(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode sqlite time: %w", err)
+	}
+	return parsed, nil
+}
+
+func decodeOptionalTime(value string) (time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}, nil
+	}
+	return decodeTime(value)
+}
+
+func mapSQLiteReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return core.ErrNotFound
+	}
+	return err
+}
+
+func mapSQLiteWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "UNIQUE constraint failed"):
+		return core.ErrDuplicate
+	case strings.Contains(message, "FOREIGN KEY constraint failed"):
+		return core.ErrNotFound
+	default:
+		return err
+	}
+}
