@@ -745,6 +745,14 @@ func (s *Store) ListHandoffs(ctx context.Context, projectID, workItemID string) 
 	return out, rows.Err()
 }
 
+func (s *Store) GetHandoff(ctx context.Context, projectID, workItemID, id string) (core.Handoff, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return core.Handoff{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, from_role_id, to_role_id, title, body, status, created_at, updated_at FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	return scanHandoff(row)
+}
+
 func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
 	if handoff.FromRoleID != "" {
 		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.FromRoleID); err != nil {
@@ -762,6 +770,36 @@ func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 		return core.Handoff{}, mapSQLiteWriteError(err)
 	}
 	return handoff, nil
+}
+
+func (s *Store) UpdateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
+	if handoff.FromRoleID != "" {
+		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.FromRoleID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	if handoff.ToRoleID != "" {
+		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.ToRoleID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE handoffs SET from_role_id = ?, to_role_id = ?, title = ?, body = ?, status = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND work_item_id = ? AND id = ?`,
+		handoff.FromRoleID, handoff.ToRoleID, handoff.Title, handoff.Body, handoff.Status, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt), handoff.ProjectID, handoff.WorkItemID, handoff.ID)
+	if err != nil {
+		return core.Handoff{}, mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		return core.Handoff{}, err
+	}
+	return handoff, nil
+}
+
+func (s *Store) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
 }
 
 func (s *Store) ListMemoryCandidates(ctx context.Context, projectID string) ([]core.MemoryCandidate, error) {

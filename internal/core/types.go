@@ -252,7 +252,11 @@ const (
 	ReviewRiskHigh        = "high"
 	ReviewStatusRecorded  = "recorded"
 
-	HandoffStatusOpen = "open"
+	HandoffStatusPending    = "pending"
+	HandoffStatusAccepted   = "accepted"
+	HandoffStatusSuperseded = "superseded"
+	HandoffStatusDismissed  = "dismissed"
+	HandoffStatusOpen       = HandoffStatusPending
 
 	MemoryCandidateProposed = "proposed"
 

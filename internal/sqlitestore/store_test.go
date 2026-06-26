@@ -242,7 +242,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListHandoffs() error = %v", err)
 	}
-	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusOpen {
+	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusPending {
 		t.Fatalf("handoffs = %+v, want persisted handoff", handoffs)
 	}
 	memory, err := reopenedService.ListMemoryCandidates(ctx, project.ID)
@@ -270,6 +270,92 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	}
+}
+
+func TestStore_HandoffLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoffs.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Handoff flow"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	fromRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole(from) error = %v", err)
+	}
+	toRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(to) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Ship handoff"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	handoff, err := service.CreateHandoff(ctx, core.Handoff{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		FromRoleID: fromRole.ID,
+		ToRoleID:   toRole.ID,
+		Title:      "Ready for review",
+		Body:       "Implementation is ready.",
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if handoff.Status != core.HandoffStatusPending {
+		t.Fatalf("handoff status = %q, want pending", handoff.Status)
+	}
+	got, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff() error = %v", err)
+	}
+	if got.ID != handoff.ID || got.FromRoleID != fromRole.ID || got.ToRoleID != toRole.ID {
+		t.Fatalf("handoff = %+v, want created handoff", got)
+	}
+
+	got.Title = "Accepted for review"
+	got.Body = "Reviewer accepted the handoff."
+	got.Status = core.HandoffStatusAccepted
+	updated, err := service.UpdateHandoff(ctx, got)
+	if err != nil {
+		t.Fatalf("UpdateHandoff() error = %v", err)
+	}
+	if updated.Status != core.HandoffStatusAccepted || updated.Title != "Accepted for review" {
+		t.Fatalf("updated handoff = %+v, want accepted replacement metadata", updated)
+	}
+	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, core.HandoffStatusDismissed); err != nil {
+		t.Fatalf("UpdateHandoffStatus() error = %v", err)
+	}
+	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, core.ErrInvalid) {
+		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
+	}
+	if _, err := service.UpdateHandoff(ctx, core.Handoff{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		ID:         handoff.ID,
+		ToRoleID:   "role_missing",
+		Title:      "Missing role",
+		Body:       "Should fail.",
+		Status:     core.HandoffStatusPending,
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("UpdateHandoff(missing role) error = %v, want ErrNotFound", err)
+	}
+
+	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID); err != nil {
+		t.Fatalf("DeleteHandoff() error = %v", err)
+	}
+	if _, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetHandoff(deleted) error = %v, want ErrNotFound", err)
+	}
+	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("DeleteHandoff(second) error = %v, want ErrNotFound", err)
 	}
 }
 

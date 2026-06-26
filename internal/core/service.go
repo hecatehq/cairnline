@@ -944,6 +944,22 @@ func (s *Service) ListHandoffs(ctx context.Context, projectID, workItemID string
 	return s.store.ListHandoffs(ctx, projectID, workItemID)
 }
 
+func (s *Service) GetHandoff(ctx context.Context, projectID, workItemID, id string) (Handoff, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	return s.store.GetHandoff(ctx, projectID, workItemID, id)
+}
+
 func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, error) {
 	projectID := strings.TrimSpace(input.ProjectID)
 	workItemID := strings.TrimSpace(input.WorkItemID)
@@ -970,11 +986,80 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		ToRoleID:   strings.TrimSpace(input.ToRoleID),
 		Title:      title,
 		Body:       body,
-		Status:     HandoffStatusOpen,
+		Status:     HandoffStatusPending,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
 	return s.store.CreateHandoff(ctx, item)
+}
+
+func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	workItemID := strings.TrimSpace(input.WorkItemID)
+	id := strings.TrimSpace(input.ID)
+	title := strings.TrimSpace(input.Title)
+	body := strings.TrimSpace(input.Body)
+	if projectID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	if title == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff title is required"))
+	}
+	if body == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff body is required"))
+	}
+	status, err := normalizeHandoffStatus(input.Status)
+	if err != nil {
+		return Handoff{}, err
+	}
+	existing, err := s.store.GetHandoff(ctx, projectID, workItemID, id)
+	if err != nil {
+		return Handoff{}, err
+	}
+	item := Handoff{
+		ID:         id,
+		ProjectID:  projectID,
+		WorkItemID: workItemID,
+		FromRoleID: strings.TrimSpace(input.FromRoleID),
+		ToRoleID:   strings.TrimSpace(input.ToRoleID),
+		Title:      title,
+		Body:       body,
+		Status:     status,
+		CreatedAt:  existing.CreatedAt,
+		UpdatedAt:  s.now(),
+	}
+	return s.store.UpdateHandoff(ctx, item)
+}
+
+func (s *Service) UpdateHandoffStatus(ctx context.Context, projectID, workItemID, id, status string) (Handoff, error) {
+	existing, err := s.GetHandoff(ctx, projectID, workItemID, id)
+	if err != nil {
+		return Handoff{}, err
+	}
+	existing.Status = status
+	return s.UpdateHandoff(ctx, existing)
+}
+
+func (s *Service) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	return s.store.DeleteHandoff(ctx, projectID, workItemID, id)
 }
 
 func (s *Service) ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error) {
@@ -1312,6 +1397,21 @@ func isProgressAssignmentStatus(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func normalizeHandoffStatus(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return HandoffStatusPending, nil
+	}
+	switch value {
+	case HandoffStatusPending, HandoffStatusAccepted, HandoffStatusSuperseded, HandoffStatusDismissed:
+		return value, nil
+	case "open":
+		return HandoffStatusPending, nil
+	default:
+		return "", errors.Join(ErrInvalid, errors.New("unsupported handoff status"))
 	}
 }
 

@@ -415,6 +415,145 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 }
 
+func TestMCPTools_HandoffLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Handoff project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	fromRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole(from) error = %v", err)
+	}
+	toRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(to) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Handoff flow"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "handoffs.create", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"from_role_id": fromRole.ID,
+		"to_role_id":   toRole.ID,
+		"title":        "Ready for review",
+		"body":         "Implementation is ready.",
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create handoff error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created handoff handoff_") {
+		t.Fatalf("create handoff response = %s", output.String())
+	}
+	handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListHandoffs() error = %v", err)
+	}
+	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusPending {
+		t.Fatalf("handoffs = %+v, want one pending handoff", handoffs)
+	}
+	handoffID := handoffs[0].ID
+
+	input = toolRequest(t, 2, "handoffs.list", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list handoffs error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Handoffs (1):") || !strings.Contains(got, handoffID) {
+		t.Fatalf("list handoffs response = %s", got)
+	}
+	var listResponse struct {
+		Result struct {
+			StructuredContent []core.Handoff `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &listResponse); err != nil {
+		t.Fatalf("list handoffs response did not unmarshal: %v\n%s", err, output.String())
+	}
+	if len(listResponse.Result.StructuredContent) != 1 || listResponse.Result.StructuredContent[0].ID != handoffID {
+		t.Fatalf("listed handoffs = %+v, want %s", listResponse.Result.StructuredContent, handoffID)
+	}
+
+	input = toolRequest(t, 3, "handoffs.get", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get handoff error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Handoff (1):") || !strings.Contains(got, "Ready for review") {
+		t.Fatalf("get handoff response = %s", got)
+	}
+
+	input = toolRequest(t, 4, "handoffs.update", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+		"title":        "Accepted review handoff",
+		"body":         "Reviewer accepted the handoff.",
+		"status":       core.HandoffStatusAccepted,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update handoff error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated handoff "+handoffID+": Accepted review handoff [accepted]") {
+		t.Fatalf("update handoff response = %s", output.String())
+	}
+
+	input = toolRequest(t, 5, "handoffs.update_status", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+		"status":       core.HandoffStatusDismissed,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update handoff status error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated handoff "+handoffID+": dismissed") {
+		t.Fatalf("update handoff status response = %s", output.String())
+	}
+	updated, err := service.GetHandoff(ctx, project.ID, work.ID, handoffID)
+	if err != nil {
+		t.Fatalf("GetHandoff() after status error = %v", err)
+	}
+	if updated.Status != core.HandoffStatusDismissed || updated.Title != "Accepted review handoff" {
+		t.Fatalf("updated handoff = %+v, want dismissed with text preserved", updated)
+	}
+
+	input = toolRequest(t, 6, "handoffs.delete", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete handoff error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted handoff "+handoffID) {
+		t.Fatalf("delete handoff response = %s", output.String())
+	}
+	handoffs, err = service.ListHandoffs(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListHandoffs() after delete error = %v", err)
+	}
+	if len(handoffs) != 0 {
+		t.Fatalf("handoffs after delete = %+v, want none", handoffs)
+	}
+}
+
 func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())

@@ -68,6 +68,11 @@ Implemented now:
   - `evidence.record`
   - `reviews.record`
   - `handoffs.create`
+  - `handoffs.list`
+  - `handoffs.get`
+  - `handoffs.update`
+  - `handoffs.update_status`
+  - `handoffs.delete`
   - `memory_candidates.create`
 - assignment launch packets with resolved profile, execution-profile, skill,
   artifact, handoff, and memory-candidate metadata

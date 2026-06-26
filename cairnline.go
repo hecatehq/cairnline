@@ -80,7 +80,11 @@ const (
 	ReviewRiskHigh        = core.ReviewRiskHigh
 	ReviewStatusRecorded  = core.ReviewStatusRecorded
 
-	HandoffStatusOpen = core.HandoffStatusOpen
+	HandoffStatusPending    = core.HandoffStatusPending
+	HandoffStatusAccepted   = core.HandoffStatusAccepted
+	HandoffStatusSuperseded = core.HandoffStatusSuperseded
+	HandoffStatusDismissed  = core.HandoffStatusDismissed
+	HandoffStatusOpen       = core.HandoffStatusOpen
 
 	MemoryCandidateProposed = core.MemoryCandidateProposed
 

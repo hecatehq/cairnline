@@ -577,22 +577,26 @@ func (s *MemoryStore) ListHandoffs(ctx context.Context, projectID, workItemID st
 	return items, nil
 }
 
+func (s *MemoryStore) GetHandoff(ctx context.Context, projectID, workItemID, id string) (Handoff, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return Handoff{}, err
+	}
+	item, ok := s.handoffs[projectID][id]
+	if !ok || item.WorkItemID != workItemID {
+		return Handoff{}, ErrNotFound
+	}
+	return item, nil
+}
+
 func (s *MemoryStore) CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.requireWorkItemLocked(handoff.ProjectID, handoff.WorkItemID); err != nil {
+	if err := s.validateHandoffLocked(handoff); err != nil {
 		return Handoff{}, err
-	}
-	if handoff.FromRoleID != "" {
-		if _, ok := s.roles[handoff.ProjectID][handoff.FromRoleID]; !ok {
-			return Handoff{}, ErrNotFound
-		}
-	}
-	if handoff.ToRoleID != "" {
-		if _, ok := s.roles[handoff.ProjectID][handoff.ToRoleID]; !ok {
-			return Handoff{}, ErrNotFound
-		}
 	}
 	if s.handoffs[handoff.ProjectID] == nil {
 		s.handoffs[handoff.ProjectID] = make(map[string]Handoff)
@@ -602,6 +606,54 @@ func (s *MemoryStore) CreateHandoff(ctx context.Context, handoff Handoff) (Hando
 	}
 	s.handoffs[handoff.ProjectID][handoff.ID] = handoff
 	return handoff, nil
+}
+
+func (s *MemoryStore) UpdateHandoff(ctx context.Context, handoff Handoff) (Handoff, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.validateHandoffLocked(handoff); err != nil {
+		return Handoff{}, err
+	}
+	existing, ok := s.handoffs[handoff.ProjectID][handoff.ID]
+	if !ok || existing.WorkItemID != handoff.WorkItemID {
+		return Handoff{}, ErrNotFound
+	}
+	handoff.CreatedAt = existing.CreatedAt
+	s.handoffs[handoff.ProjectID][handoff.ID] = handoff
+	return handoff, nil
+}
+
+func (s *MemoryStore) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return err
+	}
+	item, ok := s.handoffs[projectID][id]
+	if !ok || item.WorkItemID != workItemID {
+		return ErrNotFound
+	}
+	delete(s.handoffs[projectID], id)
+	return nil
+}
+
+func (s *MemoryStore) validateHandoffLocked(handoff Handoff) error {
+	if err := s.requireWorkItemLocked(handoff.ProjectID, handoff.WorkItemID); err != nil {
+		return err
+	}
+	if handoff.FromRoleID != "" {
+		if _, ok := s.roles[handoff.ProjectID][handoff.FromRoleID]; !ok {
+			return ErrNotFound
+		}
+	}
+	if handoff.ToRoleID != "" {
+		if _, ok := s.roles[handoff.ProjectID][handoff.ToRoleID]; !ok {
+			return ErrNotFound
+		}
+	}
+	return nil
 }
 
 func (s *MemoryStore) ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error) {

@@ -57,7 +57,10 @@ type Store interface {
 	CreateReview(ctx context.Context, review Review) (Review, error)
 
 	ListHandoffs(ctx context.Context, projectID, workItemID string) ([]Handoff, error)
+	GetHandoff(ctx context.Context, projectID, workItemID, id string) (Handoff, error)
 	CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
+	UpdateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
+	DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error
 
 	ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error)
 	CreateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error)
