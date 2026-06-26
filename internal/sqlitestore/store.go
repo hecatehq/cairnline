@@ -210,9 +210,14 @@ func (s *Store) migrate(ctx context.Context) error {
 			id TEXT NOT NULL,
 			title TEXT NOT NULL,
 			body TEXT NOT NULL,
+			suggested_kind TEXT NOT NULL DEFAULT '',
+			suggested_trust_label TEXT NOT NULL DEFAULT '',
+			suggested_source_kind TEXT NOT NULL DEFAULT '',
+			suggested_source_id TEXT NOT NULL DEFAULT '',
+			source_refs_json TEXT NOT NULL DEFAULT '[]',
 			status TEXT NOT NULL,
-			trust_label TEXT NOT NULL DEFAULT '',
-			source_ref TEXT NOT NULL DEFAULT '',
+			status_reason TEXT NOT NULL DEFAULT '',
+			promoted_memory_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			PRIMARY KEY (project_id, id),
@@ -225,6 +230,25 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := s.ensureColumn(ctx, "assignments", "root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{"suggested_kind", "TEXT NOT NULL DEFAULT ''"},
+		{"suggested_trust_label", "TEXT NOT NULL DEFAULT ''"},
+		{"suggested_source_kind", "TEXT NOT NULL DEFAULT ''"},
+		{"suggested_source_id", "TEXT NOT NULL DEFAULT ''"},
+		{"source_refs_json", "TEXT NOT NULL DEFAULT '[]'"},
+		{"status_reason", "TEXT NOT NULL DEFAULT ''"},
+		{"promoted_memory_id", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.ensureColumn(ctx, "memory_candidates", column.name, column.definition); err != nil {
+			return fmt.Errorf("migrate sqlite: %w", err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE memory_candidates SET status = ? WHERE status = 'proposed'`, core.MemoryCandidatePending); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	return nil
@@ -841,11 +865,22 @@ func (s *Store) DeleteMemoryEntry(ctx context.Context, projectID, id string) err
 	return requireAffected(result)
 }
 
-func (s *Store) ListMemoryCandidates(ctx context.Context, projectID string) ([]core.MemoryCandidate, error) {
-	if err := s.requireProject(ctx, projectID); err != nil {
+func (s *Store) ListMemoryCandidates(ctx context.Context, filter core.MemoryCandidateFilter) ([]core.MemoryCandidate, error) {
+	if err := s.requireProject(ctx, filter.ProjectID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, title, body, status, trust_label, source_ref, created_at, updated_at FROM memory_candidates WHERE project_id = ? ORDER BY updated_at DESC`, projectID)
+	query := memoryCandidateSelectSQL + ` WHERE project_id = ?`
+	args := []any{filter.ProjectID}
+	switch {
+	case filter.Status != "":
+		query += ` AND status = ?`
+		args = append(args, filter.Status)
+	case !filter.IncludeResolved:
+		query += ` AND status = ?`
+		args = append(args, core.MemoryCandidatePending)
+	}
+	query += ` ORDER BY updated_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -862,16 +897,101 @@ func (s *Store) ListMemoryCandidates(ctx context.Context, projectID string) ([]c
 	return out, rows.Err()
 }
 
+func (s *Store) GetMemoryCandidate(ctx context.Context, projectID, id string) (core.MemoryCandidate, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.MemoryCandidate{}, err
+	}
+	row := s.db.QueryRowContext(ctx, memoryCandidateSelectSQL+` WHERE project_id = ? AND id = ?`, projectID, id)
+	return scanMemoryCandidate(row)
+}
+
 func (s *Store) CreateMemoryCandidate(ctx context.Context, candidate core.MemoryCandidate) (core.MemoryCandidate, error) {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO memory_candidates (project_id, id, title, body, status, trust_label, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		candidate.ProjectID, candidate.ID, candidate.Title, candidate.Body, candidate.Status, candidate.TrustLabel, candidate.SourceRef, encodeTime(candidate.CreatedAt), encodeTime(candidate.UpdatedAt))
+	sourceRefs, err := encodeJSON(candidate.SourceRefs)
+	if err != nil {
+		return core.MemoryCandidate{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO memory_candidates (project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		candidate.ProjectID, candidate.ID, candidate.Title, candidate.Body, candidate.SuggestedKind, candidate.SuggestedTrustLabel, candidate.SuggestedSourceKind, candidate.SuggestedSourceID, sourceRefs, candidate.Status, candidate.StatusReason, candidate.PromotedMemoryID, encodeTime(candidate.CreatedAt), encodeTime(candidate.UpdatedAt))
 	if err != nil {
 		return core.MemoryCandidate{}, mapSQLiteWriteError(err)
 	}
 	return candidate, nil
 }
 
+func (s *Store) UpdateMemoryCandidate(ctx context.Context, candidate core.MemoryCandidate) (core.MemoryCandidate, error) {
+	sourceRefs, err := encodeJSON(candidate.SourceRefs)
+	if err != nil {
+		return core.MemoryCandidate{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE memory_candidates SET title = ?, body = ?, suggested_kind = ?, suggested_trust_label = ?, suggested_source_kind = ?, suggested_source_id = ?, source_refs_json = ?, status = ?, status_reason = ?, promoted_memory_id = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		candidate.Title, candidate.Body, candidate.SuggestedKind, candidate.SuggestedTrustLabel, candidate.SuggestedSourceKind, candidate.SuggestedSourceID, sourceRefs, candidate.Status, candidate.StatusReason, candidate.PromotedMemoryID, encodeTime(candidate.CreatedAt), encodeTime(candidate.UpdatedAt), candidate.ProjectID, candidate.ID)
+	if err != nil {
+		return core.MemoryCandidate{}, mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		return core.MemoryCandidate{}, err
+	}
+	return candidate, nil
+}
+
+func (s *Store) DeleteMemoryCandidate(ctx context.Context, projectID, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM memory_candidates WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
+}
+
+func (s *Store) PromoteMemoryCandidate(ctx context.Context, projectID, id string, entry core.MemoryEntry) (core.MemoryCandidate, core.MemoryEntry, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, err
+	}
+	defer tx.Rollback()
+
+	candidate, err := scanMemoryCandidate(tx.QueryRowContext(ctx, memoryCandidateSelectSQL+` WHERE project_id = ? AND id = ?`, projectID, id))
+	if err != nil {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, err
+	}
+	if candidate.Status == core.MemoryCandidatePromoted && candidate.PromotedMemoryID != "" {
+		promoted, err := scanMemoryEntry(tx.QueryRowContext(ctx, `SELECT project_id, id, title, body, trust_label, source_kind, source_id, enabled, created_at, updated_at FROM memory_entries WHERE project_id = ? AND id = ?`, projectID, candidate.PromotedMemoryID))
+		if err != nil {
+			return core.MemoryCandidate{}, core.MemoryEntry{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return core.MemoryCandidate{}, core.MemoryEntry{}, err
+		}
+		return candidate, promoted, nil
+	}
+	if candidate.Status != core.MemoryCandidatePending {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, core.ErrConflict
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO memory_entries (project_id, id, title, body, trust_label, source_kind, source_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ProjectID, entry.ID, entry.Title, entry.Body, entry.TrustLabel, entry.SourceKind, entry.SourceID, entry.Enabled, encodeTime(entry.CreatedAt), encodeTime(entry.UpdatedAt))
+	if err != nil {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, mapSQLiteWriteError(err)
+	}
+	candidate.Status = core.MemoryCandidatePromoted
+	candidate.StatusReason = ""
+	candidate.PromotedMemoryID = entry.ID
+	candidate.UpdatedAt = entry.UpdatedAt
+	result, err := tx.ExecContext(ctx, `UPDATE memory_candidates SET status = ?, status_reason = '', promoted_memory_id = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		candidate.Status, candidate.PromotedMemoryID, encodeTime(candidate.UpdatedAt), projectID, id)
+	if err != nil {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return core.MemoryCandidate{}, core.MemoryEntry{}, err
+	}
+	return candidate, entry, nil
+}
+
 const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at FROM assignments`
+
+const memoryCandidateSelectSQL = `SELECT project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at FROM memory_candidates`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -1078,9 +1198,12 @@ func scanMemoryEntry(row scanner) (core.MemoryEntry, error) {
 
 func scanMemoryCandidate(row scanner) (core.MemoryCandidate, error) {
 	var item core.MemoryCandidate
-	var createdAt, updatedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Body, &item.Status, &item.TrustLabel, &item.SourceRef, &createdAt, &updatedAt); err != nil {
+	var sourceRefsJSON, createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Body, &item.SuggestedKind, &item.SuggestedTrustLabel, &item.SuggestedSourceKind, &item.SuggestedSourceID, &sourceRefsJSON, &item.Status, &item.StatusReason, &item.PromotedMemoryID, &createdAt, &updatedAt); err != nil {
 		return core.MemoryCandidate{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(sourceRefsJSON, &item.SourceRefs); err != nil {
+		return core.MemoryCandidate{}, err
 	}
 	var err error
 	if item.CreatedAt, err = decodeTime(createdAt); err != nil {

@@ -217,15 +217,44 @@ type MemoryEntry struct {
 }
 
 type MemoryCandidate struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"project_id"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	Status     string    `json:"status"`
-	TrustLabel string    `json:"trust_label,omitempty"`
-	SourceRef  string    `json:"source_ref,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                  string                     `json:"id"`
+	ProjectID           string                     `json:"project_id"`
+	Title               string                     `json:"title"`
+	Body                string                     `json:"body"`
+	SuggestedKind       string                     `json:"suggested_kind,omitempty"`
+	SuggestedTrustLabel string                     `json:"suggested_trust_label,omitempty"`
+	SuggestedSourceKind string                     `json:"suggested_source_kind,omitempty"`
+	SuggestedSourceID   string                     `json:"suggested_source_id,omitempty"`
+	SourceRefs          []MemoryCandidateSourceRef `json:"source_refs,omitempty"`
+	Status              string                     `json:"status"`
+	StatusReason        string                     `json:"status_reason,omitempty"`
+	PromotedMemoryID    string                     `json:"promoted_memory_id,omitempty"`
+	CreatedAt           time.Time                  `json:"created_at"`
+	UpdatedAt           time.Time                  `json:"updated_at"`
+}
+
+type MemoryCandidateSourceRef struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
+type MemoryCandidateFilter struct {
+	ProjectID       string
+	Status          string
+	IncludeResolved bool
+}
+
+type MemoryCandidatePromotion struct {
+	ProjectID   string
+	CandidateID string
+	Title       *string
+	Body        *string
+	TrustLabel  *string
+	SourceKind  *string
+	SourceID    *string
+	Enabled     *bool
 }
 
 const (
@@ -273,7 +302,11 @@ const (
 
 	HandoffStatusOpen = "open"
 
-	MemoryCandidateProposed = "proposed"
+	MemoryCandidatePending  = "pending"
+	MemoryCandidatePromoted = "promoted"
+	MemoryCandidateRejected = "rejected"
+
+	MemoryCandidateProposed = MemoryCandidatePending
 
 	LaunchPacketKindAssignment = "assignment_launch_packet"
 )

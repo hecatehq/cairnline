@@ -311,7 +311,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"memory_candidates.create","arguments":{"project_id":"` + project.ID + `","title":"Review convention","body":"Reviews should cite evidence.","source_ref":"` + assignmentID + `"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"memory_candidates.create","arguments":{"project_id":"` + project.ID + `","title":"Review convention","body":"Reviews should cite evidence.","suggested_source_kind":"assignment","suggested_source_id":"` + assignmentID + `","source_refs":[{"kind":"assignment","id":"` + assignmentID + `","title":"Assignment"}]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -376,7 +376,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListHandoffs() error = %v", err)
 	}
-	memory, err := service.ListMemoryCandidates(ctx, project.ID)
+	memory, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
 	if err != nil {
 		t.Fatalf("ListMemoryCandidates() error = %v", err)
 	}
@@ -555,6 +555,168 @@ func TestMCPTools_MemoryEntryLifecycle(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("entries after delete = %+v, want none", entries)
+	}
+}
+
+func TestMCPTools_MemoryCandidateDecisionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Candidate project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "memory_candidates.create", map[string]any{
+		"project_id":            project.ID,
+		"title":                 "Generated lesson",
+		"body":                  "Generated summaries should be reviewed before becoming memory.",
+		"suggested_kind":        "note",
+		"suggested_trust_label": core.MemoryTrustGenerated,
+		"suggested_source_kind": core.MemorySourceGenerated,
+		"suggested_source_id":   "run_1",
+		"source_refs": []map[string]any{{
+			"kind":  "task_run",
+			"id":    "run_1",
+			"title": "Task run",
+		}},
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create memory candidate error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created memory candidate memcand_") {
+		t.Fatalf("create memory candidate response = %s", output.String())
+	}
+	candidates, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() error = %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %+v, want one pending candidate", candidates)
+	}
+	candidateID := candidates[0].ID
+
+	input = toolRequest(t, 2, "memory_candidates.list", map[string]any{"project_id": project.ID})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list memory candidates error = %v", err)
+	}
+	var listResponse struct {
+		Result struct {
+			StructuredContent []core.MemoryCandidate `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &listResponse); err != nil {
+		t.Fatalf("list response did not unmarshal: %v\n%s", err, output.String())
+	}
+	if len(listResponse.Result.StructuredContent) != 1 || listResponse.Result.StructuredContent[0].ID != candidateID || len(listResponse.Result.StructuredContent[0].SourceRefs) != 1 {
+		t.Fatalf("listed candidates = %+v, want created candidate with source ref", listResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 3, "memory_candidates.get", map[string]any{
+		"project_id":   project.ID,
+		"candidate_id": candidateID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get memory candidate error = %v", err)
+	}
+	if !strings.Contains(output.String(), "status=pending") || !strings.Contains(output.String(), "refs=1") {
+		t.Fatalf("get memory candidate response = %s, want pending source-ref summary", output.String())
+	}
+
+	promotedTitle := "Reviewed generated lesson"
+	input = toolRequest(t, 4, "memory_candidates.promote", map[string]any{
+		"project_id":   project.ID,
+		"candidate_id": candidateID,
+		"title":        promotedTitle,
+		"trust_label":  core.MemoryTrustOperator,
+		"source_kind":  core.MemorySourceOperator,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() promote memory candidate error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Promoted memory candidate "+candidateID+" to memory entry mem_") {
+		t.Fatalf("promote memory candidate response = %s", output.String())
+	}
+	entries, err := service.ListMemoryEntries(ctx, project.ID, false)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Title != promotedTitle || entries[0].TrustLabel != core.MemoryTrustOperator {
+		t.Fatalf("memory entries = %+v, want promoted accepted memory", entries)
+	}
+
+	input = toolRequest(t, 5, "memory_candidates.list", map[string]any{"project_id": project.ID})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list pending memory candidates error = %v", err)
+	}
+	if !strings.Contains(output.String(), "No memory candidates.") {
+		t.Fatalf("pending candidates response = %s, want promoted candidate omitted", output.String())
+	}
+
+	input = toolRequest(t, 6, "memory_candidates.list", map[string]any{
+		"project_id":       project.ID,
+		"include_resolved": true,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list resolved memory candidates error = %v", err)
+	}
+	if !strings.Contains(output.String(), "status=promoted") || !strings.Contains(output.String(), "promoted_memory="+entries[0].ID) {
+		t.Fatalf("resolved candidates response = %s, want promoted candidate", output.String())
+	}
+
+	input = toolRequest(t, 7, "memory_candidates.create", map[string]any{
+		"project_id": project.ID,
+		"title":      "Speculative lesson",
+		"body":       "Maybe skip validation.",
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create reject candidate error = %v", err)
+	}
+	candidates, err = service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates(after create reject) error = %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("pending candidates after create reject = %+v, want one", candidates)
+	}
+	rejectID := candidates[0].ID
+	input = toolRequest(t, 8, "memory_candidates.reject", map[string]any{
+		"project_id":   project.ID,
+		"candidate_id": rejectID,
+		"reason":       "Not durable.",
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() reject memory candidate error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Rejected memory candidate "+rejectID) {
+		t.Fatalf("reject memory candidate response = %s", output.String())
+	}
+	rejected, err := service.GetMemoryCandidate(ctx, project.ID, rejectID)
+	if err != nil {
+		t.Fatalf("GetMemoryCandidate(rejected) error = %v", err)
+	}
+	if rejected.Status != core.MemoryCandidateRejected || rejected.StatusReason != "Not durable." {
+		t.Fatalf("rejected candidate = %+v, want rejected reason", rejected)
+	}
+
+	input = toolRequest(t, 9, "memory_candidates.delete", map[string]any{
+		"project_id":   project.ID,
+		"candidate_id": rejectID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete memory candidate error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted memory candidate "+rejectID) {
+		t.Fatalf("delete memory candidate response = %s", output.String())
 	}
 }
 
