@@ -191,6 +191,20 @@ func (s *Store) migrate(ctx context.Context) error {
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS memory_entries (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			trust_label TEXT NOT NULL DEFAULT '',
+			source_kind TEXT NOT NULL DEFAULT '',
+			source_id TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS memory_candidates (
 			project_id TEXT NOT NULL,
 			id TEXT NOT NULL,
@@ -764,6 +778,69 @@ func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 	return handoff, nil
 }
 
+func (s *Store) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]core.MemoryEntry, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	query := `SELECT project_id, id, title, body, trust_label, source_kind, source_id, enabled, created_at, updated_at FROM memory_entries WHERE project_id = ?`
+	if !includeDisabled {
+		query += ` AND enabled = 1`
+	}
+	query += ` ORDER BY updated_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.MemoryEntry
+	for rows.Next() {
+		item, err := scanMemoryEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetMemoryEntry(ctx context.Context, projectID, id string) (core.MemoryEntry, error) {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.MemoryEntry{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, title, body, trust_label, source_kind, source_id, enabled, created_at, updated_at FROM memory_entries WHERE project_id = ? AND id = ?`, projectID, id)
+	return scanMemoryEntry(row)
+}
+
+func (s *Store) CreateMemoryEntry(ctx context.Context, entry core.MemoryEntry) (core.MemoryEntry, error) {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO memory_entries (project_id, id, title, body, trust_label, source_kind, source_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ProjectID, entry.ID, entry.Title, entry.Body, entry.TrustLabel, entry.SourceKind, entry.SourceID, entry.Enabled, encodeTime(entry.CreatedAt), encodeTime(entry.UpdatedAt))
+	if err != nil {
+		return core.MemoryEntry{}, mapSQLiteWriteError(err)
+	}
+	return entry, nil
+}
+
+func (s *Store) UpdateMemoryEntry(ctx context.Context, entry core.MemoryEntry) (core.MemoryEntry, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE memory_entries SET title = ?, body = ?, trust_label = ?, source_kind = ?, source_id = ?, enabled = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		entry.Title, entry.Body, entry.TrustLabel, entry.SourceKind, entry.SourceID, entry.Enabled, encodeTime(entry.CreatedAt), encodeTime(entry.UpdatedAt), entry.ProjectID, entry.ID)
+	if err != nil {
+		return core.MemoryEntry{}, mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		return core.MemoryEntry{}, err
+	}
+	return entry, nil
+}
+
+func (s *Store) DeleteMemoryEntry(ctx context.Context, projectID, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM memory_entries WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
+}
+
 func (s *Store) ListMemoryCandidates(ctx context.Context, projectID string) ([]core.MemoryCandidate, error) {
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return nil, err
@@ -979,6 +1056,22 @@ func scanHandoff(row scanner) (core.Handoff, error) {
 	}
 	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
 		return core.Handoff{}, err
+	}
+	return item, nil
+}
+
+func scanMemoryEntry(row scanner) (core.MemoryEntry, error) {
+	var item core.MemoryEntry
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Body, &item.TrustLabel, &item.SourceKind, &item.SourceID, &item.Enabled, &createdAt, &updatedAt); err != nil {
+		return core.MemoryEntry{}, mapSQLiteReadError(err)
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.MemoryEntry{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.MemoryEntry{}, err
 	}
 	return item, nil
 }

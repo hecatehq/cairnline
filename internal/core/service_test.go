@@ -478,6 +478,19 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if memory.Status != MemoryCandidateProposed {
 		t.Fatalf("memory candidate = %+v, want proposed status", memory)
 	}
+	memoryEntry, err := service.CreateMemoryEntry(ctx, MemoryEntry{
+		ProjectID:  project.ID,
+		Title:      "Review memory",
+		Body:       "Reviews should include concrete evidence.",
+		SourceKind: MemorySourceOperator,
+		SourceID:   assignment.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	if !memoryEntry.Enabled || memoryEntry.TrustLabel != MemoryTrustOperator {
+		t.Fatalf("memory entry = %+v, want enabled operator memory", memoryEntry)
+	}
 	launchPacket, err := service.AssignmentLaunchPacket(ctx, project.ID, assignment.ID)
 	if err != nil {
 		t.Fatalf("AssignmentLaunchPacket() error = %v", err)
@@ -487,6 +500,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if launchPacket.Profile == nil || launchPacket.Profile.ID != profile.ID || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
 		t.Fatalf("launch packet = %+v, want resolved profile metadata", launchPacket)
+	}
+	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
+		t.Fatalf("launch packet memory = %+v, want accepted project memory", launchPacket.Memory)
 	}
 	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
@@ -498,6 +514,78 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if completed.Status != AssignmentCompleted || completed.ExecutionRef != "run-123" {
 		t.Fatalf("completed assignment = %+v, want completed with execution ref", completed)
+	}
+}
+
+func TestService_MemoryEntryLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Memory flow"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	entry, err := service.CreateMemoryEntry(ctx, MemoryEntry{
+		ProjectID:  project.ID,
+		Title:      "Keep reviews tight",
+		Body:       "Review notes should cite evidence.",
+		SourceKind: MemorySourceGenerated,
+		SourceID:   "handoff_1",
+		TrustLabel: MemoryTrustGenerated,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	if entry.ID == "" || !entry.Enabled || entry.TrustLabel != MemoryTrustGenerated {
+		t.Fatalf("entry = %+v, want generated id and enabled generated memory", entry)
+	}
+	got, err := service.GetMemoryEntry(ctx, project.ID, entry.ID)
+	if err != nil {
+		t.Fatalf("GetMemoryEntry() error = %v", err)
+	}
+	if got.ID != entry.ID || got.SourceID != "handoff_1" {
+		t.Fatalf("got memory = %+v, want created entry", got)
+	}
+	got.Title = "Keep reviews concrete"
+	got.Body = "Review notes should cite exact evidence."
+	got.Enabled = false
+	updated, err := service.UpdateMemoryEntry(ctx, got)
+	if err != nil {
+		t.Fatalf("UpdateMemoryEntry() error = %v", err)
+	}
+	if updated.Title != "Keep reviews concrete" || updated.Enabled {
+		t.Fatalf("updated memory = %+v, want disabled replacement metadata", updated)
+	}
+	enabledOnly, err := service.ListMemoryEntries(ctx, project.ID, false)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries(enabled) error = %v", err)
+	}
+	if len(enabledOnly) != 0 {
+		t.Fatalf("enabled memory = %+v, want disabled entry omitted", enabledOnly)
+	}
+	allEntries, err := service.ListMemoryEntries(ctx, project.ID, true)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries(all) error = %v", err)
+	}
+	if len(allEntries) != 1 || allEntries[0].ID != entry.ID {
+		t.Fatalf("all memory = %+v, want disabled entry included", allEntries)
+	}
+	if _, err := service.UpdateMemoryEntry(ctx, MemoryEntry{
+		ProjectID: project.ID,
+		ID:        entry.ID,
+		Title:     "",
+		Body:      "Missing title.",
+		Enabled:   true,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UpdateMemoryEntry(invalid) error = %v, want ErrInvalid", err)
+	}
+	if err := service.DeleteMemoryEntry(ctx, project.ID, entry.ID); err != nil {
+		t.Fatalf("DeleteMemoryEntry() error = %v", err)
+	}
+	if _, err := service.GetMemoryEntry(ctx, project.ID, entry.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetMemoryEntry(deleted) error = %v, want ErrNotFound", err)
+	}
+	if err := service.DeleteMemoryEntry(ctx, project.ID, entry.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteMemoryEntry(second) error = %v, want ErrNotFound", err)
 	}
 }
 

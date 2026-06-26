@@ -59,6 +59,12 @@ type Store interface {
 	ListHandoffs(ctx context.Context, projectID, workItemID string) ([]Handoff, error)
 	CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
 
+	ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error)
+	GetMemoryEntry(ctx context.Context, projectID, id string) (MemoryEntry, error)
+	CreateMemoryEntry(ctx context.Context, entry MemoryEntry) (MemoryEntry, error)
+	UpdateMemoryEntry(ctx context.Context, entry MemoryEntry) (MemoryEntry, error)
+	DeleteMemoryEntry(ctx context.Context, projectID, id string) error
+
 	ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error)
 	CreateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error)
 }

@@ -155,6 +155,16 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMemoryCandidate() error = %v", err)
 	}
+	memoryEntry, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{
+		ProjectID:  project.ID,
+		Title:      "Persisted memory",
+		Body:       "Accepted memory is available to assignment launch packets.",
+		SourceKind: core.MemorySourceOperator,
+		SourceID:   assignment.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
 	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, core.AssignmentCompleted, "run-1"); err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
@@ -252,6 +262,13 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(memory) != 1 || memory[0].Status != core.MemoryCandidateProposed || memory[0].SourceRef != assignment.ID {
 		t.Fatalf("memory candidates = %+v, want persisted candidate", memory)
 	}
+	memoryEntries, err := reopenedService.ListMemoryEntries(ctx, project.ID, false)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries() error = %v", err)
+	}
+	if len(memoryEntries) != 1 || memoryEntries[0].ID != memoryEntry.ID || memoryEntries[0].TrustLabel != core.MemoryTrustOperator {
+		t.Fatalf("memory entries = %+v, want persisted accepted memory", memoryEntries)
+	}
 	launchPacket, err := reopenedService.AssignmentLaunchPacket(ctx, project.ID, assignment.ID)
 	if err != nil {
 		t.Fatalf("AssignmentLaunchPacket() error = %v", err)
@@ -268,8 +285,75 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(launchPacket.Skills) != 1 || launchPacket.Skills[0].ID != skill.ID {
 		t.Fatalf("launch packet skills = %+v, want persisted resolved skill", launchPacket.Skills)
 	}
+	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
+		t.Fatalf("launch packet memory = %+v, want persisted accepted memory", launchPacket.Memory)
+	}
 	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	}
+}
+
+func TestStore_MemoryEntryLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "memory.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Memory"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	entry, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{
+		ProjectID:  project.ID,
+		Title:      "Keep reviews concrete",
+		Body:       "Accepted review memory should cite evidence.",
+		TrustLabel: core.MemoryTrustGenerated,
+		SourceKind: core.MemorySourceGenerated,
+		SourceID:   "memcand_1",
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	got, err := service.GetMemoryEntry(ctx, project.ID, entry.ID)
+	if err != nil {
+		t.Fatalf("GetMemoryEntry() error = %v", err)
+	}
+	if got.ID != entry.ID || got.SourceKind != core.MemorySourceGenerated || !got.Enabled {
+		t.Fatalf("got memory = %+v, want created enabled entry", got)
+	}
+
+	got.Enabled = false
+	got.Title = "Keep review memory concrete"
+	updated, err := service.UpdateMemoryEntry(ctx, got)
+	if err != nil {
+		t.Fatalf("UpdateMemoryEntry() error = %v", err)
+	}
+	if updated.Enabled || updated.Title != "Keep review memory concrete" || updated.CreatedAt.IsZero() {
+		t.Fatalf("updated memory = %+v, want disabled updated entry preserving created_at", updated)
+	}
+	enabled, err := service.ListMemoryEntries(ctx, project.ID, false)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries(enabled) error = %v", err)
+	}
+	if len(enabled) != 0 {
+		t.Fatalf("enabled entries = %+v, want disabled entry omitted", enabled)
+	}
+	all, err := service.ListMemoryEntries(ctx, project.ID, true)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries(all) error = %v", err)
+	}
+	if len(all) != 1 || all[0].ID != entry.ID {
+		t.Fatalf("all entries = %+v, want disabled entry included", all)
+	}
+
+	if err := service.DeleteMemoryEntry(ctx, project.ID, entry.ID); err != nil {
+		t.Fatalf("DeleteMemoryEntry() error = %v", err)
+	}
+	if _, err := service.GetMemoryEntry(ctx, project.ID, entry.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetMemoryEntry(deleted) error = %v, want ErrNotFound", err)
 	}
 }
 

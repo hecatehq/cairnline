@@ -525,6 +525,88 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, createHandoff(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "memory_entries.list",
+		Title:       "List memory entries",
+		Description: "List accepted project memory entries.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"include_disabled":{"type":"boolean"}
+			},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, listMemoryEntries(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_entries.get",
+		Title:       "Get memory entry",
+		Description: "Get one accepted project memory entry by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"memory_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","memory_id"]
+		}`),
+		Annotations: readOnly,
+	}, getMemoryEntry(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_entries.create",
+		Title:       "Create memory entry",
+		Description: "Create an accepted project memory entry.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"title":{"type":"string","minLength":1},
+				"body":{"type":"string","minLength":1},
+				"trust_label":{"type":"string"},
+				"source_kind":{"type":"string"},
+				"source_id":{"type":"string"}
+			},
+			"required":["project_id","title","body"]
+		}`),
+	}, createMemoryEntry(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_entries.update",
+		Title:       "Update memory entry",
+		Description: "Patch an accepted project memory entry.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"memory_id":{"type":"string","minLength":1},
+				"title":{"type":"string"},
+				"body":{"type":"string"},
+				"trust_label":{"type":"string"},
+				"source_kind":{"type":"string"},
+				"source_id":{"type":"string"},
+				"enabled":{"type":"boolean"}
+			},
+			"required":["project_id","memory_id"]
+		}`),
+	}, updateMemoryEntry(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "memory_entries.delete",
+		Title:       "Delete memory entry",
+		Description: "Delete an accepted project memory entry.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"memory_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","memory_id"]
+		}`),
+	}, deleteMemoryEntry(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "memory_candidates.create",
 		Title:       "Create memory candidate",
 		Description: "Create a proposed durable memory entry awaiting explicit approval.",
@@ -1494,6 +1576,146 @@ func createHandoff(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func listMemoryEntries(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID       string `json:"project_id"`
+		IncludeDisabled bool   `json:"include_disabled"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListMemoryEntries(ctx, input.ProjectID, input.IncludeDisabled)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatMemoryEntries("Memory entries", items)),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func getMemoryEntry(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		MemoryID  string `json:"memory_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetMemoryEntry(ctx, input.ProjectID, input.MemoryID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatMemoryEntries("Memory entry", []core.MemoryEntry{item})),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func createMemoryEntry(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		Title      string `json:"title"`
+		Body       string `json:"body"`
+		TrustLabel string `json:"trust_label"`
+		SourceKind string `json:"source_kind"`
+		SourceID   string `json:"source_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{
+			ProjectID:  input.ProjectID,
+			Title:      input.Title,
+			Body:       input.Body,
+			TrustLabel: input.TrustLabel,
+			SourceKind: input.SourceKind,
+			SourceID:   input.SourceID,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Created memory entry %s: %s", item.ID, item.Title)),
+		}, nil
+	}
+}
+
+func updateMemoryEntry(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string  `json:"project_id"`
+		MemoryID   string  `json:"memory_id"`
+		Title      *string `json:"title"`
+		Body       *string `json:"body"`
+		TrustLabel *string `json:"trust_label"`
+		SourceKind *string `json:"source_kind"`
+		SourceID   *string `json:"source_id"`
+		Enabled    *bool   `json:"enabled"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		existing, err := service.GetMemoryEntry(ctx, input.ProjectID, input.MemoryID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if input.Title != nil {
+			existing.Title = *input.Title
+		}
+		if input.Body != nil {
+			existing.Body = *input.Body
+		}
+		if input.TrustLabel != nil {
+			existing.TrustLabel = *input.TrustLabel
+		}
+		if input.SourceKind != nil {
+			existing.SourceKind = *input.SourceKind
+		}
+		if input.SourceID != nil {
+			existing.SourceID = *input.SourceID
+		}
+		if input.Enabled != nil {
+			existing.Enabled = *input.Enabled
+		}
+		item, err := service.UpdateMemoryEntry(ctx, existing)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Updated memory entry %s: %s", item.ID, item.Title)),
+		}, nil
+	}
+}
+
+func deleteMemoryEntry(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		MemoryID  string `json:"memory_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteMemoryEntry(ctx, input.ProjectID, input.MemoryID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted memory entry %s", input.MemoryID)),
+		}, nil
+	}
+}
+
 func createMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID  string `json:"project_id"`
@@ -1703,6 +1925,31 @@ func formatAssignments(title string, items []core.Assignment) string {
 		}
 		if len(item.DesiredAgent.SkillIDs) > 0 {
 			fmt.Fprintf(&b, " skills=%s", strings.Join(item.DesiredAgent.SkillIDs, ","))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatMemoryEntries(title string, items []core.MemoryEntry) string {
+	if len(items) == 0 {
+		return "No memory entries."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s: %s", item.ID, item.Title)
+		if !item.Enabled {
+			b.WriteString(" disabled")
+		}
+		if item.TrustLabel != "" {
+			fmt.Fprintf(&b, " trust=%s", item.TrustLabel)
+		}
+		if item.SourceKind != "" {
+			fmt.Fprintf(&b, " source=%s", item.SourceKind)
+			if item.SourceID != "" {
+				fmt.Fprintf(&b, ":%s", item.SourceID)
+			}
 		}
 		b.WriteByte('\n')
 	}

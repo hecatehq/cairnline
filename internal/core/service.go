@@ -743,6 +743,10 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
 	}
+	memoryEntries, err := s.store.ListMemoryEntries(ctx, packetContext.Project.ID, false)
+	if err != nil {
+		return AssignmentLaunchPacket{}, err
+	}
 	memoryCandidates, err := s.store.ListMemoryCandidates(ctx, packetContext.Project.ID)
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
@@ -791,6 +795,7 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		Evidence:         evidence,
 		Reviews:          reviews,
 		Handoffs:         handoffs,
+		Memory:           memoryEntries,
 		MemoryCandidates: memoryCandidates,
 		Warnings:         warnings,
 		CreatedAt:        s.now(),
@@ -975,6 +980,111 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		UpdatedAt:  now,
 	}
 	return s.store.CreateHandoff(ctx, item)
+}
+
+func (s *Service) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	return s.store.ListMemoryEntries(ctx, projectID, includeDisabled)
+}
+
+func (s *Service) GetMemoryEntry(ctx context.Context, projectID, id string) (MemoryEntry, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory_id is required"))
+	}
+	return s.store.GetMemoryEntry(ctx, projectID, id)
+}
+
+func (s *Service) CreateMemoryEntry(ctx context.Context, input MemoryEntry) (MemoryEntry, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	title := strings.TrimSpace(input.Title)
+	body := strings.TrimSpace(input.Body)
+	if projectID == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if title == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory title is required"))
+	}
+	if body == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory body is required"))
+	}
+	trustLabel := strings.TrimSpace(input.TrustLabel)
+	if trustLabel == "" {
+		trustLabel = MemoryTrustOperator
+	}
+	now := s.now()
+	item := MemoryEntry{
+		ID:         firstNonEmpty(strings.TrimSpace(input.ID), newID("mem")),
+		ProjectID:  projectID,
+		Title:      title,
+		Body:       body,
+		TrustLabel: trustLabel,
+		SourceKind: strings.TrimSpace(input.SourceKind),
+		SourceID:   strings.TrimSpace(input.SourceID),
+		Enabled:    true,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	return s.store.CreateMemoryEntry(ctx, item)
+}
+
+func (s *Service) UpdateMemoryEntry(ctx context.Context, input MemoryEntry) (MemoryEntry, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	id := strings.TrimSpace(input.ID)
+	title := strings.TrimSpace(input.Title)
+	body := strings.TrimSpace(input.Body)
+	if projectID == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory_id is required"))
+	}
+	if title == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory title is required"))
+	}
+	if body == "" {
+		return MemoryEntry{}, errors.Join(ErrInvalid, errors.New("memory body is required"))
+	}
+	trustLabel := strings.TrimSpace(input.TrustLabel)
+	if trustLabel == "" {
+		trustLabel = MemoryTrustOperator
+	}
+	existing, err := s.store.GetMemoryEntry(ctx, projectID, id)
+	if err != nil {
+		return MemoryEntry{}, err
+	}
+	item := MemoryEntry{
+		ID:         id,
+		ProjectID:  projectID,
+		Title:      title,
+		Body:       body,
+		TrustLabel: trustLabel,
+		SourceKind: strings.TrimSpace(input.SourceKind),
+		SourceID:   strings.TrimSpace(input.SourceID),
+		Enabled:    input.Enabled,
+		CreatedAt:  existing.CreatedAt,
+		UpdatedAt:  s.now(),
+	}
+	return s.store.UpdateMemoryEntry(ctx, item)
+}
+
+func (s *Service) DeleteMemoryEntry(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("memory_id is required"))
+	}
+	return s.store.DeleteMemoryEntry(ctx, projectID, id)
 }
 
 func (s *Service) ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error) {
