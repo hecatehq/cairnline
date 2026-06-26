@@ -24,9 +24,10 @@ local MCP server, but its contracts are not stable yet.
 
 Implemented now:
 
-- portable core types for projects, roles, profiles, work items, assignments,
-  skill metadata, assignment-scoped evidence, reviews, handoffs with
-  source/target refs, accepted memory, and memory candidates
+- portable core types for projects with roots/default root metadata, roles,
+  profiles, work items, assignments, skill metadata, assignment-scoped
+  evidence, reviews, handoffs with source/target refs, accepted memory, and
+  memory candidates
 - in-memory service for projects, profiles, roles, work items, assignments, and
   collaboration artifacts
 - SQLite store for durable projects, profiles, roles, work items, assignments,

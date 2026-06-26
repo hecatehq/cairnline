@@ -141,6 +141,26 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
+	if project.DefaultRootID != "root_main" {
+		t.Fatalf("default root = %q, want root_main", project.DefaultRootID)
+	}
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + project.ID + `","roots":[{"id":"root_review","path":"/workspace/dogfood-review","kind":"git_worktree"}]}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated project "+project.ID+": Dogfood") {
+		t.Fatalf("update project response = %s", output.String())
+	}
+	projects, err := service.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("ListProjects() error = %v", err)
+	}
+	if len(projects) != 1 || projects[0].DefaultRootID != "root_review" {
+		t.Fatalf("projects = %+v, want default root to follow replacement roots", projects)
+	}
 	role, err := service.CreateRole(ctx, core.Role{
 		ProjectID:        project.ID,
 		Name:             "Reviewer",
@@ -171,14 +191,14 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		ProjectID: project.ID,
 		Title:     "Review MCP pull",
 		Brief:     "Prove assignment claim and completion.",
-		RootID:    "root_main",
+		RootID:    "root_review",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"assignments.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","root_id":"root_main","execution_profile_id":"exec_local","desired_agent_kind":"any","skill_ids":["review"]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"assignments.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_profile_id":"exec_local","desired_agent_kind":"any","skill_ids":["review"]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -195,8 +215,8 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if len(assignments) != 1 {
 		t.Fatalf("assignments = %+v, want one assignment", assignments)
 	}
-	if assignments[0].RootID != "root_main" {
-		t.Fatalf("assignment root = %q, want root_main", assignments[0].RootID)
+	if assignments[0].RootID != "root_review" {
+		t.Fatalf("assignment root = %q, want root_review", assignments[0].RootID)
 	}
 	assignmentID := assignments[0].ID
 

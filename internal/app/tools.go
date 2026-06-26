@@ -37,7 +37,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"git_remote":{"type":"string"},
 					"git_branch":{"type":"string"},
 					"active":{"type":"boolean"}
-				},"required":["path"]}}
+				},"required":["path"]}},
+				"default_root_id":{"type":"string"}
 			},
 			"required":["name"]
 		}`),
@@ -60,7 +61,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"git_remote":{"type":"string"},
 					"git_branch":{"type":"string"},
 					"active":{"type":"boolean"}
-				},"required":["path"]}}
+				},"required":["path"]}},
+				"default_root_id":{"type":"string"}
 			},
 			"required":["id"]
 		}`),
@@ -817,9 +819,10 @@ func toCoreRoots(input []rootArgs) []core.Root {
 
 func createProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		Name        string     `json:"name"`
-		Description string     `json:"description"`
-		Roots       []rootArgs `json:"roots"`
+		Name          string     `json:"name"`
+		Description   string     `json:"description"`
+		Roots         []rootArgs `json:"roots"`
+		DefaultRootID string     `json:"default_root_id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -827,9 +830,10 @@ func createProject(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateProject(ctx, core.Project{
-			Name:        input.Name,
-			Description: input.Description,
-			Roots:       toCoreRoots(input.Roots),
+			Name:          input.Name,
+			Description:   input.Description,
+			Roots:         toCoreRoots(input.Roots),
+			DefaultRootID: input.DefaultRootID,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -842,10 +846,11 @@ func createProject(service *core.Service) mcp.ToolHandler {
 
 func updateProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ID          string      `json:"id"`
-		Name        *string     `json:"name"`
-		Description *string     `json:"description"`
-		Roots       *[]rootArgs `json:"roots"`
+		ID            string      `json:"id"`
+		Name          *string     `json:"name"`
+		Description   *string     `json:"description"`
+		Roots         *[]rootArgs `json:"roots"`
+		DefaultRootID *string     `json:"default_root_id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -874,6 +879,12 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		if input.Roots != nil {
 			existing.Roots = toCoreRoots(*input.Roots)
+			if input.DefaultRootID == nil && !rootIDExists(existing.DefaultRootID, existing.Roots) {
+				existing.DefaultRootID = ""
+			}
+		}
+		if input.DefaultRootID != nil {
+			existing.DefaultRootID = *input.DefaultRootID
 		}
 		item, err := service.UpdateProject(ctx, existing)
 		if err != nil {
@@ -883,6 +894,19 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 			Content: mcp.TextContent(fmt.Sprintf("Updated project %s: %s", item.ID, item.Name)),
 		}, nil
 	}
+}
+
+func rootIDExists(id string, roots []core.Root) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, root := range roots {
+		if root.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func projectOperationsBrief(service *core.Service) mcp.ToolHandler {

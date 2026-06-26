@@ -7,6 +7,7 @@ type Project struct {
 	Name           string    `json:"name"`
 	Description    string    `json:"description,omitempty"`
 	Roots          []Root    `json:"roots,omitempty"`
+	DefaultRootID  string    `json:"default_root_id,omitempty"`
 	ContextSources []Source  `json:"context_sources,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`

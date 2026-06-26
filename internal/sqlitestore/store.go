@@ -74,6 +74,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
 			roots_json TEXT NOT NULL DEFAULT '[]',
+			default_root_id TEXT NOT NULL DEFAULT '',
 			context_sources_json TEXT NOT NULL DEFAULT '[]',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -242,6 +243,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("migrate sqlite: %w", err)
 		}
 	}
+	if err := s.ensureColumn(ctx, "projects", "default_root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
 	if err := s.ensureColumn(ctx, "assignments", "root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
@@ -317,7 +321,7 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, definition stri
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]core.Project, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, roots_json, context_sources_json, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +339,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]core.Project, error) {
 }
 
 func (s *Store) GetProject(ctx context.Context, id string) (core.Project, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, roots_json, context_sources_json, created_at, updated_at FROM projects WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at FROM projects WHERE id = ?`, id)
 	return scanProject(row)
 }
 
@@ -348,8 +352,8 @@ func (s *Store) CreateProject(ctx context.Context, project core.Project) (core.P
 	if err != nil {
 		return core.Project{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO projects (id, name, description, roots_json, context_sources_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		project.ID, project.Name, project.Description, roots, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO projects (id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		project.ID, project.Name, project.Description, roots, project.DefaultRootID, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt))
 	if err != nil {
 		return core.Project{}, mapSQLiteWriteError(err)
 	}
@@ -365,8 +369,8 @@ func (s *Store) UpdateProject(ctx context.Context, project core.Project) (core.P
 	if err != nil {
 		return core.Project{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE projects SET name = ?, description = ?, roots_json = ?, context_sources_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
-		project.Name, project.Description, roots, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt), project.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE projects SET name = ?, description = ?, roots_json = ?, default_root_id = ?, context_sources_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		project.Name, project.Description, roots, project.DefaultRootID, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt), project.ID)
 	if err != nil {
 		return core.Project{}, err
 	}
@@ -1110,7 +1114,7 @@ func scanExecutionProfile(row scanner) (core.ExecutionProfile, error) {
 func scanProject(row scanner) (core.Project, error) {
 	var item core.Project
 	var rootsJSON, sourcesJSON, createdAt, updatedAt string
-	if err := row.Scan(&item.ID, &item.Name, &item.Description, &rootsJSON, &sourcesJSON, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Description, &rootsJSON, &item.DefaultRootID, &sourcesJSON, &createdAt, &updatedAt); err != nil {
 		return core.Project{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(rootsJSON, &item.Roots); err != nil {

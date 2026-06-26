@@ -32,12 +32,18 @@ func (s *Service) CreateProject(ctx context.Context, input Project) (Project, er
 	if name == "" {
 		return Project{}, errors.Join(ErrInvalid, errors.New("project name is required"))
 	}
+	roots := normalizeRoots(input.Roots)
+	defaultRootID, err := normalizeDefaultRootID(input.DefaultRootID, roots)
+	if err != nil {
+		return Project{}, err
+	}
 	now := s.now()
 	item := Project{
 		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("proj")),
 		Name:           name,
 		Description:    strings.TrimSpace(input.Description),
-		Roots:          normalizeRoots(input.Roots),
+		Roots:          roots,
+		DefaultRootID:  defaultRootID,
 		ContextSources: input.ContextSources,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -58,11 +64,17 @@ func (s *Service) UpdateProject(ctx context.Context, input Project) (Project, er
 	if err != nil {
 		return Project{}, err
 	}
+	roots := normalizeRoots(input.Roots)
+	defaultRootID, err := normalizeDefaultRootID(input.DefaultRootID, roots)
+	if err != nil {
+		return Project{}, err
+	}
 	item := Project{
 		ID:             id,
 		Name:           name,
 		Description:    strings.TrimSpace(input.Description),
-		Roots:          normalizeRoots(input.Roots),
+		Roots:          roots,
+		DefaultRootID:  defaultRootID,
 		ContextSources: input.ContextSources,
 		CreatedAt:      existing.CreatedAt,
 		UpdatedAt:      s.now(),
@@ -1391,6 +1403,22 @@ func normalizeRoots(values []Root) []Root {
 		})
 	}
 	return out
+}
+
+func normalizeDefaultRootID(value string, roots []Root) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		if len(roots) == 0 {
+			return "", nil
+		}
+		return roots[0].ID, nil
+	}
+	for _, root := range roots {
+		if root.ID == value {
+			return value, nil
+		}
+	}
+	return "", errors.Join(ErrNotFound, errors.New("default_root_id was not found in project roots"))
 }
 
 func (s *Service) normalizeProjectSkill(input ProjectSkill, creating bool) (ProjectSkill, error) {
