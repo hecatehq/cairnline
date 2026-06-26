@@ -300,18 +300,29 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"memory_candidates.create","arguments":{"project_id":"` + project.ID + `","title":"Review convention","body":"Reviews should cite evidence.","source_ref":"` + assignmentID + `"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"memory_entries.create","arguments":{"project_id":"` + project.ID + `","title":"Accepted review convention","body":"Accepted memory should be visible in launch packets.","source_kind":"operator","source_id":"` + assignmentID + `"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve() error = %v", err)
+		t.Fatalf("Serve() create memory entry error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created memory entry mem_") {
+		t.Fatalf("create memory entry response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"memory_candidates.create","arguments":{"project_id":"` + project.ID + `","title":"Review convention","body":"Reviews should cite evidence.","source_ref":"` + assignmentID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create memory candidate error = %v", err)
 	}
 	if !strings.Contains(output.String(), "Created memory candidate memcand_") {
 		t.Fatalf("create memory candidate response = %s", output.String())
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"assignments.launch_packet","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"assignments.launch_packet","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -335,12 +346,15 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if packet.Profile == nil || packet.Profile.ID != "profile_reviewer" || packet.ExecutionProfile == nil || packet.ExecutionProfile.ID != "exec_local" {
 		t.Fatalf("launch packet = %+v, want resolved profile metadata", packet)
 	}
+	if len(packet.Memory) != 1 || packet.Memory[0].Title != "Accepted review convention" {
+		t.Fatalf("launch packet memory = %+v, want accepted memory entry", packet.Memory)
+	}
 	if len(packet.Evidence) != 1 || len(packet.Reviews) != 1 || len(packet.Handoffs) != 1 || len(packet.MemoryCandidates) != 1 {
 		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.MemoryCandidates))
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","execution_ref":"run-1"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","execution_ref":"run-1"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -366,12 +380,16 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMemoryCandidates() error = %v", err)
 	}
-	if len(evidence) != 1 || len(reviews) != 1 || len(handoffs) != 1 || len(memory) != 1 {
-		t.Fatalf("artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(evidence), len(reviews), len(handoffs), len(memory))
+	memoryEntries, err := service.ListMemoryEntries(ctx, project.ID, false)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries() error = %v", err)
+	}
+	if len(evidence) != 1 || len(reviews) != 1 || len(handoffs) != 1 || len(memoryEntries) != 1 || len(memory) != 1 {
+		t.Fatalf("artifact counts evidence=%d reviews=%d handoffs=%d memory_entries=%d memory_candidates=%d, want all one", len(evidence), len(reviews), len(handoffs), len(memoryEntries), len(memory))
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":16,"method":"resources/list"}` + "\n",
+		`{"jsonrpc":"2.0","id":17,"method":"resources/list"}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -384,19 +402,19 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":17,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":18,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
 		t.Fatalf("Serve() project resources/read error = %v", err)
 	}
 	projectResourceText := readSingleResourceText(t, output.Bytes())
-	if !strings.Contains(projectResourceText, `"project"`) || !strings.Contains(projectResourceText, `"roles"`) || !strings.Contains(projectResourceText, `"assignments"`) {
+	if !strings.Contains(projectResourceText, `"project"`) || !strings.Contains(projectResourceText, `"roles"`) || !strings.Contains(projectResourceText, `"assignments"`) || !strings.Contains(projectResourceText, `"memory"`) {
 		t.Fatalf("project resources/read text = %s", projectResourceText)
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":18,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":19,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -412,6 +430,131 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if packetFromResource.Assignment.ID != assignmentID || packetFromResource.Kind != core.LaunchPacketKindAssignment {
 		t.Fatalf("launch resource packet = %+v, want assignment launch packet", packetFromResource)
+	}
+}
+
+func TestMCPTools_MemoryEntryLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Memory project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "memory_entries.create", map[string]any{
+		"project_id":  project.ID,
+		"title":       "Accepted convention",
+		"body":        "Use accepted memory only when explicitly saved.",
+		"trust_label": core.MemoryTrustGenerated,
+		"source_kind": core.MemorySourceGenerated,
+		"source_id":   "memcand_1",
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create memory entry error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created memory entry mem_") {
+		t.Fatalf("create memory entry response = %s", output.String())
+	}
+	entries, err := service.ListMemoryEntries(ctx, project.ID, false)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %+v, want one created entry", entries)
+	}
+	memoryID := entries[0].ID
+
+	input = toolRequest(t, 2, "memory_entries.list", map[string]any{"project_id": project.ID})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list memory entries error = %v", err)
+	}
+	var listResponse struct {
+		Result struct {
+			StructuredContent []core.MemoryEntry `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &listResponse); err != nil {
+		t.Fatalf("list response did not unmarshal: %v\n%s", err, output.String())
+	}
+	if len(listResponse.Result.StructuredContent) != 1 || listResponse.Result.StructuredContent[0].ID != memoryID {
+		t.Fatalf("listed memory entries = %+v, want created entry", listResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 3, "memory_entries.get", map[string]any{
+		"project_id": project.ID,
+		"memory_id":  memoryID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get memory entry error = %v", err)
+	}
+	var getResponse struct {
+		Result struct {
+			StructuredContent core.MemoryEntry `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &getResponse); err != nil {
+		t.Fatalf("get response did not unmarshal: %v\n%s", err, output.String())
+	}
+	if getResponse.Result.StructuredContent.ID != memoryID || getResponse.Result.StructuredContent.TrustLabel != core.MemoryTrustGenerated {
+		t.Fatalf("got memory entry = %+v, want created generated entry", getResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 4, "memory_entries.update", map[string]any{
+		"project_id": project.ID,
+		"memory_id":  memoryID,
+		"title":      "Disabled convention",
+		"enabled":    false,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update memory entry error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated memory entry "+memoryID) {
+		t.Fatalf("update memory entry response = %s", output.String())
+	}
+
+	input = toolRequest(t, 5, "memory_entries.list", map[string]any{"project_id": project.ID})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list enabled memory entries error = %v", err)
+	}
+	if !strings.Contains(output.String(), "No memory entries.") {
+		t.Fatalf("enabled memory entries response = %s, want disabled entry omitted", output.String())
+	}
+
+	input = toolRequest(t, 6, "memory_entries.list", map[string]any{
+		"project_id":       project.ID,
+		"include_disabled": true,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list all memory entries error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Disabled convention") || !strings.Contains(output.String(), "disabled") {
+		t.Fatalf("all memory entries response = %s, want disabled entry included", output.String())
+	}
+
+	input = toolRequest(t, 7, "memory_entries.delete", map[string]any{
+		"project_id": project.ID,
+		"memory_id":  memoryID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete memory entry error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted memory entry "+memoryID) {
+		t.Fatalf("delete memory entry response = %s", output.String())
+	}
+	entries, err = service.ListMemoryEntries(ctx, project.ID, true)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries(all after delete) error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries after delete = %+v, want none", entries)
 	}
 }
 

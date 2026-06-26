@@ -157,6 +157,7 @@ type AssignmentLaunchPacket struct {
 	Evidence         []Evidence        `json:"evidence,omitempty"`
 	Reviews          []Review          `json:"reviews,omitempty"`
 	Handoffs         []Handoff         `json:"handoffs,omitempty"`
+	Memory           []MemoryEntry     `json:"memory,omitempty"`
 	MemoryCandidates []MemoryCandidate `json:"memory_candidates,omitempty"`
 	Warnings         []string          `json:"warnings,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
@@ -198,6 +199,19 @@ type Handoff struct {
 	Title      string    `json:"title"`
 	Body       string    `json:"body"`
 	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type MemoryEntry struct {
+	ID         string    `json:"id"`
+	ProjectID  string    `json:"project_id"`
+	Title      string    `json:"title"`
+	Body       string    `json:"body"`
+	TrustLabel string    `json:"trust_label,omitempty"`
+	SourceKind string    `json:"source_kind,omitempty"`
+	SourceID   string    `json:"source_id,omitempty"`
+	Enabled    bool      `json:"enabled"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -251,6 +265,11 @@ const (
 	ReviewRiskMedium      = "medium"
 	ReviewRiskHigh        = "high"
 	ReviewStatusRecorded  = "recorded"
+
+	MemoryTrustOperator   = "operator_memory"
+	MemoryTrustGenerated  = "generated_summary"
+	MemorySourceOperator  = "operator"
+	MemorySourceGenerated = "generated"
 
 	HandoffStatusOpen = "open"
 

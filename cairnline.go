@@ -40,6 +40,7 @@ type AssignmentLaunchPacket = core.AssignmentLaunchPacket
 type Evidence = core.Evidence
 type Review = core.Review
 type Handoff = core.Handoff
+type MemoryEntry = core.MemoryEntry
 type MemoryCandidate = core.MemoryCandidate
 
 const (
@@ -81,6 +82,11 @@ const (
 	ReviewStatusRecorded  = core.ReviewStatusRecorded
 
 	HandoffStatusOpen = core.HandoffStatusOpen
+
+	MemoryTrustOperator   = core.MemoryTrustOperator
+	MemoryTrustGenerated  = core.MemoryTrustGenerated
+	MemorySourceOperator  = core.MemorySourceOperator
+	MemorySourceGenerated = core.MemorySourceGenerated
 
 	MemoryCandidateProposed = core.MemoryCandidateProposed
 

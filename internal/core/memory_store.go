@@ -19,6 +19,7 @@ type MemoryStore struct {
 	evidence    map[string]map[string]Evidence
 	reviews     map[string]map[string]Review
 	handoffs    map[string]map[string]Handoff
+	entries     map[string]map[string]MemoryEntry
 	memory      map[string]map[string]MemoryCandidate
 }
 
@@ -34,6 +35,7 @@ func NewMemoryStore() *MemoryStore {
 		evidence:    make(map[string]map[string]Evidence),
 		reviews:     make(map[string]map[string]Review),
 		handoffs:    make(map[string]map[string]Handoff),
+		entries:     make(map[string]map[string]MemoryEntry),
 		memory:      make(map[string]map[string]MemoryCandidate),
 	}
 }
@@ -602,6 +604,87 @@ func (s *MemoryStore) CreateHandoff(ctx context.Context, handoff Handoff) (Hando
 	}
 	s.handoffs[handoff.ProjectID][handoff.ID] = handoff
 	return handoff, nil
+}
+
+func (s *MemoryStore) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return nil, ErrNotFound
+	}
+	items := make([]MemoryEntry, 0, len(s.entries[projectID]))
+	for _, item := range s.entries[projectID] {
+		if !includeDisabled && !item.Enabled {
+			continue
+		}
+		items = append(items, item)
+	}
+	slices.SortFunc(items, func(a, b MemoryEntry) int {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) GetMemoryEntry(ctx context.Context, projectID, id string) (MemoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return MemoryEntry{}, ErrNotFound
+	}
+	item, ok := s.entries[projectID][id]
+	if !ok {
+		return MemoryEntry{}, ErrNotFound
+	}
+	return item, nil
+}
+
+func (s *MemoryStore) CreateMemoryEntry(ctx context.Context, entry MemoryEntry) (MemoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[entry.ProjectID]; !ok {
+		return MemoryEntry{}, ErrNotFound
+	}
+	if s.entries[entry.ProjectID] == nil {
+		s.entries[entry.ProjectID] = make(map[string]MemoryEntry)
+	}
+	if _, ok := s.entries[entry.ProjectID][entry.ID]; ok {
+		return MemoryEntry{}, ErrDuplicate
+	}
+	s.entries[entry.ProjectID][entry.ID] = entry
+	return entry, nil
+}
+
+func (s *MemoryStore) UpdateMemoryEntry(ctx context.Context, entry MemoryEntry) (MemoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[entry.ProjectID]; !ok {
+		return MemoryEntry{}, ErrNotFound
+	}
+	existing, ok := s.entries[entry.ProjectID][entry.ID]
+	if !ok {
+		return MemoryEntry{}, ErrNotFound
+	}
+	entry.CreatedAt = existing.CreatedAt
+	s.entries[entry.ProjectID][entry.ID] = entry
+	return entry, nil
+}
+
+func (s *MemoryStore) DeleteMemoryEntry(ctx context.Context, projectID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := s.entries[projectID][id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.entries[projectID], id)
+	return nil
 }
 
 func (s *MemoryStore) ListMemoryCandidates(ctx context.Context, projectID string) ([]MemoryCandidate, error) {
