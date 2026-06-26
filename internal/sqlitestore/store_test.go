@@ -55,11 +55,16 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 			Active: true,
 		}},
 		ContextSources: []core.Source{{
-			ID:         "src_agents",
-			Kind:       "workspace_instruction",
-			Title:      "AGENTS.md",
-			Enabled:    true,
-			TrustLabel: "workspace_guidance",
+			ID:             "src_agents",
+			Kind:           "workspace_instruction",
+			Title:          "AGENTS.md",
+			Locator:        "AGENTS.md",
+			Enabled:        true,
+			Format:         "agents_md",
+			Scope:          "workspace",
+			TrustLabel:     "workspace_guidance",
+			SourceCategory: "instructions",
+			Metadata:       map[string]string{"root_id": "root_main"},
 		}},
 	})
 	if err != nil {
@@ -204,6 +209,10 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if projects[0].DefaultRootID != "root_main" {
 		t.Fatalf("default root = %q, want root_main", projects[0].DefaultRootID)
+	}
+	source := projects[0].ContextSources[0]
+	if source.Locator != "AGENTS.md" || source.Format != "agents_md" || source.Scope != "workspace" || source.SourceCategory != "instructions" || source.Metadata["root_id"] != "root_main" {
+		t.Fatalf("source = %+v, want persisted context source metadata", source)
 	}
 	profiles, err := reopenedService.ListAgentProfiles(ctx)
 	if err != nil {

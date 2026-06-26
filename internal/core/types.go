@@ -23,12 +23,18 @@ type Root struct {
 }
 
 type Source struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Title      string `json:"title"`
-	Locator    string `json:"locator,omitempty"`
-	Enabled    bool   `json:"enabled"`
-	TrustLabel string `json:"trust_label,omitempty"`
+	ID             string            `json:"id"`
+	Kind           string            `json:"kind"`
+	Title          string            `json:"title"`
+	Locator        string            `json:"locator,omitempty"`
+	Enabled        bool              `json:"enabled"`
+	Format         string            `json:"format,omitempty"`
+	Scope          string            `json:"scope,omitempty"`
+	TrustLabel     string            `json:"trust_label,omitempty"`
+	SourceCategory string            `json:"source_category,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	CreatedAt      time.Time         `json:"created_at,omitempty"`
+	UpdatedAt      time.Time         `json:"updated_at,omitempty"`
 }
 
 type ProjectSkill struct {
