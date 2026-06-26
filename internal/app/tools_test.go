@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -412,6 +413,86 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if packetFromResource.Assignment.ID != assignmentID || packetFromResource.Kind != core.LaunchPacketKindAssignment {
 		t.Fatalf("launch resource packet = %+v, want assignment launch packet", packetFromResource)
+	}
+}
+
+func TestMCPTools_GetAndDeleteAssignment(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Delete assignment"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Body:         "Delete with assignment.",
+		Verdict:      core.ReviewVerdictPass,
+	}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+
+	input := toolRequest(t, 1, "assignments.get", map[string]any{
+		"project_id":    project.ID,
+		"assignment_id": assignment.ID,
+	})
+	var output bytes.Buffer
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get assignment error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Assignment (1):") || !strings.Contains(got, assignment.ID) {
+		t.Fatalf("get assignment response = %s", got)
+	}
+	var getResponse struct {
+		Result struct {
+			StructuredContent core.Assignment `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &getResponse); err != nil {
+		t.Fatalf("get assignment response did not unmarshal: %v\n%s", err, output.String())
+	}
+	if getResponse.Result.StructuredContent.ID != assignment.ID {
+		t.Fatalf("structured assignment = %+v, want %s", getResponse.Result.StructuredContent, assignment.ID)
+	}
+
+	input = toolRequest(t, 2, "assignments.delete", map[string]any{
+		"project_id":    project.ID,
+		"assignment_id": assignment.ID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete assignment error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted assignment "+assignment.ID) {
+		t.Fatalf("delete assignment response = %s", output.String())
+	}
+	if _, err := service.GetAssignment(ctx, project.ID, assignment.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetAssignment(deleted) error = %v, want ErrNotFound", err)
+	}
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListReviews() error = %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Fatalf("reviews = %+v, want deleted assignment review removed", reviews)
 	}
 }
 

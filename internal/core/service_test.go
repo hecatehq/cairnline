@@ -501,6 +501,120 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestService_DeleteAssignmentCascadesAssignmentReviews(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assignment cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Review deletion"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	deletedAssignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(deleted) error = %v", err)
+	}
+	keptAssignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(kept) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		Title:      "Work evidence",
+		Locator:    "file://report.md",
+	}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, Review{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: deletedAssignment.ID,
+		Body:         "Delete this review with the assignment.",
+		Verdict:      ReviewVerdictConcerns,
+	}); err != nil {
+		t.Fatalf("CreateReview(deleted assignment) error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, Review{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: keptAssignment.ID,
+		Body:         "Keep this review.",
+		Verdict:      ReviewVerdictPass,
+	}); err != nil {
+		t.Fatalf("CreateReview(kept assignment) error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		Title:      "Work handoff",
+		Body:       "Keep work-item scoped handoffs.",
+	}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ProjectID: project.ID,
+		Title:     "Assignment lesson",
+		Body:      "Keep candidate provenance even if the assignment is removed.",
+		SourceRef: deletedAssignment.ID,
+	}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteAssignment(ctx, project.ID, deletedAssignment.ID); err != nil {
+		t.Fatalf("DeleteAssignment() error = %v", err)
+	}
+	if _, err := service.GetAssignment(ctx, project.ID, deletedAssignment.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetAssignment(deleted) error = %v, want ErrNotFound", err)
+	}
+	assignments, err := service.ListAssignments(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != keptAssignment.ID {
+		t.Fatalf("assignments = %+v, want only kept assignment", assignments)
+	}
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListReviews() error = %v", err)
+	}
+	if len(reviews) != 1 || reviews[0].AssignmentID != keptAssignment.ID {
+		t.Fatalf("reviews = %+v, want only review for kept assignment", reviews)
+	}
+	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListEvidence() error = %v", err)
+	}
+	handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListHandoffs() error = %v", err)
+	}
+	memory, err := service.ListMemoryCandidates(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() error = %v", err)
+	}
+	if len(evidence) != 1 || len(handoffs) != 1 || len(memory) != 1 || memory[0].SourceRef != deletedAssignment.ID {
+		t.Fatalf("remaining evidence=%+v handoffs=%+v memory=%+v, want work artifacts and memory preserved", evidence, handoffs, memory)
+	}
+	if err := service.DeleteAssignment(ctx, project.ID, deletedAssignment.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteAssignment(second) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestService_ListCompatibleAssignmentsFiltersQueuedWork(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

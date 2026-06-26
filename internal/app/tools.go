@@ -353,6 +353,21 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, listAssignments(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.get",
+		Title:       "Get assignment",
+		Description: "Get one coordination assignment by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id"]
+		}`),
+		Annotations: readOnly,
+	}, getAssignment(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.next",
 		Title:       "Next compatible assignments",
 		Description: "List queued assignments compatible with an MCP-pull agent before claiming.",
@@ -467,6 +482,20 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","assignment_id"]
 		}`),
 	}, completeAssignment(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.delete",
+		Title:       "Delete assignment",
+		Description: "Delete an assignment and assignment-linked reviews.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id"]
+		}`),
+	}, deleteAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "evidence.record",
@@ -1213,6 +1242,27 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func getAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID    string `json:"project_id"`
+		AssignmentID string `json:"assignment_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatAssignments("Assignment", []core.Assignment{item})),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
 func nextAssignments(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID      string    `json:"project_id"`
@@ -1393,6 +1443,25 @@ func completeAssignment(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated assignment %s: %s", item.ID, item.Status)),
+		}, nil
+	}
+}
+
+func deleteAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID    string `json:"project_id"`
+		AssignmentID string `json:"assignment_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteAssignment(ctx, input.ProjectID, input.AssignmentID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted assignment %s", input.AssignmentID)),
 		}, nil
 	}
 }

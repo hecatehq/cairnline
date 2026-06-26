@@ -634,6 +634,18 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	return s.store.CreateAssignment(ctx, item)
 }
 
+func (s *Service) GetAssignment(ctx context.Context, projectID, id string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	return s.store.GetAssignment(ctx, projectID, id)
+}
+
 func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string) (Assignment, error) {
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)
@@ -648,6 +660,18 @@ func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy 
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("claimed_by is required"))
 	}
 	return s.store.ClaimAssignment(ctx, projectID, id, claimedBy, s.now)
+}
+
+func (s *Service) DeleteAssignment(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	return s.store.DeleteAssignment(ctx, projectID, id)
 }
 
 func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, status, executionRef string) (Assignment, error) {

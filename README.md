@@ -58,6 +58,7 @@ Implemented now:
   - `work_items.create`
   - `work_items.update`
   - `assignments.list`
+  - `assignments.get`
   - `assignments.next`
   - `assignments.create`
   - `assignments.claim`
@@ -65,6 +66,7 @@ Implemented now:
   - `assignments.context`
   - `assignments.launch_packet`
   - `assignments.complete`
+  - `assignments.delete`
   - `evidence.record`
   - `reviews.record`
   - `handoffs.create`

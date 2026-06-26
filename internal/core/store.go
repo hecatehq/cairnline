@@ -49,6 +49,7 @@ type Store interface {
 	CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 	UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 	ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)
+	DeleteAssignment(ctx context.Context, projectID, id string) error
 
 	ListEvidence(ctx context.Context, projectID, workItemID string) ([]Evidence, error)
 	CreateEvidence(ctx context.Context, evidence Evidence) (Evidence, error)

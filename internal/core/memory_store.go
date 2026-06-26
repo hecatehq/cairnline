@@ -464,6 +464,25 @@ func (s *MemoryStore) ClaimAssignment(ctx context.Context, projectID, id, claime
 	return item, nil
 }
 
+func (s *MemoryStore) DeleteAssignment(ctx context.Context, projectID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := s.assignments[projectID][id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.assignments[projectID], id)
+	for reviewID, review := range s.reviews[projectID] {
+		if review.AssignmentID == id {
+			delete(s.reviews[projectID], reviewID)
+		}
+	}
+	return nil
+}
+
 func compareString(a, b string) int {
 	switch {
 	case a < b:

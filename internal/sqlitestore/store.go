@@ -650,6 +650,32 @@ func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy st
 	return core.Assignment{}, core.ErrConflict
 }
 
+func (s *Store) DeleteAssignment(ctx context.Context, projectID, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM reviews WHERE project_id = ? AND assignment_id = ?`, projectID, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM assignments WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		_ = tx.Rollback()
+		return mapSQLiteWriteError(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if affected == 0 {
+		_ = tx.Rollback()
+		return core.ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) ([]core.Evidence, error) {
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return nil, err
