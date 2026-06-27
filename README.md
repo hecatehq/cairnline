@@ -124,6 +124,8 @@ Implemented now:
   apply attempts, latest-result state, and repeat-apply protection for confirmed
   project-state mutations; applying a proposal can create queued assignment
   coordination records, but it does not launch or supervise agents
+- embeddable proposal-record import for migration and bridge seeding; import
+  preserves ledger state without replaying proposal actions
 
 Planned next:
 

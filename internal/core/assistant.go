@@ -51,6 +51,20 @@ func (s *Service) CreateAssistantProposal(ctx context.Context, input AssistantPr
 	return s.store.CreateAssistantProposal(ctx, record)
 }
 
+func (s *Service) ImportAssistantProposalRecord(ctx context.Context, input AssistantProposalRecord) (AssistantProposalRecord, error) {
+	record := normalizeAssistantProposalRecord(input, s.now())
+	if err := validateAssistantProposalRecord(record); err != nil {
+		return AssistantProposalRecord{}, err
+	}
+	if _, err := s.store.GetAssistantProposal(ctx, record.ID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return s.store.CreateAssistantProposal(ctx, record)
+		}
+		return AssistantProposalRecord{}, err
+	}
+	return s.store.UpdateAssistantProposal(ctx, record)
+}
+
 func (s *Service) ApplyAssistantProposal(ctx context.Context, input AssistantProposal, confirmed bool) (AssistantApplyResult, error) {
 	proposal, err := s.AssistantPropose(ctx, input)
 	if err != nil {
