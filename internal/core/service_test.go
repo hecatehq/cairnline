@@ -1405,6 +1405,120 @@ func TestService_ProjectHealth(t *testing.T) {
 	}
 }
 
+func TestService_AssistantProposalApply(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assistant"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	proposal := AssistantProposal{
+		ID:        "prop_assistant",
+		ProjectID: project.ID,
+		Title:     "Set up first work",
+		Actions: []AssistantAction{
+			{
+				Kind: AssistantActionCreateRole,
+				Role: &Role{
+					ID:        "role_operator",
+					ProjectID: project.ID,
+					Name:      "Operator",
+				},
+			},
+			{
+				Kind: AssistantActionCreateWorkItem,
+				WorkItem: &WorkItem{
+					ID:        "work_first",
+					ProjectID: project.ID,
+					Title:     "First reviewable task",
+					Brief:     "Prove the proposal path.",
+				},
+			},
+			{
+				Kind: AssistantActionCreateAssignment,
+				Assignment: &Assignment{
+					ID:            "asgn_first",
+					ProjectID:     project.ID,
+					WorkItemID:    "work_first",
+					RoleID:        "role_operator",
+					ExecutionMode: ExecutionMCPPull,
+					DesiredAgent:  DesiredAgent{Kind: DesiredAgentAny},
+				},
+			},
+			{
+				Kind: AssistantActionCreateMemoryCandidate,
+				MemoryCandidate: &MemoryCandidate{
+					ID:        "memcand_first",
+					ProjectID: project.ID,
+					Title:     "Project setup lesson",
+					Body:      "The first work item came from a confirmed proposal.",
+				},
+			},
+		},
+	}
+	normalized, err := service.AssistantPropose(ctx, proposal)
+	if err != nil {
+		t.Fatalf("AssistantPropose() error = %v", err)
+	}
+	if normalized.ID != proposal.ID || !normalized.RequiresConfirmation || len(normalized.Actions) != 4 {
+		t.Fatalf("normalized proposal = %+v, want confirmed four-action proposal", normalized)
+	}
+	if _, err := service.ApplyAssistantProposal(ctx, proposal, false); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ApplyAssistantProposal(unconfirmed) error = %v, want ErrConflict", err)
+	}
+	applied, err := service.ApplyAssistantProposal(ctx, proposal, true)
+	if err != nil {
+		t.Fatalf("ApplyAssistantProposal() error = %v result=%+v", err, applied)
+	}
+	if !applied.Applied || applied.Status != AssistantApplyStatusApplied || applied.AppliedActionCount != 4 {
+		t.Fatalf("applied result = %+v, want full apply", applied)
+	}
+	assignment, err := service.GetAssignment(ctx, project.ID, "asgn_first")
+	if err != nil {
+		t.Fatalf("GetAssignment() error = %v", err)
+	}
+	if assignment.Status != AssignmentQueued || assignment.ExecutionRef != "" || assignment.ClaimedBy != "" {
+		t.Fatalf("assignment = %+v, want queued coordination record without execution binding", assignment)
+	}
+	candidates, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ID != "memcand_first" {
+		t.Fatalf("candidates = %+v, want proposal-created memory candidate", candidates)
+	}
+	reapplied, err := service.ApplyAssistantProposal(ctx, proposal, true)
+	if !errors.Is(err, ErrDuplicate) || reapplied.Status != AssistantApplyStatusRejected || reapplied.AppliedActionCount != 0 || reapplied.FailedActionIndex == nil || *reapplied.FailedActionIndex != 0 {
+		t.Fatalf("reapply result=%+v error=%v, want duplicate rejected at first action", reapplied, err)
+	}
+}
+
+func TestService_AssistantProposalRejectsExecutionBoundAssignment(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assistant safety"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	proposal := AssistantProposal{
+		Title: "Unsafe assignment",
+		Actions: []AssistantAction{{
+			Kind: AssistantActionCreateAssignment,
+			Assignment: &Assignment{
+				ProjectID:     project.ID,
+				WorkItemID:    "work_missing",
+				RoleID:        "role_missing",
+				Status:        AssignmentRunning,
+				ExecutionRef:  "run_unsafe",
+				ExecutionMode: ExecutionMCPPull,
+			},
+		}},
+	}
+	if _, err := service.AssistantPropose(ctx, proposal); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("AssistantPropose(unsafe assignment) error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestService_ProjectActivity(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

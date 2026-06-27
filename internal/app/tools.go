@@ -164,6 +164,39 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, projectActivity(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "assistant.propose",
+		Title:       "Validate assistant proposal",
+		Description: "Normalize and validate a typed project proposal. This does not mutate project state.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"id":{"type":"string"},
+				"project_id":{"type":"string"},
+				"title":{"type":"string","minLength":1},
+				"summary":{"type":"string"},
+				"source":{"type":"string"},
+				"actions":{"type":"array","items":{"type":"object"},"minItems":1}
+			},
+			"required":["title","actions"]
+		}`),
+		Annotations: readOnly,
+	}, assistantPropose(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assistant.apply",
+		Title:       "Apply assistant proposal",
+		Description: "Apply a confirmed typed project proposal. Assignments are coordination records only and are not auto-dispatched.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"proposal":{"type":"object"},
+				"confirm":{"type":"boolean"}
+			},
+			"required":["proposal","confirm"]
+		}`),
+	}, assistantApply(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "profiles.list",
 		Title:       "List agent profiles",
 		Description: "List portable agent behavior and context-policy profiles.",
@@ -1351,6 +1384,45 @@ func projectActivity(service *core.Service) mcp.ToolHandler {
 		return mcp.CallToolResult{
 			Content:           mcp.TextContent(formatProjectActivity(activity)),
 			StructuredContent: activity,
+		}, nil
+	}
+}
+
+func assistantPropose(service *core.Service) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input core.AssistantProposal
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		proposal, err := service.AssistantPropose(ctx, input)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatAssistantProposal(proposal)),
+			StructuredContent: proposal,
+		}, nil
+	}
+}
+
+func assistantApply(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		Proposal core.AssistantProposal `json:"proposal"`
+		Confirm  bool                   `json:"confirm"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		result, err := service.ApplyAssistantProposal(ctx, input.Proposal, input.Confirm)
+		if err != nil && result.ProposalID == "" {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatAssistantApplyResult(result)),
+			StructuredContent: result,
+			IsError:           err != nil,
 		}, nil
 	}
 }
@@ -3371,6 +3443,73 @@ func formatProjectActivityBucket(b *strings.Builder, title string, items []core.
 		}
 		b.WriteByte('\n')
 	}
+}
+
+func formatAssistantProposal(proposal core.AssistantProposal) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Assistant proposal %s: %s\n", proposal.ID, proposal.Title)
+	if proposal.ProjectID != "" {
+		fmt.Fprintf(&b, "Project: %s\n", proposal.ProjectID)
+	}
+	if proposal.Summary != "" {
+		fmt.Fprintf(&b, "%s\n", proposal.Summary)
+	}
+	fmt.Fprintf(&b, "requires_confirmation=%t actions=%d\n", proposal.RequiresConfirmation, len(proposal.Actions))
+	for idx, action := range proposal.Actions {
+		fmt.Fprintf(&b, "%d. %s", idx+1, action.Kind)
+		if action.Title != "" {
+			fmt.Fprintf(&b, " — %s", action.Title)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatAssistantApplyResult(result core.AssistantApplyResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Assistant apply %s: %s\n", result.ProposalID, result.Status)
+	fmt.Fprintf(&b, "confirmed=%t applied=%t actions=%d/%d\n", result.Confirmed, result.Applied, result.AppliedActionCount, result.TotalActionCount)
+	if result.FailedActionIndex != nil {
+		fmt.Fprintf(&b, "failed_action_index=%d\n", *result.FailedActionIndex)
+	}
+	for idx, action := range result.Actions {
+		fmt.Fprintf(&b, "%d. [%s] %s", idx+1, action.Status, action.Kind)
+		refs := assistantActionResultRefs(action)
+		if len(refs) > 0 {
+			fmt.Fprintf(&b, " %s", strings.Join(refs, " "))
+		}
+		if action.Error != "" {
+			fmt.Fprintf(&b, " — %s", action.Error)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func assistantActionResultRefs(action core.AssistantActionResult) []string {
+	refs := make([]string, 0, 6)
+	if action.ProjectID != "" {
+		refs = append(refs, "project="+action.ProjectID)
+	}
+	if action.RoleID != "" {
+		refs = append(refs, "role="+action.RoleID)
+	}
+	if action.WorkItemID != "" {
+		refs = append(refs, "work="+action.WorkItemID)
+	}
+	if action.AssignmentID != "" {
+		refs = append(refs, "assignment="+action.AssignmentID)
+	}
+	if action.ArtifactID != "" {
+		refs = append(refs, "artifact="+action.ArtifactID)
+	}
+	if action.HandoffID != "" {
+		refs = append(refs, "handoff="+action.HandoffID)
+	}
+	if action.MemoryCandidateID != "" {
+		refs = append(refs, "memory_candidate="+action.MemoryCandidateID)
+	}
+	return refs
 }
 
 func formatMemoryEntries(title string, items []core.MemoryEntry) string {

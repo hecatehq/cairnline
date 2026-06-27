@@ -40,6 +40,11 @@ type ProjectSetupReadinessAction = core.ProjectSetupReadinessAction
 type ProjectHealth = core.ProjectHealth
 type ProjectHealthSummary = core.ProjectHealthSummary
 type ProjectHealthAttentionItem = core.ProjectHealthAttentionItem
+type AssistantProposal = core.AssistantProposal
+type AssistantAction = core.AssistantAction
+type AssistantTarget = core.AssistantTarget
+type AssistantApplyResult = core.AssistantApplyResult
+type AssistantActionResult = core.AssistantActionResult
 type ProjectOperationsBrief = core.ProjectOperationsBrief
 type ProjectOperationsCounts = core.ProjectOperationsCounts
 type ProjectOperationItem = core.ProjectOperationItem
@@ -132,6 +137,27 @@ const (
 
 	ProjectHealthStatusClear     = core.ProjectHealthStatusClear
 	ProjectHealthStatusAttention = core.ProjectHealthStatusAttention
+
+	AssistantProposalSourceAPI       = core.AssistantProposalSourceAPI
+	AssistantProposalSourceAssistant = core.AssistantProposalSourceAssistant
+
+	AssistantActionCreateProject         = core.AssistantActionCreateProject
+	AssistantActionUpdateProject         = core.AssistantActionUpdateProject
+	AssistantActionCreateRole            = core.AssistantActionCreateRole
+	AssistantActionUpdateRole            = core.AssistantActionUpdateRole
+	AssistantActionCreateWorkItem        = core.AssistantActionCreateWorkItem
+	AssistantActionUpdateWorkItem        = core.AssistantActionUpdateWorkItem
+	AssistantActionCreateAssignment      = core.AssistantActionCreateAssignment
+	AssistantActionCreateEvidence        = core.AssistantActionCreateEvidence
+	AssistantActionCreateReview          = core.AssistantActionCreateReview
+	AssistantActionCreateHandoff         = core.AssistantActionCreateHandoff
+	AssistantActionUpdateHandoff         = core.AssistantActionUpdateHandoff
+	AssistantActionCreateMemoryCandidate = core.AssistantActionCreateMemoryCandidate
+
+	AssistantApplyStatusApplied      = core.AssistantApplyStatusApplied
+	AssistantApplyStatusNeedsConfirm = core.AssistantApplyStatusNeedsConfirm
+	AssistantApplyStatusPartial      = core.AssistantApplyStatusPartial
+	AssistantApplyStatusRejected     = core.AssistantApplyStatusRejected
 
 	ProjectOperationKindAssignment      = core.ProjectOperationKindAssignment
 	ProjectOperationKindCloseoutReady   = core.ProjectOperationKindCloseoutReady

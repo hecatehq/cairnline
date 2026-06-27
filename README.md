@@ -52,6 +52,8 @@ Implemented now:
   - `projects.health`
   - `projects.operations_brief`
   - `projects.setup_readiness`
+  - `assistant.propose`
+  - `assistant.apply`
   - `profiles.list`
   - `profiles.create`
   - `profiles.update`
@@ -116,6 +118,9 @@ Implemented now:
   claimed, while claimed/running/review assignments are active
 - read-only project setup-readiness and health summaries for onboarding,
   context/profile/skill gaps, and bounded operator attention
+- deterministic assistant proposal/apply tools for confirmed project-state
+  mutations; applying a proposal can create queued assignment coordination
+  records, but it does not launch or supervise agents
 
 Planned next:
 

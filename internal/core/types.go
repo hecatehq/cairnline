@@ -221,6 +221,65 @@ type ProjectHealthAttentionItem struct {
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
+type AssistantProposal struct {
+	ID                   string            `json:"id"`
+	ProjectID            string            `json:"project_id,omitempty"`
+	Title                string            `json:"title"`
+	Summary              string            `json:"summary,omitempty"`
+	Source               string            `json:"source,omitempty"`
+	RequiresConfirmation bool              `json:"requires_confirmation"`
+	Actions              []AssistantAction `json:"actions"`
+	CreatedAt            time.Time         `json:"created_at"`
+}
+
+type AssistantAction struct {
+	Kind            string           `json:"kind"`
+	Title           string           `json:"title,omitempty"`
+	Summary         string           `json:"summary,omitempty"`
+	Target          AssistantTarget  `json:"target,omitempty"`
+	Project         *Project         `json:"project,omitempty"`
+	Role            *Role            `json:"role,omitempty"`
+	WorkItem        *WorkItem        `json:"work_item,omitempty"`
+	Assignment      *Assignment      `json:"assignment,omitempty"`
+	Evidence        *Evidence        `json:"evidence,omitempty"`
+	Review          *Review          `json:"review,omitempty"`
+	Handoff         *Handoff         `json:"handoff,omitempty"`
+	MemoryCandidate *MemoryCandidate `json:"memory_candidate,omitempty"`
+}
+
+type AssistantTarget struct {
+	ProjectID    string `json:"project_id,omitempty"`
+	RoleID       string `json:"role_id,omitempty"`
+	WorkItemID   string `json:"work_item_id,omitempty"`
+	AssignmentID string `json:"assignment_id,omitempty"`
+	ArtifactID   string `json:"artifact_id,omitempty"`
+	HandoffID    string `json:"handoff_id,omitempty"`
+}
+
+type AssistantApplyResult struct {
+	ProposalID         string                  `json:"proposal_id"`
+	Status             string                  `json:"status"`
+	Applied            bool                    `json:"applied"`
+	Confirmed          bool                    `json:"confirmed"`
+	TotalActionCount   int                     `json:"total_action_count"`
+	AppliedActionCount int                     `json:"applied_action_count"`
+	FailedActionIndex  *int                    `json:"failed_action_index,omitempty"`
+	Actions            []AssistantActionResult `json:"actions,omitempty"`
+}
+
+type AssistantActionResult struct {
+	Kind              string `json:"kind"`
+	Status            string `json:"status"`
+	ProjectID         string `json:"project_id,omitempty"`
+	RoleID            string `json:"role_id,omitempty"`
+	WorkItemID        string `json:"work_item_id,omitempty"`
+	AssignmentID      string `json:"assignment_id,omitempty"`
+	ArtifactID        string `json:"artifact_id,omitempty"`
+	HandoffID         string `json:"handoff_id,omitempty"`
+	MemoryCandidateID string `json:"memory_candidate_id,omitempty"`
+	Error             string `json:"error,omitempty"`
+}
+
 type ProjectOperationsBrief struct {
 	ProjectID string                  `json:"project_id"`
 	Status    string                  `json:"status"`
@@ -553,6 +612,27 @@ const (
 
 	ProjectHealthStatusClear     = "clear"
 	ProjectHealthStatusAttention = "attention"
+
+	AssistantProposalSourceAPI       = "api"
+	AssistantProposalSourceAssistant = "assistant"
+
+	AssistantActionCreateProject         = "create_project"
+	AssistantActionUpdateProject         = "update_project"
+	AssistantActionCreateRole            = "create_role"
+	AssistantActionUpdateRole            = "update_role"
+	AssistantActionCreateWorkItem        = "create_work_item"
+	AssistantActionUpdateWorkItem        = "update_work_item"
+	AssistantActionCreateAssignment      = "create_assignment"
+	AssistantActionCreateEvidence        = "create_evidence"
+	AssistantActionCreateReview          = "create_review"
+	AssistantActionCreateHandoff         = "create_handoff"
+	AssistantActionUpdateHandoff         = "update_handoff"
+	AssistantActionCreateMemoryCandidate = "create_memory_candidate"
+
+	AssistantApplyStatusApplied      = "applied"
+	AssistantApplyStatusNeedsConfirm = "needs_confirmation"
+	AssistantApplyStatusPartial      = "partial"
+	AssistantApplyStatusRejected     = "rejected"
 
 	ProjectOperationKindAssignment      = "assignment"
 	ProjectOperationKindCloseoutReady   = "closeout_ready"
