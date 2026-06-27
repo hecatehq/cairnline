@@ -596,6 +596,7 @@ const (
 	SkillStatusConflict  = "conflict"
 	SkillTrustWorkspace  = "workspace_skill"
 	SkillPathAgents      = ".agents/skills"
+	SkillPathHecate      = ".hecate/skills"
 	SkillPathCairnline   = ".cairnline/skills"
 
 	EvidenceTrustOperator = "operator_provided"

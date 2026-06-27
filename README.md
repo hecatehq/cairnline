@@ -33,6 +33,9 @@ Implemented now:
   collaboration artifacts
 - SQLite store for durable projects, profiles, roles, work items, assignments,
   skill metadata, assistant proposal records, and collaboration artifacts
+- project skill discovery from `.agents/skills`, Hecate-compatible
+  `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
+  guidance-linked local skill roots
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP
 - stdio MCP server with JSON-RPC framing
