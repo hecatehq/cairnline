@@ -37,7 +37,9 @@ Implemented now:
   skill metadata, assistant proposal records, and collaboration artifacts
 - project skill discovery from `.agents/skills`, Hecate-compatible
   `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
-  guidance-linked local skill roots
+  guidance-linked local skill roots; rediscovery refreshes discovered status
+  and provenance while preserving operator-edited enabled/title/description
+  and trust-label fields
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP, including assignment metadata updates that
   preserve created time and claim ownership while validating work-item, role,

@@ -249,7 +249,6 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 			item.Title = firstNonEmpty(prior.Title, item.Title)
 			item.Description = firstNonEmpty(prior.Description, item.Description)
 			item.TrustLabel = firstNonEmpty(prior.TrustLabel, item.TrustLabel)
-			item.SourceRefs = prior.SourceRefs
 			item.CreatedAt = prior.CreatedAt
 			if item.CreatedAt.IsZero() {
 				item.CreatedAt = now
