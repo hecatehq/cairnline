@@ -161,6 +161,108 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 }
 
+func TestMCPTools_AssistantProposalApply(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Assistant MCP"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	proposal := core.AssistantProposal{
+		ID:        "prop_mcp",
+		ProjectID: project.ID,
+		Title:     "Queue first assignment",
+		Actions: []core.AssistantAction{
+			{
+				Kind: core.AssistantActionCreateRole,
+				Role: &core.Role{ID: "role_mcp", ProjectID: project.ID, Name: "Operator"},
+			},
+			{
+				Kind:     core.AssistantActionCreateWorkItem,
+				WorkItem: &core.WorkItem{ID: "work_mcp", ProjectID: project.ID, Title: "MCP proposed work"},
+			},
+			{
+				Kind: core.AssistantActionCreateAssignment,
+				Assignment: &core.Assignment{
+					ID:            "asgn_mcp",
+					ProjectID:     project.ID,
+					WorkItemID:    "work_mcp",
+					RoleID:        "role_mcp",
+					ExecutionMode: core.ExecutionMCPPull,
+				},
+			},
+		},
+	}
+	proposePayload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "assistant.propose",
+			"arguments": proposal,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal propose payload: %v", err)
+	}
+	var output bytes.Buffer
+	if err := server.Serve(ctx, bytes.NewReader(append(proposePayload, '\n')), &output); err != nil {
+		t.Fatalf("Serve(propose) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Assistant proposal prop_mcp") || !strings.Contains(output.String(), "requires_confirmation=true") {
+		t.Fatalf("propose response = %s", output.String())
+	}
+	var proposeResponse struct {
+		Result struct {
+			StructuredContent core.AssistantProposal `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &proposeResponse); err != nil {
+		t.Fatalf("decode propose response: %v\n%s", err, output.String())
+	}
+	applyPayload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "assistant.apply",
+			"arguments": map[string]any{
+				"proposal": proposeResponse.Result.StructuredContent,
+				"confirm":  true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal apply payload: %v", err)
+	}
+	output.Reset()
+	if err := server.Serve(ctx, bytes.NewReader(append(applyPayload, '\n')), &output); err != nil {
+		t.Fatalf("Serve(apply) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Assistant apply prop_mcp: applied") || !strings.Contains(output.String(), "actions=3/3") {
+		t.Fatalf("apply response = %s", output.String())
+	}
+	var applyResponse struct {
+		Result struct {
+			StructuredContent core.AssistantApplyResult `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &applyResponse); err != nil {
+		t.Fatalf("decode apply response: %v\n%s", err, output.String())
+	}
+	if !applyResponse.Result.StructuredContent.Applied || applyResponse.Result.StructuredContent.AppliedActionCount != 3 {
+		t.Fatalf("apply result = %+v, want full confirmed apply", applyResponse.Result.StructuredContent)
+	}
+	assignment, err := service.GetAssignment(ctx, project.ID, "asgn_mcp")
+	if err != nil {
+		t.Fatalf("GetAssignment() error = %v", err)
+	}
+	if assignment.Status != core.AssignmentQueued {
+		t.Fatalf("assignment = %+v, want queued", assignment)
+	}
+}
+
 func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
