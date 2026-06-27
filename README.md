@@ -39,7 +39,9 @@ Implemented now:
   `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
   guidance-linked local skill roots
 - embeddable Go API for applications that want to use the coordination core
-  directly instead of speaking MCP
+  directly instead of speaking MCP, including assignment metadata updates that
+  preserve created time and claim ownership while validating work-item, role,
+  root, profile, and execution-profile references
 - stdio MCP server with JSON-RPC framing
 - MCP resources:
   - `cairnline://projects/{project_id}`
@@ -88,6 +90,7 @@ Implemented now:
   - `assignments.get`
   - `assignments.next`
   - `assignments.create`
+  - `assignments.update`
   - `assignments.claim`
   - `assignments.update_status`
   - `assignments.context`
