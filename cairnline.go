@@ -60,6 +60,7 @@ type Assignment = core.Assignment
 type AssignmentCompatibilityFilter = core.AssignmentCompatibilityFilter
 type AssignmentContext = core.AssignmentContext
 type AssignmentLaunchPacket = core.AssignmentLaunchPacket
+type Artifact = core.Artifact
 type Evidence = core.Evidence
 type Review = core.Review
 type Handoff = core.Handoff

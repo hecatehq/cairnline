@@ -438,6 +438,20 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("assignment root = %q, want root_review", assignments[0].RootID)
 	}
 	assignmentID := assignments[0].ID
+	artifact, err := service.CreateArtifact(ctx, core.Artifact{
+		ProjectID:      project.ID,
+		WorkItemID:     work.ID,
+		AssignmentID:   assignmentID,
+		Kind:           "decision_note",
+		Title:          "Decision",
+		Body:           "Record a generic collaboration artifact.",
+		AuthorRoleID:   role.ID,
+		ProvenanceKind: "operator",
+		TrustLabel:     "operator_reviewed",
+	})
+	if err != nil {
+		t.Fatalf("CreateArtifact() error = %v", err)
+	}
 
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"assignments.next","arguments":{"project_id":"` + project.ID + `","agent_kind":"any","skill_ids":["review"]}}}` + "\n",
@@ -646,8 +660,11 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if len(packet.Memory) != 1 || packet.Memory[0].Title != "Accepted review convention" {
 		t.Fatalf("launch packet memory = %+v, want accepted memory entry", packet.Memory)
 	}
-	if len(packet.Evidence) != 1 || len(packet.Reviews) != 1 || len(packet.Handoffs) != 1 || len(packet.MemoryCandidates) != 1 {
-		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.MemoryCandidates))
+	if len(packet.Artifacts) != 1 || len(packet.Evidence) != 1 || len(packet.Reviews) != 1 || len(packet.Handoffs) != 1 || len(packet.MemoryCandidates) != 1 {
+		t.Fatalf("launch packet artifact counts artifacts=%d evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(packet.Artifacts), len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.MemoryCandidates))
+	}
+	if packet.Artifacts[0].ID != artifact.ID || packet.Artifacts[0].Kind != "decision_note" {
+		t.Fatalf("launch packet artifacts = %+v, want generic artifact", packet.Artifacts)
 	}
 
 	input = strings.NewReader(
@@ -810,10 +827,11 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("Serve() resources/list error = %v", err)
 	}
 	projectURI := "cairnline://projects/" + project.ID
+	workItemURI := projectURI + "/work-items/" + work.ID
 	readinessURI := projectURI + "/work-items/" + work.ID + "/closeout-readiness"
 	launchURI := projectURI + "/assignments/" + assignmentID + "/launch-packet"
 	candidateURI := projectURI + "/memory-candidates/" + candidateID
-	if got := output.String(); !strings.Contains(got, projectURI) || !strings.Contains(got, readinessURI) || !strings.Contains(got, launchURI) || !strings.Contains(got, candidateURI) {
+	if got := output.String(); !strings.Contains(got, projectURI) || !strings.Contains(got, workItemURI) || !strings.Contains(got, readinessURI) || !strings.Contains(got, launchURI) || !strings.Contains(got, candidateURI) {
 		t.Fatalf("resources/list response = %s, want project, readiness, launch packet, and memory candidate resources", got)
 	}
 
@@ -830,7 +848,26 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":22,"method":"resources/read","params":{"uri":"` + readinessURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":22,"method":"resources/read","params":{"uri":"` + workItemURI + `"}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() work item resources/read error = %v", err)
+	}
+	workItemResourceResponse := readSingleResourceResponse(t, output.Bytes())
+	if workItemResourceResponse.URI != workItemURI || workItemResourceResponse.MimeType != "application/json" {
+		t.Fatalf("work item resource content = %+v, want JSON work item resource", workItemResourceResponse)
+	}
+	var workItemFromResource workItemResourcePayload
+	if err := json.Unmarshal([]byte(workItemResourceResponse.Text), &workItemFromResource); err != nil {
+		t.Fatalf("work item resource text did not unmarshal: %v\n%s", err, workItemResourceResponse.Text)
+	}
+	if len(workItemFromResource.Artifacts) != 1 || workItemFromResource.Artifacts[0].ID != artifact.ID || len(workItemFromResource.Evidence) != 1 || len(workItemFromResource.Reviews) != 1 || len(workItemFromResource.Handoffs) != 1 {
+		t.Fatalf("work item resource = %+v, want generic artifact plus collaboration records", workItemFromResource)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":23,"method":"resources/read","params":{"uri":"` + readinessURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -849,7 +886,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":23,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":24,"method":"resources/read","params":{"uri":"` + launchURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -868,7 +905,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":24,"method":"resources/read","params":{"uri":"` + candidateURI + `"}}` + "\n",
+		`{"jsonrpc":"2.0","id":25,"method":"resources/read","params":{"uri":"` + candidateURI + `"}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

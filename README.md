@@ -4,9 +4,9 @@ Cairnline is an experimental local-first coordination server for human and AI
 work.
 
 It provides durable project identity, work coordination, context metadata,
-evidence, reviews, handoffs, accepted project memory, and memory-candidate
-concepts without assuming that any specific agent host can be launched or
-supervised.
+collaboration artifacts, evidence, reviews, handoffs, accepted project memory,
+and memory-candidate concepts without assuming that any specific agent host can
+be launched or supervised.
 
 Initial status: early implementation. Cairnline is usable as an experimental
 local MCP server, but its contracts are not stable yet.
@@ -26,9 +26,9 @@ Implemented now:
 
 - portable core types for projects with roots/default root metadata, context
   source provenance metadata, roles with agent/execution-profile defaults,
-  profiles, work items, assignments, skill metadata, assignment-scoped evidence,
-  reviews, handoffs with source/target refs, accepted memory, and memory
-  candidates
+  profiles, work items, assignments, skill metadata, generic collaboration
+  artifacts, assignment-scoped evidence, reviews, handoffs with source/target
+  refs, accepted memory, and memory candidates
 - in-memory service for projects, profiles, roles, work items, assignments,
   assistant proposal records including project-root/default-root actions, and
   collaboration artifacts
@@ -114,7 +114,8 @@ Implemented now:
   - `memory_candidates.reject`
   - `memory_candidates.delete`
 - assignment launch packets with resolved profile, execution-profile, skill,
-  artifact, handoff, accepted-memory, and memory-candidate metadata
+  generic-artifact, evidence, review, handoff, accepted-memory, and
+  memory-candidate metadata
 - read-only work-item closeout readiness summaries derived from assignment,
   evidence, review, and handoff metadata
 - read-only project operations briefs for attention routing across active

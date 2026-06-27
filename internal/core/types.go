@@ -454,6 +454,7 @@ type AssignmentLaunchPacket struct {
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	Skills           []ProjectSkill    `json:"skills,omitempty"`
 	Assignment       Assignment        `json:"assignment"`
+	Artifacts        []Artifact        `json:"artifacts,omitempty"`
 	Evidence         []Evidence        `json:"evidence,omitempty"`
 	Reviews          []Review          `json:"reviews,omitempty"`
 	Handoffs         []Handoff         `json:"handoffs,omitempty"`
@@ -461,6 +462,21 @@ type AssignmentLaunchPacket struct {
 	MemoryCandidates []MemoryCandidate `json:"memory_candidates,omitempty"`
 	Warnings         []string          `json:"warnings,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
+}
+
+type Artifact struct {
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	WorkItemID     string    `json:"work_item_id"`
+	AssignmentID   string    `json:"assignment_id,omitempty"`
+	Kind           string    `json:"kind"`
+	Title          string    `json:"title,omitempty"`
+	Body           string    `json:"body"`
+	AuthorRoleID   string    `json:"author_role_id,omitempty"`
+	ProvenanceKind string    `json:"provenance_kind,omitempty"`
+	TrustLabel     string    `json:"trust_label,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Evidence struct {

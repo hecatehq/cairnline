@@ -16,6 +16,7 @@ type MemoryStore struct {
 	workItems   map[string]map[string]WorkItem
 	roles       map[string]map[string]Role
 	assignments map[string]map[string]Assignment
+	artifacts   map[string]map[string]Artifact
 	evidence    map[string]map[string]Evidence
 	reviews     map[string]map[string]Review
 	handoffs    map[string]map[string]Handoff
@@ -33,6 +34,7 @@ func NewMemoryStore() *MemoryStore {
 		workItems:   make(map[string]map[string]WorkItem),
 		roles:       make(map[string]map[string]Role),
 		assignments: make(map[string]map[string]Assignment),
+		artifacts:   make(map[string]map[string]Artifact),
 		evidence:    make(map[string]map[string]Evidence),
 		reviews:     make(map[string]map[string]Review),
 		handoffs:    make(map[string]map[string]Handoff),
@@ -101,6 +103,7 @@ func (s *MemoryStore) DeleteProject(ctx context.Context, id string) error {
 	delete(s.workItems, id)
 	delete(s.roles, id)
 	delete(s.assignments, id)
+	delete(s.artifacts, id)
 	delete(s.evidence, id)
 	delete(s.reviews, id)
 	delete(s.handoffs, id)
@@ -355,6 +358,11 @@ func (s *MemoryStore) DeleteWorkItem(ctx context.Context, projectID, id string) 
 			delete(s.evidence[projectID], evidenceID)
 		}
 	}
+	for artifactID, item := range s.artifacts[projectID] {
+		if item.WorkItemID == id {
+			delete(s.artifacts[projectID], artifactID)
+		}
+	}
 	for reviewID, item := range s.reviews[projectID] {
 		if item.WorkItemID == id {
 			delete(s.reviews[projectID], reviewID)
@@ -538,6 +546,11 @@ func (s *MemoryStore) DeleteAssignment(ctx context.Context, projectID, id string
 		return ErrNotFound
 	}
 	delete(s.assignments[projectID], id)
+	for artifactID, artifact := range s.artifacts[projectID] {
+		if artifact.AssignmentID == id {
+			delete(s.artifacts[projectID], artifactID)
+		}
+	}
 	for reviewID, review := range s.reviews[projectID] {
 		if review.AssignmentID == id {
 			delete(s.reviews[projectID], reviewID)
@@ -555,6 +568,70 @@ func compareString(a, b string) int {
 	default:
 		return 0
 	}
+}
+
+func (s *MemoryStore) ListArtifacts(ctx context.Context, projectID, workItemID string) ([]Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return nil, err
+	}
+	items := make([]Artifact, 0, len(s.artifacts[projectID]))
+	for _, item := range s.artifacts[projectID] {
+		if item.WorkItemID == workItemID {
+			items = append(items, item)
+		}
+	}
+	slices.SortFunc(items, func(a, b Artifact) int {
+		if cmp := a.CreatedAt.Compare(b.CreatedAt); cmp != 0 {
+			return cmp
+		}
+		return compareString(a.ID, b.ID)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) GetArtifact(ctx context.Context, projectID, workItemID, id string) (Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return Artifact{}, err
+	}
+	item, ok := s.artifacts[projectID][id]
+	if !ok || item.WorkItemID != workItemID {
+		return Artifact{}, ErrNotFound
+	}
+	return item, nil
+}
+
+func (s *MemoryStore) CreateArtifact(ctx context.Context, artifact Artifact) (Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(artifact.ProjectID, artifact.WorkItemID); err != nil {
+		return Artifact{}, err
+	}
+	if artifact.AssignmentID != "" {
+		assignment, ok := s.assignments[artifact.ProjectID][artifact.AssignmentID]
+		if !ok || assignment.WorkItemID != artifact.WorkItemID {
+			return Artifact{}, ErrNotFound
+		}
+	}
+	if artifact.AuthorRoleID != "" {
+		if _, ok := s.roles[artifact.ProjectID][artifact.AuthorRoleID]; !ok {
+			return Artifact{}, ErrNotFound
+		}
+	}
+	if s.artifacts[artifact.ProjectID] == nil {
+		s.artifacts[artifact.ProjectID] = make(map[string]Artifact)
+	}
+	if _, ok := s.artifacts[artifact.ProjectID][artifact.ID]; ok {
+		return Artifact{}, ErrDuplicate
+	}
+	s.artifacts[artifact.ProjectID][artifact.ID] = artifact
+	return artifact, nil
 }
 
 func (s *MemoryStore) ListEvidence(ctx context.Context, projectID, workItemID string) ([]Evidence, error) {
