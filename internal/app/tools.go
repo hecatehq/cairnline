@@ -697,6 +697,58 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, deleteAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "artifacts.list",
+		Title:       "List collaboration artifacts",
+		Description: "List generic collaboration artifacts recorded for a work item.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id"]
+		}`),
+		Annotations: readOnly,
+	}, listArtifacts(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "artifacts.get",
+		Title:       "Get collaboration artifact",
+		Description: "Get one generic collaboration artifact by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"artifact_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id","artifact_id"]
+		}`),
+		Annotations: readOnly,
+	}, getArtifact(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "artifacts.create",
+		Title:       "Create collaboration artifact",
+		Description: "Record a generic collaboration artifact such as a brief, decision note, or handoff summary.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string"},
+				"kind":{"type":"string","minLength":1},
+				"title":{"type":"string"},
+				"body":{"type":"string","minLength":1},
+				"author_role_id":{"type":"string"},
+				"provenance_kind":{"type":"string"},
+				"trust_label":{"type":"string"}
+			},
+			"required":["project_id","work_item_id","kind","body"]
+		}`),
+	}, createArtifact(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "evidence.list",
 		Title:       "List evidence",
 		Description: "List proof, output, or external locators recorded for a work item.",
@@ -2349,6 +2401,87 @@ func deleteAssignment(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func listArtifacts(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListArtifacts(ctx, input.ProjectID, input.WorkItemID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatArtifacts("Artifacts", items)),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func getArtifact(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+		ArtifactID string `json:"artifact_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetArtifact(ctx, input.ProjectID, input.WorkItemID, input.ArtifactID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatArtifacts("Artifacts", []core.Artifact{item})),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func createArtifact(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID      string `json:"project_id"`
+		WorkItemID     string `json:"work_item_id"`
+		AssignmentID   string `json:"assignment_id"`
+		Kind           string `json:"kind"`
+		Title          string `json:"title"`
+		Body           string `json:"body"`
+		AuthorRoleID   string `json:"author_role_id"`
+		ProvenanceKind string `json:"provenance_kind"`
+		TrustLabel     string `json:"trust_label"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.CreateArtifact(ctx, core.Artifact{
+			ProjectID:      input.ProjectID,
+			WorkItemID:     input.WorkItemID,
+			AssignmentID:   input.AssignmentID,
+			Kind:           input.Kind,
+			Title:          input.Title,
+			Body:           input.Body,
+			AuthorRoleID:   input.AuthorRoleID,
+			ProvenanceKind: input.ProvenanceKind,
+			TrustLabel:     input.TrustLabel,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Created artifact %s: %s", item.ID, item.Title)),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
 func listEvidence(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID  string `json:"project_id"`
@@ -3243,6 +3376,31 @@ func formatAssignments(title string, items []core.Assignment) string {
 		}
 		if len(item.DesiredAgent.SkillIDs) > 0 {
 			fmt.Fprintf(&b, " skills=%s", strings.Join(item.DesiredAgent.SkillIDs, ","))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatArtifacts(title string, items []core.Artifact) string {
+	if len(items) == 0 {
+		return "No artifacts."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s: [%s]", item.ID, item.Kind)
+		if item.Title != "" {
+			fmt.Fprintf(&b, " %s", item.Title)
+		}
+		if item.AssignmentID != "" {
+			fmt.Fprintf(&b, " assignment=%s", item.AssignmentID)
+		}
+		if item.AuthorRoleID != "" {
+			fmt.Fprintf(&b, " author_role=%s", item.AuthorRoleID)
+		}
+		if item.TrustLabel != "" {
+			fmt.Fprintf(&b, " trust=%s", item.TrustLabel)
 		}
 		b.WriteByte('\n')
 	}

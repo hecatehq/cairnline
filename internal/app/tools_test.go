@@ -438,19 +438,50 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("assignment root = %q, want root_review", assignments[0].RootID)
 	}
 	assignmentID := assignments[0].ID
-	artifact, err := service.CreateArtifact(ctx, core.Artifact{
-		ProjectID:      project.ID,
-		WorkItemID:     work.ID,
-		AssignmentID:   assignmentID,
-		Kind:           "decision_note",
-		Title:          "Decision",
-		Body:           "Record a generic collaboration artifact.",
-		AuthorRoleID:   role.ID,
-		ProvenanceKind: "operator",
-		TrustLabel:     "operator_reviewed",
-	})
-	if err != nil {
-		t.Fatalf("CreateArtifact() error = %v", err)
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"artifacts.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","kind":"decision_note","title":"Decision","body":"Record a generic collaboration artifact.","author_role_id":"` + role.ID + `","provenance_kind":"operator","trust_label":"operator_reviewed"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create artifact error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created artifact art_") {
+		t.Fatalf("create artifact response = %s", output.String())
+	}
+	var artifactResponse struct {
+		Result struct {
+			StructuredContent core.Artifact `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &artifactResponse); err != nil {
+		t.Fatalf("create artifact response did not unmarshal: %v\n%s", err, output.String())
+	}
+	artifact := artifactResponse.Result.StructuredContent
+	if artifact.Kind != "decision_note" || artifact.AssignmentID != assignmentID || artifact.AuthorRoleID != role.ID || artifact.TrustLabel != "operator_reviewed" {
+		t.Fatalf("created artifact = %+v, want generic artifact metadata", artifact)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"artifacts.list","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list artifacts error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Artifacts (1):") || !strings.Contains(output.String(), "decision_note") {
+		t.Fatalf("list artifacts response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"artifacts.get","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","artifact_id":"` + artifact.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get artifact error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Artifacts (1):") || !strings.Contains(got, artifact.ID) {
+		t.Fatalf("get artifact response = %s", got)
 	}
 
 	input = strings.NewReader(
