@@ -599,6 +599,7 @@ description: Work on backend code with tests.
 Body should not be stored in the skill registry.
 `)
 	writeSkill(t, root, SkillPathHecate, "qa", "# QA reviewer\n")
+	writeSkill(t, root, SkillPathCairnline, "planning", "# Planning\n")
 
 	project, err := service.CreateProject(ctx, Project{
 		Name: "Skill project",
@@ -616,8 +617,8 @@ Body should not be stored in the skill registry.
 	if err != nil {
 		t.Fatalf("DiscoverProjectSkills() error = %v", err)
 	}
-	if len(skills) != 2 {
-		t.Fatalf("skills = %+v, want two discovered skills", skills)
+	if len(skills) != 3 {
+		t.Fatalf("skills = %+v, want three discovered skills", skills)
 	}
 	skill := findProjectSkillForTest(skills, "backend")
 	if skill == nil {
@@ -632,6 +633,10 @@ Body should not be stored in the skill registry.
 	qa := findProjectSkillForTest(skills, "qa")
 	if qa == nil || qa.Path != ".hecate/skills/qa/SKILL.md" || qa.Title != "QA reviewer" {
 		t.Fatalf("qa skill = %+v, want Hecate-compatible discovered skill", qa)
+	}
+	planning := findProjectSkillForTest(skills, "planning")
+	if planning == nil || planning.Path != ".cairnline/skills/planning/SKILL.md" || planning.Title != "Planning" {
+		t.Fatalf("planning skill = %+v, want Cairnline-native discovered skill", planning)
 	}
 
 	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
@@ -814,6 +819,91 @@ func TestService_ProjectSkillsDiscoveryUsesGuidanceLinkedRoots(t *testing.T) {
 	}
 	if disabled := findProjectSkillForTest(skills, "disabled"); disabled != nil {
 		t.Fatalf("disabled-source skill = %+v, want disabled guidance source skipped", disabled)
+	}
+}
+
+func TestService_ProjectSkillsRediscoveryPreservesOperatorOverridesAndRefreshesSourceRefs(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	root := t.TempDir()
+	writeSkill(t, root, "docs-ai/skills", "backend", `---
+name: Backend implementer
+description: Original description.
+---
+# Backend
+`)
+	writeProjectTestFile(t, root, "AGENTS.md", "Use docs-ai/skills/backend/SKILL.md.\n")
+	writeProjectTestFile(t, root, "CLAUDE.md", "Use docs-ai/skills/backend/SKILL.md.\n")
+
+	project, err := service.CreateProject(ctx, Project{
+		Name: "Rediscover skills",
+		Roots: []Root{{
+			ID:     "root_main",
+			Path:   root,
+			Kind:   "workspace",
+			Active: true,
+		}},
+		ContextSources: []Source{{
+			ID:      "src_agents",
+			Kind:    "workspace_instruction",
+			Title:   "AGENTS.md",
+			Locator: "AGENTS.md",
+			Enabled: true,
+			Format:  "agents_md",
+			Metadata: map[string]string{
+				"root_id": "root_main",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	skills, err := service.DiscoverProjectSkills(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("DiscoverProjectSkills() error = %v", err)
+	}
+	backend := findProjectSkillForTest(skills, "backend")
+	if backend == nil {
+		t.Fatalf("skills = %+v, missing backend skill", skills)
+	}
+	if !containsString(backend.SourceRefs, "src_agents") {
+		t.Fatalf("backend source refs = %+v, want initial AGENTS.md provenance", backend.SourceRefs)
+	}
+	backend.Enabled = false
+	backend.Title = "Operator backend"
+	backend.Description = "Operator-curated description."
+	backend.TrustLabel = "operator_reviewed"
+	if _, err := service.UpdateProjectSkill(ctx, *backend); err != nil {
+		t.Fatalf("UpdateProjectSkill() error = %v", err)
+	}
+
+	project.ContextSources = []Source{{
+		ID:      "src_claude",
+		Kind:    "workspace_instruction",
+		Title:   "CLAUDE.md",
+		Locator: "CLAUDE.md",
+		Enabled: true,
+		Format:  "claude_md",
+		Metadata: map[string]string{
+			"root_id": "root_main",
+		},
+	}}
+	if _, err := service.UpdateProject(ctx, project); err != nil {
+		t.Fatalf("UpdateProject() error = %v", err)
+	}
+	skills, err = service.DiscoverProjectSkills(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("DiscoverProjectSkills() rediscover error = %v", err)
+	}
+	backend = findProjectSkillForTest(skills, "backend")
+	if backend == nil {
+		t.Fatalf("skills = %+v, missing backend skill after rediscovery", skills)
+	}
+	if backend.Enabled || backend.Title != "Operator backend" || backend.Description != "Operator-curated description." || backend.TrustLabel != "operator_reviewed" {
+		t.Fatalf("backend after rediscovery = %+v, want operator overrides preserved", backend)
+	}
+	if !containsString(backend.SourceRefs, "src_claude") || containsString(backend.SourceRefs, "src_agents") {
+		t.Fatalf("backend source refs = %+v, want refreshed CLAUDE.md provenance only", backend.SourceRefs)
 	}
 }
 
