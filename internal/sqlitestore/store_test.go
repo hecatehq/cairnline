@@ -939,6 +939,7 @@ func TestStore_PersistsAssistantProposalLedger(t *testing.T) {
 		ID:        "prop_sqlite",
 		ProjectID: project.ID,
 		Title:     "Create persisted work",
+		Warnings:  []string{"persist warning"},
 		Actions: []core.AssistantAction{
 			{
 				Kind: core.AssistantActionCreateRole,
@@ -978,7 +979,7 @@ func TestStore_PersistsAssistantProposalLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAssistantProposals() error = %v", err)
 	}
-	if len(records) != 1 || records[0].ID != record.ID || records[0].Status != core.AssistantProposalStatusApplied || records[0].LatestResult == nil || len(records[0].ApplyAttempts) != 1 || records[0].AppliedAt == nil {
+	if len(records) != 1 || records[0].ID != record.ID || records[0].Status != core.AssistantProposalStatusApplied || records[0].LatestResult == nil || len(records[0].ApplyAttempts) != 1 || records[0].AppliedAt == nil || len(records[0].Proposal.Warnings) != 1 || records[0].Proposal.Warnings[0] != "persist warning" {
 		t.Fatalf("records = %+v, want persisted applied proposal ledger", records)
 	}
 	if _, err := reopenedService.ApplyAssistantProposalRecord(ctx, record.ID, true); !errors.Is(err, core.ErrConflict) {

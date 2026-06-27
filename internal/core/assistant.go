@@ -152,6 +152,7 @@ func normalizeAssistantProposal(input AssistantProposal, now func() time.Time) A
 		ProjectID:            strings.TrimSpace(input.ProjectID),
 		Title:                strings.TrimSpace(input.Title),
 		Summary:              strings.TrimSpace(input.Summary),
+		Warnings:             compactStrings(input.Warnings),
 		Source:               source,
 		RequiresConfirmation: true,
 		CreatedAt:            createdAt,
@@ -607,6 +608,7 @@ func assistantProposalProjectID(proposal AssistantProposal) string {
 
 func cloneAssistantProposal(input AssistantProposal) AssistantProposal {
 	out := input
+	out.Warnings = append([]string(nil), input.Warnings...)
 	out.Actions = cloneAssistantActions(input.Actions)
 	return out
 }

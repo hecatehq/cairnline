@@ -1505,6 +1505,7 @@ func TestService_AssistantProposalRecordLifecycle(t *testing.T) {
 		ID:        "prop_record",
 		ProjectID: project.ID,
 		Title:     "Queue reviewable work",
+		Warnings:  []string{"confirm operator intent", "confirm operator intent", " "},
 		Actions: []AssistantAction{
 			{
 				Kind: AssistantActionCreateRole,
@@ -1541,11 +1542,14 @@ func TestService_AssistantProposalRecordLifecycle(t *testing.T) {
 	if record.ID != proposal.ID || record.Status != AssistantProposalStatusProposed || record.ProjectID != project.ID || len(record.ApplyAttempts) != 0 {
 		t.Fatalf("record = %+v, want proposed project-scoped record", record)
 	}
+	if len(record.Proposal.Warnings) != 1 || record.Proposal.Warnings[0] != "confirm operator intent" {
+		t.Fatalf("record warnings = %+v, want compacted proposal warnings", record.Proposal.Warnings)
+	}
 	listed, err := service.ListAssistantProposals(ctx, project.ID)
 	if err != nil {
 		t.Fatalf("ListAssistantProposals() error = %v", err)
 	}
-	if len(listed) != 1 || listed[0].ID != record.ID {
+	if len(listed) != 1 || listed[0].ID != record.ID || len(listed[0].Proposal.Warnings) != 1 {
 		t.Fatalf("listed = %+v, want proposal record", listed)
 	}
 	needsConfirm, err := service.ApplyAssistantProposalRecord(ctx, record.ID, false)
@@ -1653,6 +1657,7 @@ func TestService_ImportAssistantProposalRecordPreservesLedgerWithoutApplying(t *
 			ID:        "prop_import",
 			ProjectID: project.ID,
 			Title:     "Imported proposal",
+			Warnings:  []string{"imported proposal warning"},
 			Actions: []AssistantAction{{
 				Kind: AssistantActionCreateWorkItem,
 				WorkItem: &WorkItem{
@@ -1695,6 +1700,9 @@ func TestService_ImportAssistantProposalRecordPreservesLedgerWithoutApplying(t *
 	}
 	if record.Status != AssistantProposalStatusApplied || record.LatestResult == nil || len(record.ApplyAttempts) != 1 || record.AppliedAt == nil {
 		t.Fatalf("imported record = %+v, want applied ledger state", record)
+	}
+	if len(record.Proposal.Warnings) != 1 || record.Proposal.Warnings[0] != "imported proposal warning" {
+		t.Fatalf("imported warnings = %+v, want imported warnings preserved", record.Proposal.Warnings)
 	}
 	if _, err := service.GetWorkItem(ctx, project.ID, "work_imported"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetWorkItem() after import error = %v, want ErrNotFound because import must not apply actions", err)
