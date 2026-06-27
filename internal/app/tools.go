@@ -510,6 +510,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"description":{"type":"string"},
 				"instructions":{"type":"string"},
 				"default_profile_id":{"type":"string"},
+				"default_execution_profile_id":{"type":"string"},
 				"default_skill_ids":{"type":"array","items":{"type":"string"}},
 				"default_execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]}
 			},
@@ -530,6 +531,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"description":{"type":"string"},
 				"instructions":{"type":"string"},
 				"default_profile_id":{"type":"string"},
+				"default_execution_profile_id":{"type":"string"},
 				"default_skill_ids":{"type":"array","items":{"type":"string"}},
 				"default_execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]}
 			},
@@ -1985,6 +1987,9 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 			if item.DefaultExecutionMode != "" {
 				fmt.Fprintf(&b, " (%s)", item.DefaultExecutionMode)
 			}
+			if item.DefaultExecutionProfileID != "" {
+				fmt.Fprintf(&b, " exec=%s", item.DefaultExecutionProfileID)
+			}
 			b.WriteByte('\n')
 		}
 		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
@@ -1993,13 +1998,14 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 
 func createRole(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID            string   `json:"project_id"`
-		Name                 string   `json:"name"`
-		Description          string   `json:"description"`
-		Instructions         string   `json:"instructions"`
-		DefaultProfileID     string   `json:"default_profile_id"`
-		DefaultSkillIDs      []string `json:"default_skill_ids"`
-		DefaultExecutionMode string   `json:"default_execution_mode"`
+		ProjectID                 string   `json:"project_id"`
+		Name                      string   `json:"name"`
+		Description               string   `json:"description"`
+		Instructions              string   `json:"instructions"`
+		DefaultProfileID          string   `json:"default_profile_id"`
+		DefaultExecutionProfileID string   `json:"default_execution_profile_id"`
+		DefaultSkillIDs           []string `json:"default_skill_ids"`
+		DefaultExecutionMode      string   `json:"default_execution_mode"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2007,13 +2013,14 @@ func createRole(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateRole(ctx, core.Role{
-			ProjectID:            input.ProjectID,
-			Name:                 input.Name,
-			Description:          input.Description,
-			Instructions:         input.Instructions,
-			DefaultProfileID:     input.DefaultProfileID,
-			DefaultSkillIDs:      input.DefaultSkillIDs,
-			DefaultExecutionMode: input.DefaultExecutionMode,
+			ProjectID:                 input.ProjectID,
+			Name:                      input.Name,
+			Description:               input.Description,
+			Instructions:              input.Instructions,
+			DefaultProfileID:          input.DefaultProfileID,
+			DefaultExecutionProfileID: input.DefaultExecutionProfileID,
+			DefaultSkillIDs:           input.DefaultSkillIDs,
+			DefaultExecutionMode:      input.DefaultExecutionMode,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -2026,14 +2033,15 @@ func createRole(service *core.Service) mcp.ToolHandler {
 
 func updateRole(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID            string    `json:"project_id"`
-		ID                   string    `json:"id"`
-		Name                 *string   `json:"name"`
-		Description          *string   `json:"description"`
-		Instructions         *string   `json:"instructions"`
-		DefaultProfileID     *string   `json:"default_profile_id"`
-		DefaultSkillIDs      *[]string `json:"default_skill_ids"`
-		DefaultExecutionMode *string   `json:"default_execution_mode"`
+		ProjectID                 string    `json:"project_id"`
+		ID                        string    `json:"id"`
+		Name                      *string   `json:"name"`
+		Description               *string   `json:"description"`
+		Instructions              *string   `json:"instructions"`
+		DefaultProfileID          *string   `json:"default_profile_id"`
+		DefaultExecutionProfileID *string   `json:"default_execution_profile_id"`
+		DefaultSkillIDs           *[]string `json:"default_skill_ids"`
+		DefaultExecutionMode      *string   `json:"default_execution_mode"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2065,6 +2073,9 @@ func updateRole(service *core.Service) mcp.ToolHandler {
 		}
 		if input.DefaultProfileID != nil {
 			existing.DefaultProfileID = *input.DefaultProfileID
+		}
+		if input.DefaultExecutionProfileID != nil {
+			existing.DefaultExecutionProfileID = *input.DefaultExecutionProfileID
 		}
 		if input.DefaultSkillIDs != nil {
 			existing.DefaultSkillIDs = *input.DefaultSkillIDs

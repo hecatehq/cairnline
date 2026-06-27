@@ -56,14 +56,15 @@ type ProjectSkill struct {
 }
 
 type Role struct {
-	ID                   string   `json:"id"`
-	ProjectID            string   `json:"project_id"`
-	Name                 string   `json:"name"`
-	Description          string   `json:"description,omitempty"`
-	Instructions         string   `json:"instructions,omitempty"`
-	DefaultProfileID     string   `json:"default_profile_id,omitempty"`
-	DefaultSkillIDs      []string `json:"default_skill_ids,omitempty"`
-	DefaultExecutionMode string   `json:"default_execution_mode,omitempty"`
+	ID                        string   `json:"id"`
+	ProjectID                 string   `json:"project_id"`
+	Name                      string   `json:"name"`
+	Description               string   `json:"description,omitempty"`
+	Instructions              string   `json:"instructions,omitempty"`
+	DefaultProfileID          string   `json:"default_profile_id,omitempty"`
+	DefaultExecutionProfileID string   `json:"default_execution_profile_id,omitempty"`
+	DefaultSkillIDs           []string `json:"default_skill_ids,omitempty"`
+	DefaultExecutionMode      string   `json:"default_execution_mode,omitempty"`
 }
 
 type AgentProfile struct {

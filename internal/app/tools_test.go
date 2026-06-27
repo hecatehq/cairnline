@@ -380,10 +380,11 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("projects = %+v, want default root to follow replacement roots", projects)
 	}
 	role, err := service.CreateRole(ctx, core.Role{
-		ProjectID:        project.ID,
-		Name:             "Reviewer",
-		Instructions:     "Review evidence.",
-		DefaultProfileID: "profile_reviewer",
+		ProjectID:                 project.ID,
+		Name:                      "Reviewer",
+		Instructions:              "Review evidence.",
+		DefaultProfileID:          "profile_reviewer",
+		DefaultExecutionProfileID: "exec_local",
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -402,8 +403,8 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRoles() error = %v", err)
 	}
-	if len(updatedRoles) != 1 || updatedRoles[0].DefaultProfileID != "profile_reviewer" || updatedRoles[0].Name != "Senior reviewer" {
-		t.Fatalf("updated roles = %+v, want patch preserving default profile", updatedRoles)
+	if len(updatedRoles) != 1 || updatedRoles[0].DefaultProfileID != "profile_reviewer" || updatedRoles[0].DefaultExecutionProfileID != "exec_local" || updatedRoles[0].Name != "Senior reviewer" {
+		t.Fatalf("updated roles = %+v, want patch preserving default profiles", updatedRoles)
 	}
 	work, err := service.CreateWorkItem(ctx, core.WorkItem{
 		ProjectID: project.ID,
