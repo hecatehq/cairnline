@@ -237,6 +237,19 @@ func (s *Store) migrate(ctx context.Context) error {
 			PRIMARY KEY (project_id, id),
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS assistant_proposals (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			source_id TEXT NOT NULL DEFAULT '',
+			proposal_json TEXT NOT NULL,
+			status TEXT NOT NULL,
+			latest_result_json TEXT NOT NULL DEFAULT '',
+			apply_attempts_json TEXT NOT NULL DEFAULT '[]',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			applied_at TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -391,6 +404,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		"handoffs",
 		"memory_candidates",
 		"memory_entries",
+		"assistant_proposals",
 		"assignments",
 		"project_skills",
 		"work_items",
@@ -1253,9 +1267,78 @@ func (s *Store) PromoteMemoryCandidate(ctx context.Context, projectID, id string
 	return candidate, entry, nil
 }
 
+func (s *Store) ListAssistantProposals(ctx context.Context, projectID string) ([]core.AssistantProposalRecord, error) {
+	query := assistantProposalSelectSQL
+	var args []any
+	if projectID != "" {
+		query += ` WHERE project_id = ?`
+		args = append(args, projectID)
+	}
+	query += ` ORDER BY updated_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.AssistantProposalRecord
+	for rows.Next() {
+		item, err := scanAssistantProposalRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetAssistantProposal(ctx context.Context, id string) (core.AssistantProposalRecord, error) {
+	row := s.db.QueryRowContext(ctx, assistantProposalSelectSQL+` WHERE id = ?`, id)
+	return scanAssistantProposalRecord(row)
+}
+
+func (s *Store) CreateAssistantProposal(ctx context.Context, record core.AssistantProposalRecord) (core.AssistantProposalRecord, error) {
+	proposal, latestResult, attempts, err := encodeAssistantProposalRecordJSON(record)
+	if err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	appliedAt := ""
+	if record.AppliedAt != nil {
+		appliedAt = encodeTime(*record.AppliedAt)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO assistant_proposals (id, project_id, source, source_id, proposal_json, status, latest_result_json, apply_attempts_json, created_at, updated_at, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, record.ProjectID, record.Source, record.SourceID, proposal, record.Status, latestResult, attempts, encodeTime(record.CreatedAt), encodeTime(record.UpdatedAt), appliedAt)
+	if err != nil {
+		return core.AssistantProposalRecord{}, mapSQLiteWriteError(err)
+	}
+	return record, nil
+}
+
+func (s *Store) UpdateAssistantProposal(ctx context.Context, record core.AssistantProposalRecord) (core.AssistantProposalRecord, error) {
+	proposal, latestResult, attempts, err := encodeAssistantProposalRecordJSON(record)
+	if err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	appliedAt := ""
+	if record.AppliedAt != nil {
+		appliedAt = encodeTime(*record.AppliedAt)
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE assistant_proposals SET project_id = ?, source = ?, source_id = ?, proposal_json = ?, status = ?, latest_result_json = ?, apply_attempts_json = ?, created_at = ?, updated_at = ?, applied_at = ? WHERE id = ?`,
+		record.ProjectID, record.Source, record.SourceID, proposal, record.Status, latestResult, attempts, encodeTime(record.CreatedAt), encodeTime(record.UpdatedAt), appliedAt, record.ID)
+	if err != nil {
+		return core.AssistantProposalRecord{}, mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	return record, nil
+}
+
 const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at FROM assignments`
 
 const memoryCandidateSelectSQL = `SELECT project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at FROM memory_candidates`
+
+const assistantProposalSelectSQL = `SELECT id, project_id, source, source_id, proposal_json, status, latest_result_json, apply_attempts_json, created_at, updated_at, applied_at FROM assistant_proposals`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -1488,6 +1571,42 @@ func scanMemoryCandidate(row scanner) (core.MemoryCandidate, error) {
 	return item, nil
 }
 
+func scanAssistantProposalRecord(row scanner) (core.AssistantProposalRecord, error) {
+	var item core.AssistantProposalRecord
+	var proposalJSON, latestResultJSON, attemptsJSON, createdAt, updatedAt, appliedAt string
+	if err := row.Scan(&item.ID, &item.ProjectID, &item.Source, &item.SourceID, &proposalJSON, &item.Status, &latestResultJSON, &attemptsJSON, &createdAt, &updatedAt, &appliedAt); err != nil {
+		return core.AssistantProposalRecord{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(proposalJSON, &item.Proposal); err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	if latestResultJSON != "" {
+		var result core.AssistantApplyResult
+		if err := decodeJSON(latestResultJSON, &result); err != nil {
+			return core.AssistantProposalRecord{}, err
+		}
+		item.LatestResult = &result
+	}
+	if err := decodeJSON(attemptsJSON, &item.ApplyAttempts); err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.AssistantProposalRecord{}, err
+	}
+	if appliedAt != "" {
+		stamp, err := decodeTime(appliedAt)
+		if err != nil {
+			return core.AssistantProposalRecord{}, err
+		}
+		item.AppliedAt = &stamp
+	}
+	return item, nil
+}
+
 func (s *Store) requireProject(ctx context.Context, projectID string) error {
 	var id string
 	err := s.db.QueryRowContext(ctx, `SELECT id FROM projects WHERE id = ?`, projectID).Scan(&id)
@@ -1517,6 +1636,25 @@ func encodeJSON(value any) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+func encodeAssistantProposalRecordJSON(record core.AssistantProposalRecord) (string, string, string, error) {
+	proposal, err := encodeJSON(record.Proposal)
+	if err != nil {
+		return "", "", "", err
+	}
+	latestResult := ""
+	if record.LatestResult != nil {
+		latestResult, err = encodeJSON(record.LatestResult)
+		if err != nil {
+			return "", "", "", err
+		}
+	}
+	attempts, err := encodeJSON(record.ApplyAttempts)
+	if err != nil {
+		return "", "", "", err
+	}
+	return proposal, latestResult, attempts, nil
 }
 
 func decodeJSON(raw string, target any) error {

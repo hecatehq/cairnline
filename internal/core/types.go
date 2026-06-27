@@ -232,6 +232,30 @@ type AssistantProposal struct {
 	CreatedAt            time.Time         `json:"created_at"`
 }
 
+type AssistantProposalRecord struct {
+	ID            string                  `json:"id"`
+	ProjectID     string                  `json:"project_id,omitempty"`
+	Source        string                  `json:"source,omitempty"`
+	SourceID      string                  `json:"source_id,omitempty"`
+	Proposal      AssistantProposal       `json:"proposal"`
+	Status        string                  `json:"status"`
+	LatestResult  *AssistantApplyResult   `json:"latest_result,omitempty"`
+	ApplyAttempts []AssistantApplyAttempt `json:"apply_attempts,omitempty"`
+	CreatedAt     time.Time               `json:"created_at"`
+	UpdatedAt     time.Time               `json:"updated_at"`
+	AppliedAt     *time.Time              `json:"applied_at,omitempty"`
+}
+
+type AssistantApplyAttempt struct {
+	ID           string               `json:"id"`
+	ProposalID   string               `json:"proposal_id"`
+	Status       string               `json:"status"`
+	Confirmed    bool                 `json:"confirmed"`
+	Result       AssistantApplyResult `json:"result"`
+	ErrorMessage string               `json:"error_message,omitempty"`
+	CreatedAt    time.Time            `json:"created_at"`
+}
+
 type AssistantAction struct {
 	Kind            string           `json:"kind"`
 	Title           string           `json:"title,omitempty"`
@@ -615,6 +639,12 @@ const (
 
 	AssistantProposalSourceAPI       = "api"
 	AssistantProposalSourceAssistant = "assistant"
+
+	AssistantProposalStatusProposed     = "proposed"
+	AssistantProposalStatusNeedsConfirm = "needs_confirmation"
+	AssistantProposalStatusApplied      = "applied"
+	AssistantProposalStatusPartial      = "partial"
+	AssistantProposalStatusRejected     = "rejected"
 
 	AssistantActionCreateProject         = "create_project"
 	AssistantActionUpdateProject         = "update_project"

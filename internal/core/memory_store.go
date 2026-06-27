@@ -21,6 +21,7 @@ type MemoryStore struct {
 	handoffs    map[string]map[string]Handoff
 	entries     map[string]map[string]MemoryEntry
 	memory      map[string]map[string]MemoryCandidate
+	assistant   map[string]AssistantProposalRecord
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -37,6 +38,7 @@ func NewMemoryStore() *MemoryStore {
 		handoffs:    make(map[string]map[string]Handoff),
 		entries:     make(map[string]map[string]MemoryEntry),
 		memory:      make(map[string]map[string]MemoryCandidate),
+		assistant:   make(map[string]AssistantProposalRecord),
 	}
 }
 
@@ -104,6 +106,11 @@ func (s *MemoryStore) DeleteProject(ctx context.Context, id string) error {
 	delete(s.handoffs, id)
 	delete(s.entries, id)
 	delete(s.memory, id)
+	for proposalID, proposal := range s.assistant {
+		if proposal.ProjectID == id {
+			delete(s.assistant, proposalID)
+		}
+	}
 	return nil
 }
 
@@ -978,6 +985,68 @@ func (s *MemoryStore) PromoteMemoryCandidate(ctx context.Context, projectID, id 
 	candidate.UpdatedAt = entry.UpdatedAt
 	s.memory[projectID][id] = candidate
 	return candidate, entry, nil
+}
+
+func (s *MemoryStore) ListAssistantProposals(ctx context.Context, projectID string) ([]AssistantProposalRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	items := make([]AssistantProposalRecord, 0)
+	for _, item := range s.assistant {
+		if projectID != "" && item.ProjectID != projectID {
+			continue
+		}
+		items = append(items, cloneAssistantProposalRecord(item))
+	}
+	slices.SortFunc(items, func(a, b AssistantProposalRecord) int {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) GetAssistantProposal(ctx context.Context, id string) (AssistantProposalRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	item, ok := s.assistant[id]
+	if !ok {
+		return AssistantProposalRecord{}, ErrNotFound
+	}
+	return cloneAssistantProposalRecord(item), nil
+}
+
+func (s *MemoryStore) CreateAssistantProposal(ctx context.Context, record AssistantProposalRecord) (AssistantProposalRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record = normalizeAssistantProposalRecord(record, record.CreatedAt)
+	if err := validateAssistantProposalRecord(record); err != nil {
+		return AssistantProposalRecord{}, err
+	}
+	if _, ok := s.assistant[record.ID]; ok {
+		return AssistantProposalRecord{}, ErrDuplicate
+	}
+	s.assistant[record.ID] = cloneAssistantProposalRecord(record)
+	return cloneAssistantProposalRecord(record), nil
+}
+
+func (s *MemoryStore) UpdateAssistantProposal(ctx context.Context, record AssistantProposalRecord) (AssistantProposalRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.assistant[record.ID]
+	if !ok {
+		return AssistantProposalRecord{}, ErrNotFound
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = existing.CreatedAt
+	}
+	record = normalizeAssistantProposalRecord(record, record.UpdatedAt)
+	if err := validateAssistantProposalRecord(record); err != nil {
+		return AssistantProposalRecord{}, err
+	}
+	s.assistant[record.ID] = cloneAssistantProposalRecord(record)
+	return cloneAssistantProposalRecord(record), nil
 }
 
 func (s *MemoryStore) requireWorkItemLocked(projectID, workItemID string) error {

@@ -165,8 +165,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assistant.propose",
-		Title:       "Validate assistant proposal",
-		Description: "Normalize and validate a typed project proposal. This does not mutate project state.",
+		Title:       "Create assistant proposal",
+		Description: "Persist a typed proposal record for operator-confirmed apply. This mutates the proposal ledger only, not project coordination records.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
@@ -179,20 +179,42 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			},
 			"required":["title","actions"]
 		}`),
-		Annotations: readOnly,
 	}, assistantPropose(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assistant.proposals.list",
+		Title:       "List assistant proposals",
+		Description: "List durable assistant proposal records, optionally scoped to a project.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string"}}
+		}`),
+		Annotations: readOnly,
+	}, listAssistantProposals(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assistant.proposals.get",
+		Title:       "Get assistant proposal",
+		Description: "Fetch one durable assistant proposal record.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"id":{"type":"string","minLength":1}},
+			"required":["id"]
+		}`),
+		Annotations: readOnly,
+	}, getAssistantProposal(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assistant.apply",
 		Title:       "Apply assistant proposal",
-		Description: "Apply a confirmed typed project proposal. Assignments are coordination records only and are not auto-dispatched.",
+		Description: "Apply a confirmed typed project proposal record. Assignments are coordination records only and are not auto-dispatched.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
+				"proposal_id":{"type":"string"},
 				"proposal":{"type":"object"},
 				"confirm":{"type":"boolean"}
-			},
-			"required":["proposal","confirm"]
+			}
 		}`),
 	}, assistantApply(service))
 
@@ -1394,28 +1416,82 @@ func assistantPropose(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
-		proposal, err := service.AssistantPropose(ctx, input)
+		record, err := service.CreateAssistantProposal(ctx, input)
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
 		return mcp.CallToolResult{
-			Content:           mcp.TextContent(formatAssistantProposal(proposal)),
-			StructuredContent: proposal,
+			Content:           mcp.TextContent(formatAssistantProposalRecord(record)),
+			StructuredContent: record,
 		}, nil
 	}
 }
 
-func assistantApply(service *core.Service) mcp.ToolHandler {
+func listAssistantProposals(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		Proposal core.AssistantProposal `json:"proposal"`
-		Confirm  bool                   `json:"confirm"`
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &input); err != nil {
+				return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			}
+		}
+		items, err := service.ListAssistantProposals(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if len(items) == 0 {
+			return mcp.CallToolResult{Content: mcp.TextContent("No assistant proposals yet."), StructuredContent: items}, nil
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "Assistant proposals (%d):\n", len(items))
+		for _, item := range items {
+			fmt.Fprintf(&b, "- %s: [%s] %s (%d actions)\n", item.ID, item.Status, item.Proposal.Title, len(item.Proposal.Actions))
+		}
+		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
+	}
+}
+
+func getAssistantProposal(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
-		result, err := service.ApplyAssistantProposal(ctx, input.Proposal, input.Confirm)
+		record, err := service.GetAssistantProposal(ctx, input.ID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatAssistantProposalRecord(record)),
+			StructuredContent: record,
+		}, nil
+	}
+}
+
+func assistantApply(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProposalID string                 `json:"proposal_id"`
+		Proposal   core.AssistantProposal `json:"proposal"`
+		Confirm    bool                   `json:"confirm"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		var result core.AssistantApplyResult
+		var err error
+		if strings.TrimSpace(input.ProposalID) != "" {
+			result, err = service.ApplyAssistantProposalRecord(ctx, input.ProposalID, input.Confirm)
+		} else {
+			result, err = service.ApplyAssistantProposal(ctx, input.Proposal, input.Confirm)
+		}
 		if err != nil && result.ProposalID == "" {
 			return mcp.CallToolResult{}, err
 		}
@@ -3456,6 +3532,29 @@ func formatAssistantProposal(proposal core.AssistantProposal) string {
 	}
 	fmt.Fprintf(&b, "requires_confirmation=%t actions=%d\n", proposal.RequiresConfirmation, len(proposal.Actions))
 	for idx, action := range proposal.Actions {
+		fmt.Fprintf(&b, "%d. %s", idx+1, action.Kind)
+		if action.Title != "" {
+			fmt.Fprintf(&b, " — %s", action.Title)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatAssistantProposalRecord(record core.AssistantProposalRecord) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Assistant proposal %s: [%s] %s\n", record.ID, record.Status, record.Proposal.Title)
+	if record.ProjectID != "" {
+		fmt.Fprintf(&b, "Project: %s\n", record.ProjectID)
+	}
+	if record.Proposal.Summary != "" {
+		fmt.Fprintf(&b, "%s\n", record.Proposal.Summary)
+	}
+	fmt.Fprintf(&b, "source=%s requires_confirmation=%t actions=%d attempts=%d\n", record.Source, record.Proposal.RequiresConfirmation, len(record.Proposal.Actions), len(record.ApplyAttempts))
+	if record.LatestResult != nil {
+		fmt.Fprintf(&b, "latest=%s applied=%t actions=%d/%d\n", record.LatestResult.Status, record.LatestResult.Applied, record.LatestResult.AppliedActionCount, record.LatestResult.TotalActionCount)
+	}
+	for idx, action := range record.Proposal.Actions {
 		fmt.Fprintf(&b, "%d. %s", idx+1, action.Kind)
 		if action.Title != "" {
 			fmt.Fprintf(&b, " — %s", action.Title)

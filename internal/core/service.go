@@ -9,14 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 const maxSkillMetadataBytes = 64 * 1024
 
 type Service struct {
-	store Store
-	now   func() time.Time
+	store       Store
+	now         func() time.Time
+	assistantMu sync.Mutex
 }
 
 func NewService(store Store) *Service {

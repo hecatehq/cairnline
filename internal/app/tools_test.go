@@ -210,17 +210,65 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 	if err := server.Serve(ctx, bytes.NewReader(append(proposePayload, '\n')), &output); err != nil {
 		t.Fatalf("Serve(propose) error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Assistant proposal prop_mcp") || !strings.Contains(output.String(), "requires_confirmation=true") {
+	if !strings.Contains(output.String(), "Assistant proposal prop_mcp") || !strings.Contains(output.String(), "requires_confirmation=true") || !strings.Contains(output.String(), `"structuredContent"`) {
 		t.Fatalf("propose response = %s", output.String())
 	}
 	var proposeResponse struct {
 		Result struct {
-			StructuredContent core.AssistantProposal `json:"structuredContent"`
+			StructuredContent core.AssistantProposalRecord `json:"structuredContent"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(output.Bytes(), &proposeResponse); err != nil {
 		t.Fatalf("decode propose response: %v\n%s", err, output.String())
 	}
+	if proposeResponse.Result.StructuredContent.Status != core.AssistantProposalStatusProposed || proposeResponse.Result.StructuredContent.Proposal.ID != "prop_mcp" {
+		t.Fatalf("proposal record = %+v, want proposed prop_mcp", proposeResponse.Result.StructuredContent)
+	}
+
+	listPayload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "list-proposals",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "assistant.proposals.list",
+			"arguments": map[string]any{
+				"project_id": project.ID,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal proposal list payload: %v", err)
+	}
+	output.Reset()
+	if err := server.Serve(ctx, bytes.NewReader(append(listPayload, '\n')), &output); err != nil {
+		t.Fatalf("Serve(proposals.list) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Assistant proposals (1):") || !strings.Contains(output.String(), "prop_mcp") {
+		t.Fatalf("proposal list response = %s", output.String())
+	}
+
+	getPayload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "get-proposal",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "assistant.proposals.get",
+			"arguments": map[string]any{
+				"id": proposeResponse.Result.StructuredContent.ID,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal proposal get payload: %v", err)
+	}
+	output.Reset()
+	if err := server.Serve(ctx, bytes.NewReader(append(getPayload, '\n')), &output); err != nil {
+		t.Fatalf("Serve(proposals.get) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Assistant proposal prop_mcp") {
+		t.Fatalf("proposal get response = %s", output.String())
+	}
+
 	applyPayload, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
@@ -228,8 +276,8 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 		"params": map[string]any{
 			"name": "assistant.apply",
 			"arguments": map[string]any{
-				"proposal": proposeResponse.Result.StructuredContent,
-				"confirm":  true,
+				"proposal_id": proposeResponse.Result.StructuredContent.ID,
+				"confirm":     true,
 			},
 		},
 	})

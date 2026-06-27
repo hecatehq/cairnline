@@ -923,6 +923,69 @@ func TestStore_CreateAssignmentValidatesReferences(t *testing.T) {
 	}
 }
 
+func TestStore_PersistsAssistantProposalLedger(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "assistant-ledger.db")
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Assistant ledger"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	record, err := service.CreateAssistantProposal(ctx, core.AssistantProposal{
+		ID:        "prop_sqlite",
+		ProjectID: project.ID,
+		Title:     "Create persisted work",
+		Actions: []core.AssistantAction{
+			{
+				Kind: core.AssistantActionCreateRole,
+				Role: &core.Role{
+					ID:        "role_sqlite",
+					ProjectID: project.ID,
+					Name:      "Operator",
+				},
+			},
+			{
+				Kind: core.AssistantActionCreateWorkItem,
+				WorkItem: &core.WorkItem{
+					ID:        "work_sqlite",
+					ProjectID: project.ID,
+					Title:     "Persist proposal apply",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateAssistantProposal() error = %v", err)
+	}
+	if _, err := service.ApplyAssistantProposalRecord(ctx, record.ID, true); err != nil {
+		t.Fatalf("ApplyAssistantProposalRecord() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer reopened.Close()
+	reopenedService := core.NewService(reopened)
+	records, err := reopenedService.ListAssistantProposals(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssistantProposals() error = %v", err)
+	}
+	if len(records) != 1 || records[0].ID != record.ID || records[0].Status != core.AssistantProposalStatusApplied || records[0].LatestResult == nil || len(records[0].ApplyAttempts) != 1 || records[0].AppliedAt == nil {
+		t.Fatalf("records = %+v, want persisted applied proposal ledger", records)
+	}
+	if _, err := reopenedService.ApplyAssistantProposalRecord(ctx, record.ID, true); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("reapply after reopen error = %v, want ErrConflict", err)
+	}
+}
+
 func TestStore_CreateReviewValidatesAssignmentWorkItem(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "review-validation.db"))

@@ -28,10 +28,10 @@ Implemented now:
   source provenance metadata, roles, profiles, work items, assignments, skill
   metadata, assignment-scoped evidence, reviews, handoffs with source/target
   refs, accepted memory, and memory candidates
-- in-memory service for projects, profiles, roles, work items, assignments, and
-  collaboration artifacts
+- in-memory service for projects, profiles, roles, work items, assignments,
+  assistant proposal records, and collaboration artifacts
 - SQLite store for durable projects, profiles, roles, work items, assignments,
-  skill metadata, and collaboration artifacts
+  skill metadata, assistant proposal records, and collaboration artifacts
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP
 - stdio MCP server with JSON-RPC framing
@@ -53,6 +53,8 @@ Implemented now:
   - `projects.operations_brief`
   - `projects.setup_readiness`
   - `assistant.propose`
+  - `assistant.proposals.list`
+  - `assistant.proposals.get`
   - `assistant.apply`
   - `profiles.list`
   - `profiles.create`
@@ -118,9 +120,10 @@ Implemented now:
   claimed, while claimed/running/review assignments are active
 - read-only project setup-readiness and health summaries for onboarding,
   context/profile/skill gaps, and bounded operator attention
-- deterministic assistant proposal/apply tools for confirmed project-state
-  mutations; applying a proposal can create queued assignment coordination
-  records, but it does not launch or supervise agents
+- deterministic assistant proposal/apply tools with durable proposal records,
+  apply attempts, latest-result state, and repeat-apply protection for confirmed
+  project-state mutations; applying a proposal can create queued assignment
+  coordination records, but it does not launch or supervise agents
 
 Planned next:
 

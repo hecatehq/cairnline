@@ -1493,6 +1493,149 @@ func TestService_AssistantProposalApply(t *testing.T) {
 	}
 }
 
+func TestService_AssistantProposalRecordLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assistant ledger"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	proposal := AssistantProposal{
+		ID:        "prop_record",
+		ProjectID: project.ID,
+		Title:     "Queue reviewable work",
+		Actions: []AssistantAction{
+			{
+				Kind: AssistantActionCreateRole,
+				Role: &Role{
+					ID:        "role_record",
+					ProjectID: project.ID,
+					Name:      "Operator",
+				},
+			},
+			{
+				Kind: AssistantActionCreateWorkItem,
+				WorkItem: &WorkItem{
+					ID:        "work_record",
+					ProjectID: project.ID,
+					Title:     "Record-backed work",
+				},
+			},
+			{
+				Kind: AssistantActionCreateAssignment,
+				Assignment: &Assignment{
+					ID:            "asgn_record",
+					ProjectID:     project.ID,
+					WorkItemID:    "work_record",
+					RoleID:        "role_record",
+					ExecutionMode: ExecutionMCPPull,
+				},
+			},
+		},
+	}
+	record, err := service.CreateAssistantProposal(ctx, proposal)
+	if err != nil {
+		t.Fatalf("CreateAssistantProposal() error = %v", err)
+	}
+	if record.ID != proposal.ID || record.Status != AssistantProposalStatusProposed || record.ProjectID != project.ID || len(record.ApplyAttempts) != 0 {
+		t.Fatalf("record = %+v, want proposed project-scoped record", record)
+	}
+	listed, err := service.ListAssistantProposals(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssistantProposals() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != record.ID {
+		t.Fatalf("listed = %+v, want proposal record", listed)
+	}
+	needsConfirm, err := service.ApplyAssistantProposalRecord(ctx, record.ID, false)
+	if !errors.Is(err, ErrConflict) || needsConfirm.Status != AssistantApplyStatusNeedsConfirm || needsConfirm.Applied {
+		t.Fatalf("unconfirmed apply result=%+v error=%v, want confirmation conflict", needsConfirm, err)
+	}
+	afterConfirmGate, err := service.GetAssistantProposal(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantProposal() after confirm gate error = %v", err)
+	}
+	if afterConfirmGate.Status != AssistantProposalStatusNeedsConfirm || afterConfirmGate.LatestResult == nil || len(afterConfirmGate.ApplyAttempts) != 1 {
+		t.Fatalf("record after confirm gate = %+v, want one needs-confirmation attempt", afterConfirmGate)
+	}
+	applied, err := service.ApplyAssistantProposalRecord(ctx, record.ID, true)
+	if err != nil {
+		t.Fatalf("ApplyAssistantProposalRecord() error = %v result=%+v", err, applied)
+	}
+	if !applied.Applied || applied.Status != AssistantApplyStatusApplied || applied.AppliedActionCount != 3 {
+		t.Fatalf("applied = %+v, want full record apply", applied)
+	}
+	afterApply, err := service.GetAssistantProposal(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantProposal() after apply error = %v", err)
+	}
+	if afterApply.Status != AssistantProposalStatusApplied || afterApply.LatestResult == nil || !afterApply.LatestResult.Applied || len(afterApply.ApplyAttempts) != 2 || afterApply.AppliedAt == nil {
+		t.Fatalf("record after apply = %+v, want applied ledger state", afterApply)
+	}
+	reapplied, err := service.ApplyAssistantProposalRecord(ctx, record.ID, true)
+	if !errors.Is(err, ErrConflict) || !reapplied.Applied || reapplied.Status != AssistantApplyStatusApplied {
+		t.Fatalf("reapply result=%+v error=%v, want already-applied conflict with latest result", reapplied, err)
+	}
+}
+
+func TestService_AssistantProposalRecordCapturesPartialFailure(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assistant partial"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	record, err := service.CreateAssistantProposal(ctx, AssistantProposal{
+		ID:        "prop_partial",
+		ProjectID: project.ID,
+		Title:     "Partially apply",
+		Actions: []AssistantAction{
+			{
+				Kind: AssistantActionCreateRole,
+				Role: &Role{
+					ID:        "role_partial",
+					ProjectID: project.ID,
+					Name:      "Operator",
+				},
+			},
+			{
+				Kind: AssistantActionCreateAssignment,
+				Assignment: &Assignment{
+					ID:            "asgn_partial",
+					ProjectID:     project.ID,
+					WorkItemID:    "work_missing",
+					RoleID:        "role_partial",
+					ExecutionMode: ExecutionMCPPull,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateAssistantProposal() error = %v", err)
+	}
+	result, err := service.ApplyAssistantProposalRecord(ctx, record.ID, true)
+	if !errors.Is(err, ErrNotFound) || result.Status != AssistantApplyStatusPartial || result.AppliedActionCount != 1 || result.FailedActionIndex == nil || *result.FailedActionIndex != 1 {
+		t.Fatalf("partial result=%+v error=%v, want one committed action and failed second action", result, err)
+	}
+	roles, err := service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() after partial apply error = %v", err)
+	}
+	if len(roles) != 1 || roles[0].ID != "role_partial" {
+		t.Fatalf("roles after partial apply = %+v, want role_partial", roles)
+	}
+	if _, err := service.GetAssignment(ctx, project.ID, "asgn_partial"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetAssignment() after partial apply error = %v, want ErrNotFound", err)
+	}
+	afterApply, err := service.GetAssistantProposal(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantProposal() after partial apply error = %v", err)
+	}
+	if afterApply.Status != AssistantProposalStatusPartial || afterApply.LatestResult == nil || len(afterApply.ApplyAttempts) != 1 || afterApply.ApplyAttempts[0].ErrorMessage == "" {
+		t.Fatalf("record after partial = %+v, want partial ledger state with error", afterApply)
+	}
+}
+
 func TestService_AssistantProposalRejectsExecutionBoundAssignment(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
