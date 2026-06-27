@@ -1211,7 +1211,7 @@ func (s *Store) ListMemoryEntries(ctx context.Context, projectID string, include
 	if !includeDisabled {
 		query += ` AND enabled = 1`
 	}
-	query += ` ORDER BY updated_at DESC`
+	query += ` ORDER BY enabled DESC, updated_at DESC, title ASC, id ASC`
 	rows, err := s.db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, err
@@ -1280,7 +1280,7 @@ func (s *Store) ListMemoryCandidates(ctx context.Context, filter core.MemoryCand
 		query += ` AND status = ?`
 		args = append(args, core.MemoryCandidatePending)
 	}
-	query += ` ORDER BY updated_at DESC`
+	query += ` ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'promoted' THEN 1 WHEN 'rejected' THEN 2 ELSE 3 END ASC, updated_at DESC, title ASC, id ASC`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

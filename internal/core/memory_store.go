@@ -917,9 +917,7 @@ func (s *MemoryStore) ListMemoryEntries(ctx context.Context, projectID string, i
 		}
 		items = append(items, item)
 	}
-	slices.SortFunc(items, func(a, b MemoryEntry) int {
-		return b.UpdatedAt.Compare(a.UpdatedAt)
-	})
+	slices.SortFunc(items, compareMemoryEntries)
 	return items, nil
 }
 
@@ -1002,10 +1000,60 @@ func (s *MemoryStore) ListMemoryCandidates(ctx context.Context, filter MemoryCan
 		}
 		items = append(items, item)
 	}
-	slices.SortFunc(items, func(a, b MemoryCandidate) int {
-		return b.UpdatedAt.Compare(a.UpdatedAt)
-	})
+	slices.SortFunc(items, compareMemoryCandidates)
 	return items, nil
+}
+
+func compareMemoryEntries(a, b MemoryEntry) int {
+	if a.Enabled != b.Enabled {
+		if a.Enabled {
+			return -1
+		}
+		return 1
+	}
+	if !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	}
+	if a.Title != b.Title {
+		return compareStrings(a.Title, b.Title)
+	}
+	return compareStrings(a.ID, b.ID)
+}
+
+func compareMemoryCandidates(a, b MemoryCandidate) int {
+	if a.Status != b.Status {
+		return memoryCandidateSortRank(a.Status) - memoryCandidateSortRank(b.Status)
+	}
+	if !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	}
+	if a.Title != b.Title {
+		return compareStrings(a.Title, b.Title)
+	}
+	return compareStrings(a.ID, b.ID)
+}
+
+func memoryCandidateSortRank(status string) int {
+	switch status {
+	case MemoryCandidatePending:
+		return 0
+	case MemoryCandidatePromoted:
+		return 1
+	case MemoryCandidateRejected:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func compareStrings(a, b string) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
 }
 
 func (s *MemoryStore) GetMemoryCandidate(ctx context.Context, projectID, id string) (MemoryCandidate, error) {

@@ -2556,6 +2556,95 @@ func TestService_MemoryCandidateImportPreservesTimestampsAndResolvedState(t *tes
 	}
 }
 
+func TestService_MemoryListsUseHecateCompatibleOrder(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Memory order"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	base := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+
+	enabled, err := service.CreateMemoryEntry(ctx, MemoryEntry{
+		ID:         "mem_enabled",
+		ProjectID:  project.ID,
+		Title:      "Enabled memory",
+		Body:       "Enabled entries sort before disabled entries.",
+		TrustLabel: MemoryTrustOperator,
+		SourceKind: MemorySourceOperator,
+		CreatedAt:  base,
+		UpdatedAt:  base,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry(enabled) error = %v", err)
+	}
+	disabled, err := service.CreateMemoryEntry(ctx, MemoryEntry{
+		ID:         "mem_disabled",
+		ProjectID:  project.ID,
+		Title:      "Disabled memory",
+		Body:       "Disabled entries remain inspectable but sort after enabled entries.",
+		TrustLabel: MemoryTrustOperator,
+		SourceKind: MemorySourceOperator,
+		CreatedAt:  base.Add(time.Minute),
+		UpdatedAt:  base.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry(disabled) error = %v", err)
+	}
+	disabled.Enabled = false
+	disabled.UpdatedAt = base.Add(2 * time.Minute)
+	if _, err := service.UpdateMemoryEntry(ctx, disabled); err != nil {
+		t.Fatalf("UpdateMemoryEntry(disabled) error = %v", err)
+	}
+	entries, err := service.ListMemoryEntries(ctx, project.ID, true)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries() error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].ID != enabled.ID || entries[1].ID != disabled.ID {
+		t.Fatalf("entries = %+v, want enabled memory before newer disabled memory", entries)
+	}
+
+	pending, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ID:                  "memcand_pending",
+		ProjectID:           project.ID,
+		Title:               "Pending candidate",
+		Body:                "Pending candidates need operator review.",
+		SuggestedTrustLabel: MemoryTrustGenerated,
+		SuggestedSourceKind: MemorySourceGenerated,
+		CreatedAt:           base,
+		UpdatedAt:           base,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(pending) error = %v", err)
+	}
+	rejected, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ID:                  "memcand_rejected",
+		ProjectID:           project.ID,
+		Title:               "Rejected candidate",
+		Body:                "Resolved candidates sort after pending candidates.",
+		SuggestedTrustLabel: MemoryTrustGenerated,
+		SuggestedSourceKind: MemorySourceGenerated,
+		CreatedAt:           base.Add(time.Minute),
+		UpdatedAt:           base.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(rejected) error = %v", err)
+	}
+	rejected.Status = MemoryCandidateRejected
+	rejected.StatusReason = "Not durable."
+	rejected.UpdatedAt = base.Add(2 * time.Minute)
+	if _, err := service.UpdateMemoryCandidate(ctx, rejected); err != nil {
+		t.Fatalf("UpdateMemoryCandidate(rejected) error = %v", err)
+	}
+	candidates, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID, IncludeResolved: true})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() error = %v", err)
+	}
+	if len(candidates) != 2 || candidates[0].ID != pending.ID || candidates[1].ID != rejected.ID {
+		t.Fatalf("candidates = %+v, want pending candidate before newer rejected candidate", candidates)
+	}
+}
+
 func TestService_MemoryEntryLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
