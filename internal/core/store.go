@@ -79,4 +79,9 @@ type Store interface {
 	UpdateMemoryCandidate(ctx context.Context, candidate MemoryCandidate) (MemoryCandidate, error)
 	DeleteMemoryCandidate(ctx context.Context, projectID, id string) error
 	PromoteMemoryCandidate(ctx context.Context, projectID, id string, entry MemoryEntry) (MemoryCandidate, MemoryEntry, error)
+
+	ListAssistantProposals(ctx context.Context, projectID string) ([]AssistantProposalRecord, error)
+	GetAssistantProposal(ctx context.Context, id string) (AssistantProposalRecord, error)
+	CreateAssistantProposal(ctx context.Context, record AssistantProposalRecord) (AssistantProposalRecord, error)
+	UpdateAssistantProposal(ctx context.Context, record AssistantProposalRecord) (AssistantProposalRecord, error)
 }

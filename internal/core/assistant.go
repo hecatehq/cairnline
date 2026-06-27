@@ -24,6 +24,33 @@ func (s *Service) AssistantPropose(ctx context.Context, input AssistantProposal)
 	return proposal, nil
 }
 
+func (s *Service) ListAssistantProposals(ctx context.Context, projectID string) ([]AssistantProposalRecord, error) {
+	return s.store.ListAssistantProposals(ctx, strings.TrimSpace(projectID))
+}
+
+func (s *Service) GetAssistantProposal(ctx context.Context, id string) (AssistantProposalRecord, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return AssistantProposalRecord{}, errors.Join(ErrInvalid, errors.New("proposal id is required"))
+	}
+	return s.store.GetAssistantProposal(ctx, id)
+}
+
+func (s *Service) CreateAssistantProposal(ctx context.Context, input AssistantProposal) (AssistantProposalRecord, error) {
+	proposal, err := s.AssistantPropose(ctx, input)
+	if err != nil {
+		return AssistantProposalRecord{}, err
+	}
+	record := normalizeAssistantProposalRecord(AssistantProposalRecord{
+		ID:        proposal.ID,
+		ProjectID: proposal.ProjectID,
+		Source:    proposal.Source,
+		Proposal:  proposal,
+		Status:    AssistantProposalStatusProposed,
+	}, s.now())
+	return s.store.CreateAssistantProposal(ctx, record)
+}
+
 func (s *Service) ApplyAssistantProposal(ctx context.Context, input AssistantProposal, confirmed bool) (AssistantApplyResult, error) {
 	proposal, err := s.AssistantPropose(ctx, input)
 	if err != nil {
@@ -64,6 +91,39 @@ func (s *Service) ApplyAssistantProposal(ctx context.Context, input AssistantPro
 	return result, nil
 }
 
+func (s *Service) ApplyAssistantProposalRecord(ctx context.Context, id string, confirmed bool) (AssistantApplyResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return AssistantApplyResult{}, errors.Join(ErrInvalid, errors.New("proposal id is required"))
+	}
+
+	s.assistantMu.Lock()
+	defer s.assistantMu.Unlock()
+
+	record, err := s.store.GetAssistantProposal(ctx, id)
+	if err != nil {
+		return AssistantApplyResult{}, err
+	}
+	if record.LatestResult != nil && record.LatestResult.Applied {
+		return cloneAssistantApplyResult(*record.LatestResult), ErrConflict
+	}
+	if record.Status == AssistantProposalStatusApplied {
+		if record.LatestResult != nil {
+			return cloneAssistantApplyResult(*record.LatestResult), ErrConflict
+		}
+		return AssistantApplyResult{ProposalID: record.ID, Status: AssistantApplyStatusApplied, Applied: true}, ErrConflict
+	}
+
+	result, applyErr := s.ApplyAssistantProposal(ctx, record.Proposal, confirmed)
+	attempt := assistantApplyAttemptForResult(newID("paatt"), confirmed, result, applyErr, s.now())
+	record = applyAssistantResultToProposalRecord(record, result, s.now())
+	record.ApplyAttempts = append(record.ApplyAttempts, attempt)
+	if _, err := s.store.UpdateAssistantProposal(ctx, record); err != nil {
+		return result, err
+	}
+	return result, applyErr
+}
+
 func normalizeAssistantProposal(input AssistantProposal, now func() time.Time) AssistantProposal {
 	createdAt := input.CreatedAt
 	if createdAt.IsZero() {
@@ -87,6 +147,52 @@ func normalizeAssistantProposal(input AssistantProposal, now func() time.Time) A
 		proposal.Actions = append(proposal.Actions, normalizeAssistantAction(action))
 	}
 	return proposal
+}
+
+func normalizeAssistantProposalRecord(input AssistantProposalRecord, now time.Time) AssistantProposalRecord {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	proposal := cloneAssistantProposal(input.Proposal)
+	if proposal.ID == "" {
+		proposal.ID = strings.TrimSpace(input.ID)
+	}
+	if proposal.ProjectID == "" {
+		proposal.ProjectID = strings.TrimSpace(input.ProjectID)
+	}
+	if proposal.Source == "" {
+		proposal.Source = strings.TrimSpace(input.Source)
+	}
+	record := AssistantProposalRecord{
+		ID:            firstNonEmpty(strings.TrimSpace(input.ID), proposal.ID, newID("prop")),
+		ProjectID:     firstNonEmpty(strings.TrimSpace(input.ProjectID), proposal.ProjectID, assistantProposalProjectID(proposal)),
+		Source:        firstNonEmpty(strings.TrimSpace(input.Source), proposal.Source, AssistantProposalSourceAPI),
+		SourceID:      strings.TrimSpace(input.SourceID),
+		Proposal:      proposal,
+		Status:        firstNonEmpty(strings.TrimSpace(input.Status), AssistantProposalStatusProposed),
+		LatestResult:  cloneAssistantApplyResultPtr(input.LatestResult),
+		ApplyAttempts: cloneAssistantApplyAttempts(input.ApplyAttempts),
+		CreatedAt:     input.CreatedAt,
+		UpdatedAt:     input.UpdatedAt,
+		AppliedAt:     cloneTimePtr(input.AppliedAt),
+	}
+	record.Proposal.ID = record.ID
+	record.Proposal.ProjectID = record.ProjectID
+	record.Proposal.Source = record.Source
+	record.Proposal.RequiresConfirmation = true
+	if record.Proposal.CreatedAt.IsZero() {
+		record.Proposal.CreatedAt = now
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = record.Proposal.CreatedAt
+	}
+	if record.UpdatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) {
+		record.UpdatedAt = now
+	}
+	if record.LatestResult != nil {
+		record = applyAssistantResultToProposalRecord(record, *record.LatestResult, record.UpdatedAt)
+	}
+	return record
 }
 
 func normalizeAssistantAction(input AssistantAction) AssistantAction {
@@ -173,6 +279,37 @@ func validateAssistantAction(action AssistantAction) error {
 		return requireAssistantPayload(action.MemoryCandidate, "memory_candidate")
 	default:
 		return errors.Join(ErrInvalid, fmt.Errorf("unknown assistant action kind %q", action.Kind))
+	}
+	return nil
+}
+
+func validateAssistantProposalRecord(record AssistantProposalRecord) error {
+	if strings.TrimSpace(record.ID) == "" {
+		return errors.Join(ErrInvalid, errors.New("proposal id is required"))
+	}
+	if strings.TrimSpace(record.Proposal.ID) != record.ID {
+		return errors.Join(ErrInvalid, errors.New("proposal record id mismatch"))
+	}
+	if _, err := (&Service{now: func() time.Time { return record.CreatedAt }}).AssistantPropose(context.Background(), record.Proposal); err != nil {
+		return err
+	}
+	for idx, attempt := range record.ApplyAttempts {
+		if err := validateAssistantApplyAttempt(attempt); err != nil {
+			return fmt.Errorf("apply attempt %d: %w", idx, err)
+		}
+	}
+	return nil
+}
+
+func validateAssistantApplyAttempt(attempt AssistantApplyAttempt) error {
+	if strings.TrimSpace(attempt.ID) == "" {
+		return errors.Join(ErrInvalid, errors.New("apply attempt id is required"))
+	}
+	if strings.TrimSpace(attempt.ProposalID) == "" {
+		return errors.Join(ErrInvalid, errors.New("apply attempt proposal_id is required"))
+	}
+	if strings.TrimSpace(attempt.Status) == "" {
+		return errors.Join(ErrInvalid, errors.New("apply attempt status is required"))
 	}
 	return nil
 }
@@ -346,4 +483,182 @@ func cloneMemoryCandidatePtr(input *MemoryCandidate) *MemoryCandidate {
 	item := *input
 	item.SourceRefs = append([]MemoryCandidateSourceRef(nil), input.SourceRefs...)
 	return &item
+}
+
+func applyAssistantResultToProposalRecord(record AssistantProposalRecord, result AssistantApplyResult, now time.Time) AssistantProposalRecord {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	result = cloneAssistantApplyResult(result)
+	if result.ProposalID == "" {
+		result.ProposalID = record.ID
+	}
+	record.LatestResult = &result
+	record.Status = assistantProposalStatusForResult(result)
+	record.UpdatedAt = now
+	if result.Applied {
+		appliedAt := now
+		record.AppliedAt = &appliedAt
+	}
+	return record
+}
+
+func assistantProposalStatusForResult(result AssistantApplyResult) string {
+	switch result.Status {
+	case AssistantApplyStatusNeedsConfirm:
+		return AssistantProposalStatusNeedsConfirm
+	case AssistantApplyStatusApplied:
+		return AssistantProposalStatusApplied
+	case AssistantApplyStatusPartial:
+		return AssistantProposalStatusPartial
+	case AssistantApplyStatusRejected:
+		return AssistantProposalStatusRejected
+	default:
+		if result.Applied {
+			return AssistantProposalStatusApplied
+		}
+		if result.Status != "" {
+			return result.Status
+		}
+		return AssistantProposalStatusProposed
+	}
+}
+
+func assistantApplyAttemptForResult(id string, confirmed bool, result AssistantApplyResult, err error, now time.Time) AssistantApplyAttempt {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	attempt := AssistantApplyAttempt{
+		ID:         strings.TrimSpace(id),
+		ProposalID: strings.TrimSpace(result.ProposalID),
+		Status:     strings.TrimSpace(result.Status),
+		Confirmed:  confirmed,
+		Result:     cloneAssistantApplyResult(result),
+		CreatedAt:  now,
+	}
+	if err != nil {
+		attempt.ErrorMessage = err.Error()
+	}
+	if attempt.Status == "" {
+		attempt.Status = AssistantApplyStatusRejected
+	}
+	return attempt
+}
+
+func assistantProposalProjectID(proposal AssistantProposal) string {
+	if projectID := strings.TrimSpace(proposal.ProjectID); projectID != "" {
+		return projectID
+	}
+	for _, action := range proposal.Actions {
+		if projectID := strings.TrimSpace(action.Target.ProjectID); projectID != "" {
+			return projectID
+		}
+		switch action.Kind {
+		case AssistantActionCreateProject, AssistantActionUpdateProject:
+			if action.Project != nil && strings.TrimSpace(action.Project.ID) != "" {
+				return strings.TrimSpace(action.Project.ID)
+			}
+		case AssistantActionCreateRole, AssistantActionUpdateRole:
+			if action.Role != nil && strings.TrimSpace(action.Role.ProjectID) != "" {
+				return strings.TrimSpace(action.Role.ProjectID)
+			}
+		case AssistantActionCreateWorkItem, AssistantActionUpdateWorkItem:
+			if action.WorkItem != nil && strings.TrimSpace(action.WorkItem.ProjectID) != "" {
+				return strings.TrimSpace(action.WorkItem.ProjectID)
+			}
+		case AssistantActionCreateAssignment:
+			if action.Assignment != nil && strings.TrimSpace(action.Assignment.ProjectID) != "" {
+				return strings.TrimSpace(action.Assignment.ProjectID)
+			}
+		case AssistantActionCreateEvidence:
+			if action.Evidence != nil && strings.TrimSpace(action.Evidence.ProjectID) != "" {
+				return strings.TrimSpace(action.Evidence.ProjectID)
+			}
+		case AssistantActionCreateReview:
+			if action.Review != nil && strings.TrimSpace(action.Review.ProjectID) != "" {
+				return strings.TrimSpace(action.Review.ProjectID)
+			}
+		case AssistantActionCreateHandoff, AssistantActionUpdateHandoff:
+			if action.Handoff != nil && strings.TrimSpace(action.Handoff.ProjectID) != "" {
+				return strings.TrimSpace(action.Handoff.ProjectID)
+			}
+		case AssistantActionCreateMemoryCandidate:
+			if action.MemoryCandidate != nil && strings.TrimSpace(action.MemoryCandidate.ProjectID) != "" {
+				return strings.TrimSpace(action.MemoryCandidate.ProjectID)
+			}
+		}
+	}
+	return ""
+}
+
+func cloneAssistantProposal(input AssistantProposal) AssistantProposal {
+	out := input
+	out.Actions = cloneAssistantActions(input.Actions)
+	return out
+}
+
+func cloneAssistantProposalRecord(input AssistantProposalRecord) AssistantProposalRecord {
+	out := input
+	out.Proposal = cloneAssistantProposal(input.Proposal)
+	out.LatestResult = cloneAssistantApplyResultPtr(input.LatestResult)
+	out.ApplyAttempts = cloneAssistantApplyAttempts(input.ApplyAttempts)
+	out.AppliedAt = cloneTimePtr(input.AppliedAt)
+	return out
+}
+
+func cloneAssistantActions(input []AssistantAction) []AssistantAction {
+	if input == nil {
+		return nil
+	}
+	out := make([]AssistantAction, len(input))
+	for idx, action := range input {
+		out[idx] = normalizeAssistantAction(action)
+	}
+	return out
+}
+
+func cloneAssistantApplyResult(input AssistantApplyResult) AssistantApplyResult {
+	out := input
+	out.FailedActionIndex = cloneIntPtr(input.FailedActionIndex)
+	if input.Actions != nil {
+		out.Actions = make([]AssistantActionResult, len(input.Actions))
+		copy(out.Actions, input.Actions)
+	}
+	return out
+}
+
+func cloneAssistantApplyResultPtr(input *AssistantApplyResult) *AssistantApplyResult {
+	if input == nil {
+		return nil
+	}
+	out := cloneAssistantApplyResult(*input)
+	return &out
+}
+
+func cloneAssistantApplyAttempts(input []AssistantApplyAttempt) []AssistantApplyAttempt {
+	if input == nil {
+		return nil
+	}
+	out := make([]AssistantApplyAttempt, len(input))
+	for idx, attempt := range input {
+		out[idx] = attempt
+		out[idx].Result = cloneAssistantApplyResult(attempt.Result)
+	}
+	return out
+}
+
+func cloneTimePtr(input *time.Time) *time.Time {
+	if input == nil {
+		return nil
+	}
+	out := input.UTC()
+	return &out
+}
+
+func cloneIntPtr(input *int) *int {
+	if input == nil {
+		return nil
+	}
+	out := *input
+	return &out
 }
