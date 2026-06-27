@@ -41,6 +41,8 @@ type ProjectHealth = core.ProjectHealth
 type ProjectHealthSummary = core.ProjectHealthSummary
 type ProjectHealthAttentionItem = core.ProjectHealthAttentionItem
 type AssistantProposal = core.AssistantProposal
+type AssistantProposalRecord = core.AssistantProposalRecord
+type AssistantApplyAttempt = core.AssistantApplyAttempt
 type AssistantAction = core.AssistantAction
 type AssistantTarget = core.AssistantTarget
 type AssistantApplyResult = core.AssistantApplyResult
@@ -140,6 +142,12 @@ const (
 
 	AssistantProposalSourceAPI       = core.AssistantProposalSourceAPI
 	AssistantProposalSourceAssistant = core.AssistantProposalSourceAssistant
+
+	AssistantProposalStatusProposed     = core.AssistantProposalStatusProposed
+	AssistantProposalStatusNeedsConfirm = core.AssistantProposalStatusNeedsConfirm
+	AssistantProposalStatusApplied      = core.AssistantProposalStatusApplied
+	AssistantProposalStatusPartial      = core.AssistantProposalStatusPartial
+	AssistantProposalStatusRejected     = core.AssistantProposalStatusRejected
 
 	AssistantActionCreateProject         = core.AssistantActionCreateProject
 	AssistantActionUpdateProject         = core.AssistantActionUpdateProject

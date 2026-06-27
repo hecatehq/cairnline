@@ -115,3 +115,51 @@ func TestPublicAPIOpensSQLiteStore(t *testing.T) {
 		t.Fatalf("CreateWorkItem() error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
+	ctx := context.Background()
+	service := cairnline.NewMemoryService()
+	project, err := service.CreateProject(ctx, cairnline.Project{Name: "Assistant project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	record, err := service.CreateAssistantProposal(ctx, cairnline.AssistantProposal{
+		ID:        "prop_public",
+		ProjectID: project.ID,
+		Title:     "Create public work",
+		Actions: []cairnline.AssistantAction{{
+			Kind: cairnline.AssistantActionCreateWorkItem,
+			WorkItem: &cairnline.WorkItem{
+				ID:        "work_public",
+				ProjectID: project.ID,
+				Title:     "Public API work",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateAssistantProposal() error = %v", err)
+	}
+	var typedRecord cairnline.AssistantProposalRecord = record
+	if typedRecord.Status != cairnline.AssistantProposalStatusProposed {
+		t.Fatalf("proposal status = %q, want public proposed constant", typedRecord.Status)
+	}
+	result, err := service.ApplyAssistantProposalRecord(ctx, typedRecord.ID, true)
+	if err != nil {
+		t.Fatalf("ApplyAssistantProposalRecord() error = %v", err)
+	}
+	var typedResult cairnline.AssistantApplyResult = result
+	if typedResult.Status != cairnline.AssistantApplyStatusApplied || !typedResult.Applied {
+		t.Fatalf("apply result = %+v, want public applied status", typedResult)
+	}
+	applied, err := service.GetAssistantProposal(ctx, typedRecord.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantProposal() error = %v", err)
+	}
+	if len(applied.ApplyAttempts) != 1 {
+		t.Fatalf("apply attempts = %+v, want one public attempt", applied.ApplyAttempts)
+	}
+	var typedAttempt cairnline.AssistantApplyAttempt = applied.ApplyAttempts[0]
+	if typedAttempt.ProposalID != typedRecord.ID || typedAttempt.Status != cairnline.AssistantApplyStatusApplied {
+		t.Fatalf("typed attempt = %+v, want public attempt alias", typedAttempt)
+	}
+}
