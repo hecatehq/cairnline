@@ -17,8 +17,10 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	service := NewService(NewMemoryStore())
 
 	project, err := service.CreateProject(ctx, Project{
-		Name:        "Research notes",
-		Description: "Coordinate interview synthesis.",
+		Name:                      "Research notes",
+		Description:               "Coordinate interview synthesis.",
+		DefaultProfileID:          " profile_research ",
+		DefaultExecutionProfileID: " exec_local ",
 		ContextSources: []Source{{
 			ID:             " src_agents ",
 			Kind:           " workspace_instruction ",
@@ -41,6 +43,9 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	if project.ID == "" || len(project.Roots) != 0 {
 		t.Fatalf("project = %+v, want generated id and no roots", project)
 	}
+	if project.DefaultProfileID != "profile_research" || project.DefaultExecutionProfileID != "exec_local" {
+		t.Fatalf("project defaults = %q/%q, want trimmed profile and execution profile defaults", project.DefaultProfileID, project.DefaultExecutionProfileID)
+	}
 	if len(project.ContextSources) != 1 {
 		t.Fatalf("context sources = %+v, want one normalized source", project.ContextSources)
 	}
@@ -59,9 +64,11 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	}
 
 	updatedProject, err := service.UpdateProject(ctx, Project{
-		ID:          project.ID,
-		Name:        project.Name,
-		Description: project.Description,
+		ID:                        project.ID,
+		Name:                      project.Name,
+		Description:               project.Description,
+		DefaultProfileID:          "profile_synthesis",
+		DefaultExecutionProfileID: "exec_review",
 		ContextSources: []Source{{
 			ID:             "src_agents",
 			Kind:           "workspace_instruction",
@@ -84,6 +91,9 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	}
 	if updatedSource.Metadata["source"] != "manual" || updatedSource.Metadata["root_id"] != "root_main" {
 		t.Fatalf("updated source metadata = %+v, want replacement metadata", updatedSource.Metadata)
+	}
+	if updatedProject.DefaultProfileID != "profile_synthesis" || updatedProject.DefaultExecutionProfileID != "exec_review" {
+		t.Fatalf("updated defaults = %q/%q, want updated profile and execution profile defaults", updatedProject.DefaultProfileID, updatedProject.DefaultExecutionProfileID)
 	}
 
 	item, err := service.CreateWorkItem(ctx, WorkItem{
@@ -1164,6 +1174,81 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
+		Name:     "Project default profile",
+		SkillIDs: []string{"research"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentProfile() error = %v", err)
+	}
+	executionProfile, err := service.CreateExecutionProfile(ctx, ExecutionProfile{
+		Name:      "Project default execution",
+		AgentKind: "any",
+	})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	project, err := service.CreateProject(ctx, Project{
+		Name:                      "Project defaults",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := service.CreateProjectSkill(ctx, ProjectSkill{
+		ProjectID:  project.ID,
+		ID:         "research",
+		Title:      "Research",
+		Format:     SkillFormatMarkdown,
+		Enabled:    true,
+		Status:     SkillStatusAvailable,
+		TrustLabel: SkillTrustWorkspace,
+	}); err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{
+		ProjectID: project.ID,
+		Name:      "Researcher",
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID: project.ID,
+		Title:     "Investigate project defaults",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+
+	packet, err := service.AssignmentLaunchPacket(ctx, project.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("AssignmentLaunchPacket() error = %v", err)
+	}
+	if packet.Profile == nil || packet.Profile.ID != profile.ID {
+		t.Fatalf("launch packet profile = %+v, want project default profile", packet.Profile)
+	}
+	if packet.ExecutionProfile == nil || packet.ExecutionProfile.ID != executionProfile.ID {
+		t.Fatalf("launch packet execution profile = %+v, want project default execution profile", packet.ExecutionProfile)
+	}
+	if len(packet.Skills) != 1 || packet.Skills[0].ID != "research" {
+		t.Fatalf("launch packet skills = %+v, want skills from project default profile", packet.Skills)
+	}
+}
+
 func TestService_WorkItemCloseoutReadiness(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
@@ -1630,6 +1715,29 @@ func TestService_ProjectHealth(t *testing.T) {
 	}
 	if !containsHealthAttention(health.Attention, ProjectOperationKindAssignment, queued.ID) {
 		t.Fatalf("health attention = %+v, want queued assignment", health.Attention)
+	}
+}
+
+func TestService_ProjectHealthIncludesProjectDefaultProfileReferences(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{
+		Name:             "Missing project default",
+		DefaultProfileID: "missing_profile",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	health, err := service.ProjectHealth(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectHealth() error = %v", err)
+	}
+	if health.Summary.MissingProfileReferenceCount != 1 {
+		t.Fatalf("health summary = %+v, want one missing project default profile", health.Summary)
+	}
+	if !containsHealthAttentionDetail(health.Attention, ProjectOperationKindProfile, "missing_profile") {
+		t.Fatalf("health attention = %+v, want missing project default profile detail", health.Attention)
 	}
 }
 
@@ -2447,6 +2555,15 @@ func containsHealthAttention(items []ProjectHealthAttentionItem, kind, refID str
 			continue
 		}
 		if refID == "" || item.AssignmentID == refID || item.ArtifactID == refID || item.HandoffID == refID || item.MemoryCandidateID == refID {
+			return true
+		}
+	}
+	return false
+}
+
+func containsHealthAttentionDetail(items []ProjectHealthAttentionItem, kind, detail string) bool {
+	for _, item := range items {
+		if item.Kind == kind && strings.Contains(item.Detail, detail) {
 			return true
 		}
 	}

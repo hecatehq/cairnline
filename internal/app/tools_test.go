@@ -18,7 +18,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	server := NewServer(service, "dev")
 
 	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.create","arguments":{"name":"Research notes","description":"Coordinate synthesis.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"AGENTS.md","locator":"AGENTS.md","format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main"}}]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.create","arguments":{"name":"Research notes","description":"Coordinate synthesis.","default_profile_id":"profile_research","default_execution_profile_id":"exec_local","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"AGENTS.md","locator":"AGENTS.md","format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main"}}]}}}` + "\n",
 	)
 	var output bytes.Buffer
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -46,6 +46,9 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if len(projects) != 1 {
 		t.Fatalf("projects = %+v, want one project", projects)
 	}
+	if projects[0].DefaultProfileID != "profile_research" || projects[0].DefaultExecutionProfileID != "exec_local" {
+		t.Fatalf("project defaults = %q/%q, want MCP-created defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
+	}
 	if len(projects[0].ContextSources) != 1 || projects[0].ContextSources[0].Format != "agents_md" || projects[0].ContextSources[0].Metadata["root_id"] != "root_main" {
 		t.Fatalf("project sources = %+v, want MCP-created source metadata", projects[0].ContextSources)
 	}
@@ -62,7 +65,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","default_profile_id":"profile_writer","default_execution_profile_id":"exec_review","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -78,6 +81,9 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	updatedSource := projects[0].ContextSources[0]
 	if updatedSource.Title != "Repository guidance" || updatedSource.Enabled || updatedSource.Metadata["source"] != "manual" {
 		t.Fatalf("updated project source = %+v, want MCP-updated source metadata", updatedSource)
+	}
+	if projects[0].DefaultProfileID != "profile_writer" || projects[0].DefaultExecutionProfileID != "exec_review" {
+		t.Fatalf("updated project defaults = %q/%q, want MCP-updated defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
 	}
 
 	input = strings.NewReader(

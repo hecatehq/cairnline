@@ -51,6 +51,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"active":{"type":"boolean"}
 				},"required":["path"]}},
 				"default_root_id":{"type":"string"},
+				"default_profile_id":{"type":"string"},
+				"default_execution_profile_id":{"type":"string"},
 				"context_sources":{"type":"array","items":{"type":"object","properties":{
 					"id":{"type":"string"},
 					"kind":{"type":"string"},
@@ -87,6 +89,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"active":{"type":"boolean"}
 				},"required":["path"]}},
 				"default_root_id":{"type":"string"},
+				"default_profile_id":{"type":"string"},
+				"default_execution_profile_id":{"type":"string"},
 				"context_sources":{"type":"array","items":{"type":"object","properties":{
 					"id":{"type":"string"},
 					"kind":{"type":"string"},
@@ -1317,11 +1321,13 @@ func toCoreSources(input []sourceArgs) []core.Source {
 
 func createProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		Name           string       `json:"name"`
-		Description    string       `json:"description"`
-		Roots          []rootArgs   `json:"roots"`
-		DefaultRootID  string       `json:"default_root_id"`
-		ContextSources []sourceArgs `json:"context_sources"`
+		Name                      string       `json:"name"`
+		Description               string       `json:"description"`
+		Roots                     []rootArgs   `json:"roots"`
+		DefaultRootID             string       `json:"default_root_id"`
+		DefaultProfileID          string       `json:"default_profile_id"`
+		DefaultExecutionProfileID string       `json:"default_execution_profile_id"`
+		ContextSources            []sourceArgs `json:"context_sources"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1329,11 +1335,13 @@ func createProject(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateProject(ctx, core.Project{
-			Name:           input.Name,
-			Description:    input.Description,
-			Roots:          toCoreRoots(input.Roots),
-			DefaultRootID:  input.DefaultRootID,
-			ContextSources: toCoreSources(input.ContextSources),
+			Name:                      input.Name,
+			Description:               input.Description,
+			Roots:                     toCoreRoots(input.Roots),
+			DefaultRootID:             input.DefaultRootID,
+			DefaultProfileID:          input.DefaultProfileID,
+			DefaultExecutionProfileID: input.DefaultExecutionProfileID,
+			ContextSources:            toCoreSources(input.ContextSources),
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -1346,12 +1354,14 @@ func createProject(service *core.Service) mcp.ToolHandler {
 
 func updateProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ID             string        `json:"id"`
-		Name           *string       `json:"name"`
-		Description    *string       `json:"description"`
-		Roots          *[]rootArgs   `json:"roots"`
-		DefaultRootID  *string       `json:"default_root_id"`
-		ContextSources *[]sourceArgs `json:"context_sources"`
+		ID                        string        `json:"id"`
+		Name                      *string       `json:"name"`
+		Description               *string       `json:"description"`
+		Roots                     *[]rootArgs   `json:"roots"`
+		DefaultRootID             *string       `json:"default_root_id"`
+		DefaultProfileID          *string       `json:"default_profile_id"`
+		DefaultExecutionProfileID *string       `json:"default_execution_profile_id"`
+		ContextSources            *[]sourceArgs `json:"context_sources"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1376,6 +1386,12 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		if input.DefaultRootID != nil {
 			existing.DefaultRootID = *input.DefaultRootID
+		}
+		if input.DefaultProfileID != nil {
+			existing.DefaultProfileID = *input.DefaultProfileID
+		}
+		if input.DefaultExecutionProfileID != nil {
+			existing.DefaultExecutionProfileID = *input.DefaultExecutionProfileID
 		}
 		if input.ContextSources != nil {
 			existing.ContextSources = toCoreSources(*input.ContextSources)
