@@ -1113,7 +1113,7 @@ func (s *Service) CreateArtifact(ctx context.Context, input Artifact) (Artifact,
 			return Artifact{}, err
 		}
 	}
-	now := s.now()
+	createdAt, updatedAt := importedTimestamps(input.CreatedAt, input.UpdatedAt, s.now())
 	item := Artifact{
 		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("art")),
 		ProjectID:      projectID,
@@ -1125,8 +1125,8 @@ func (s *Service) CreateArtifact(ctx context.Context, input Artifact) (Artifact,
 		AuthorRoleID:   authorRoleID,
 		ProvenanceKind: strings.TrimSpace(input.ProvenanceKind),
 		TrustLabel:     strings.TrimSpace(input.TrustLabel),
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
 	}
 	return s.store.CreateArtifact(ctx, item)
 }
@@ -1191,7 +1191,7 @@ func (s *Service) CreateEvidence(ctx context.Context, input Evidence) (Evidence,
 	if trustLabel == "" {
 		trustLabel = EvidenceTrustOperator
 	}
-	now := s.now()
+	createdAt, updatedAt := importedTimestamps(input.CreatedAt, input.UpdatedAt, s.now())
 	item := Evidence{
 		ID:           firstNonEmpty(strings.TrimSpace(input.ID), newID("ev")),
 		ProjectID:    projectID,
@@ -1201,8 +1201,8 @@ func (s *Service) CreateEvidence(ctx context.Context, input Evidence) (Evidence,
 		Body:         body,
 		Locator:      locator,
 		TrustLabel:   trustLabel,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
 	}
 	return s.store.CreateEvidence(ctx, item)
 }
@@ -1260,7 +1260,7 @@ func (s *Service) CreateReview(ctx context.Context, input Review) (Review, error
 	if err != nil {
 		return Review{}, err
 	}
-	now := s.now()
+	createdAt, updatedAt := importedTimestamps(input.CreatedAt, input.UpdatedAt, s.now())
 	item := Review{
 		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("rev")),
 		ProjectID:      projectID,
@@ -1272,8 +1272,8 @@ func (s *Service) CreateReview(ctx context.Context, input Review) (Review, error
 		Verdict:        verdict,
 		Risk:           risk,
 		Status:         ReviewStatusRecorded,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
 	}
 	return s.store.CreateReview(ctx, item)
 }
