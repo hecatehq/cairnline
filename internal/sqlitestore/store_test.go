@@ -45,9 +45,11 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateExecutionProfile() error = %v", err)
 	}
 	project, err := service.CreateProject(ctx, core.Project{
-		Name:          "Persistent project",
-		Description:   "Survives process restart.",
-		DefaultRootID: "root_main",
+		Name:                      "Persistent project",
+		Description:               "Survives process restart.",
+		DefaultRootID:             "root_main",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
 		Roots: []core.Root{{
 			ID:     "root_main",
 			Path:   "/tmp/example",
@@ -224,6 +226,9 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if projects[0].DefaultRootID != "root_main" {
 		t.Fatalf("default root = %q, want root_main", projects[0].DefaultRootID)
+	}
+	if projects[0].DefaultProfileID != profile.ID || projects[0].DefaultExecutionProfileID != executionProfile.ID {
+		t.Fatalf("project defaults = %q/%q, want persisted profile and execution profile defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
 	}
 	source := projects[0].ContextSources[0]
 	if source.Locator != "AGENTS.md" || source.Format != "agents_md" || source.Scope != "workspace" || source.SourceCategory != "instructions" || source.Metadata["root_id"] != "root_main" {
@@ -895,7 +900,7 @@ func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
 	}
 }
 
-func TestStore_MigrateAddsProjectDefaultRootID(t *testing.T) {
+func TestStore_MigrateAddsProjectDefaultColumns(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old-project.db")
 	db, err := sql.Open("sqlite", path)
@@ -929,7 +934,12 @@ func TestStore_MigrateAddsProjectDefaultRootID(t *testing.T) {
 		t.Fatalf("PRAGMA table_info error = %v", err)
 	}
 	defer rows.Close()
-	found := false
+	found := map[string]bool{}
+	want := map[string]bool{
+		"default_root_id":              true,
+		"default_profile_id":           true,
+		"default_execution_profile_id": true,
+	}
 	for rows.Next() {
 		var cid int
 		var name, columnType string
@@ -938,18 +948,20 @@ func TestStore_MigrateAddsProjectDefaultRootID(t *testing.T) {
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
 			t.Fatalf("scan table_info error = %v", err)
 		}
-		if name == "default_root_id" {
-			found = true
+		if want[name] {
+			found[name] = true
 			if columnType != "TEXT" || notNull != 1 {
-				t.Fatalf("default_root_id column type=%q notNull=%d, want TEXT NOT NULL", columnType, notNull)
+				t.Fatalf("%s column type=%q notNull=%d, want TEXT NOT NULL", name, columnType, notNull)
 			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("table_info rows error = %v", err)
 	}
-	if !found {
-		t.Fatalf("projects default_root_id column was not added")
+	for name := range want {
+		if !found[name] {
+			t.Fatalf("projects %s column was not added", name)
+		}
 	}
 }
 

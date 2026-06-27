@@ -3,14 +3,16 @@ package core
 import "time"
 
 type Project struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	Roots          []Root    `json:"roots,omitempty"`
-	DefaultRootID  string    `json:"default_root_id,omitempty"`
-	ContextSources []Source  `json:"context_sources,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                        string    `json:"id"`
+	Name                      string    `json:"name"`
+	Description               string    `json:"description,omitempty"`
+	Roots                     []Root    `json:"roots,omitempty"`
+	DefaultRootID             string    `json:"default_root_id,omitempty"`
+	DefaultProfileID          string    `json:"default_profile_id,omitempty"`
+	DefaultExecutionProfileID string    `json:"default_execution_profile_id,omitempty"`
+	ContextSources            []Source  `json:"context_sources,omitempty"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 type Root struct {

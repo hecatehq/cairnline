@@ -79,7 +79,7 @@ func (s *Service) ProjectHealth(ctx context.Context, projectID string) (ProjectH
 	for _, item := range operations.Items {
 		attention = append(attention, projectOperationHealthAttention(project.ID, item))
 	}
-	missingProfiles := missingProjectHealthProfileReferences(roles, assignments, profiles)
+	missingProfiles := missingProjectHealthProfileReferences(project, roles, assignments, profiles)
 	summary.MissingProfileReferenceCount = len(missingProfiles)
 	if len(missingProfiles) > 0 {
 		attention = append(attention, ProjectHealthAttentionItem{
@@ -89,12 +89,12 @@ func (s *Service) ProjectHealth(ctx context.Context, projectID string) (ProjectH
 			Severity:    ProjectOperationSeverityBlocked,
 			Status:      "missing",
 			Title:       "Agent profile reference missing",
-			Detail:      "Role or assignment defaults reference " + summarizeIDs(missingProfiles) + ".",
+			Detail:      "Project, role, or assignment defaults reference " + summarizeIDs(missingProfiles) + ".",
 			ActionKind:  "update_profiles",
 			ActionLabel: "Review profiles",
 		})
 	}
-	skillIssues := projectHealthSkillIssues(roles, assignments, profiles, skills)
+	skillIssues := projectHealthSkillIssues(project, roles, assignments, profiles, skills)
 	summary.ProjectSkillIssueCount = len(skillIssues)
 	if len(skillIssues) > 0 {
 		attention = append(attention, ProjectHealthAttentionItem{
@@ -282,7 +282,7 @@ func projectOperationHealthAction(item ProjectOperationItem) (string, string) {
 	}
 }
 
-func missingProjectHealthProfileReferences(roles []Role, assignments []Assignment, profiles []AgentProfile) []string {
+func missingProjectHealthProfileReferences(project Project, roles []Role, assignments []Assignment, profiles []AgentProfile) []string {
 	profileIDs := make(map[string]struct{}, len(profiles))
 	for _, profile := range profiles {
 		if id := strings.TrimSpace(profile.ID); id != "" {
@@ -300,6 +300,7 @@ func missingProjectHealthProfileReferences(roles []Role, assignments []Assignmen
 		}
 		missing = appendUnique(missing, id)
 	}
+	addMissing(project.DefaultProfileID)
 	for _, role := range roles {
 		addMissing(role.DefaultProfileID)
 	}
@@ -310,14 +311,14 @@ func missingProjectHealthProfileReferences(roles []Role, assignments []Assignmen
 	return missing
 }
 
-func projectHealthSkillIssues(roles []Role, assignments []Assignment, profiles []AgentProfile, skills []ProjectSkill) []string {
+func projectHealthSkillIssues(project Project, roles []Role, assignments []Assignment, profiles []AgentProfile, skills []ProjectSkill) []string {
 	skillsByID := make(map[string]ProjectSkill, len(skills))
 	for _, skill := range skills {
 		if id := normalizeSkillID(skill.ID); id != "" {
 			skillsByID[id] = skill
 		}
 	}
-	referenced := referencedProjectHealthSkillIDs(roles, assignments, profiles)
+	referenced := referencedProjectHealthSkillIDs(project, roles, assignments, profiles)
 	unresolved := make([]string, 0)
 	disabled := make([]string, 0)
 	unavailable := make([]string, 0)
@@ -347,7 +348,7 @@ func projectHealthSkillIssues(roles []Role, assignments []Assignment, profiles [
 	return issues
 }
 
-func referencedProjectHealthSkillIDs(roles []Role, assignments []Assignment, profiles []AgentProfile) []string {
+func referencedProjectHealthSkillIDs(project Project, roles []Role, assignments []Assignment, profiles []AgentProfile) []string {
 	referenced := make([]string, 0)
 	relevantProfileIDs := make(map[string]struct{})
 	addSkill := func(id string) {
@@ -355,6 +356,9 @@ func referencedProjectHealthSkillIDs(roles []Role, assignments []Assignment, pro
 		if id != "" {
 			referenced = appendUnique(referenced, id)
 		}
+	}
+	if id := strings.TrimSpace(project.DefaultProfileID); id != "" {
+		relevantProfileIDs[id] = struct{}{}
 	}
 	for _, role := range roles {
 		for _, skillID := range role.DefaultSkillIDs {

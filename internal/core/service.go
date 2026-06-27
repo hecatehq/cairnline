@@ -58,14 +58,16 @@ func (s *Service) CreateProject(ctx context.Context, input Project) (Project, er
 	}
 	now := s.now()
 	item := Project{
-		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("proj")),
-		Name:           name,
-		Description:    strings.TrimSpace(input.Description),
-		Roots:          roots,
-		DefaultRootID:  defaultRootID,
-		ContextSources: normalizeSources(input.ContextSources, nil, now),
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                        firstNonEmpty(strings.TrimSpace(input.ID), newID("proj")),
+		Name:                      name,
+		Description:               strings.TrimSpace(input.Description),
+		Roots:                     roots,
+		DefaultRootID:             defaultRootID,
+		DefaultProfileID:          strings.TrimSpace(input.DefaultProfileID),
+		DefaultExecutionProfileID: strings.TrimSpace(input.DefaultExecutionProfileID),
+		ContextSources:            normalizeSources(input.ContextSources, nil, now),
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}
 	return s.store.CreateProject(ctx, item)
 }
@@ -90,14 +92,16 @@ func (s *Service) UpdateProject(ctx context.Context, input Project) (Project, er
 	}
 	now := s.now()
 	item := Project{
-		ID:             id,
-		Name:           name,
-		Description:    strings.TrimSpace(input.Description),
-		Roots:          roots,
-		DefaultRootID:  defaultRootID,
-		ContextSources: normalizeSources(input.ContextSources, existingSourcesByID(existing.ContextSources), now),
-		CreatedAt:      existing.CreatedAt,
-		UpdatedAt:      now,
+		ID:                        id,
+		Name:                      name,
+		Description:               strings.TrimSpace(input.Description),
+		Roots:                     roots,
+		DefaultRootID:             defaultRootID,
+		DefaultProfileID:          strings.TrimSpace(input.DefaultProfileID),
+		DefaultExecutionProfileID: strings.TrimSpace(input.DefaultExecutionProfileID),
+		ContextSources:            normalizeSources(input.ContextSources, existingSourcesByID(existing.ContextSources), now),
+		CreatedAt:                 existing.CreatedAt,
+		UpdatedAt:                 now,
 	}
 	return s.store.UpdateProject(ctx, item)
 }
@@ -893,7 +897,7 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 	}
 	warnings := append([]string(nil), packetContext.Warnings...)
 	var profile *AgentProfile
-	profileID := firstNonEmpty(packetContext.Assignment.ProfileID, profileIDFromRole(packetContext.Role))
+	profileID := firstNonEmpty(packetContext.Assignment.ProfileID, profileIDFromRole(packetContext.Role), packetContext.Project.DefaultProfileID)
 	if profileID != "" {
 		resolvedProfile, err := s.store.GetAgentProfile(ctx, profileID)
 		if err != nil {
@@ -906,7 +910,7 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		}
 	}
 	var executionProfile *ExecutionProfile
-	executionProfileID := firstNonEmpty(packetContext.Assignment.ExecutionProfileID, executionProfileIDFromRole(packetContext.Role))
+	executionProfileID := firstNonEmpty(packetContext.Assignment.ExecutionProfileID, executionProfileIDFromRole(packetContext.Role), packetContext.Project.DefaultExecutionProfileID)
 	if executionProfileID != "" {
 		resolvedExecutionProfile, err := s.store.GetExecutionProfile(ctx, executionProfileID)
 		if err != nil {
