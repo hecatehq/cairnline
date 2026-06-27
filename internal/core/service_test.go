@@ -382,6 +382,49 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	}
 }
 
+func TestService_HandoffImportPreservesTimestamps(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	project, err := service.CreateProject(ctx, Project{Name: "Imported handoff"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Replay handoff"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	createdAt := time.Date(2026, 6, 3, 12, 6, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 6, 3, 12, 7, 0, 0, time.UTC)
+	handoff, err := service.CreateHandoff(ctx, Handoff{
+		ID:         "handoff_imported",
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		Title:      "Imported handoff",
+		Body:       "Keep source timestamps.",
+		Status:     HandoffStatusOpen,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if !handoff.CreatedAt.Equal(createdAt) || !handoff.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("handoff timestamps = %s/%s, want %s/%s", handoff.CreatedAt, handoff.UpdatedAt, createdAt, updatedAt)
+	}
+
+	nextUpdatedAt := time.Date(2026, 6, 3, 12, 8, 0, 0, time.UTC)
+	handoff.Body = "Updated source summary."
+	handoff.UpdatedAt = nextUpdatedAt
+	updated, err := service.UpdateHandoff(ctx, handoff)
+	if err != nil {
+		t.Fatalf("UpdateHandoff() error = %v", err)
+	}
+	if !updated.CreatedAt.Equal(createdAt) || !updated.UpdatedAt.Equal(nextUpdatedAt) {
+		t.Fatalf("updated handoff timestamps = %s/%s, want %s/%s", updated.CreatedAt, updated.UpdatedAt, createdAt, nextUpdatedAt)
+	}
+}
+
 func TestService_CreateWorkItemValidatesProject(t *testing.T) {
 	service := NewService(NewMemoryStore())
 
