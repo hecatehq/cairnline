@@ -569,6 +569,20 @@ func (s *MemoryStore) ListEvidence(ctx context.Context, projectID, workItemID st
 	return items, nil
 }
 
+func (s *MemoryStore) GetEvidence(ctx context.Context, projectID, workItemID, id string) (Evidence, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return Evidence{}, err
+	}
+	item, ok := s.evidence[projectID][id]
+	if !ok || item.WorkItemID != workItemID {
+		return Evidence{}, ErrNotFound
+	}
+	return item, nil
+}
+
 func (s *MemoryStore) CreateEvidence(ctx context.Context, evidence Evidence) (Evidence, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -603,6 +617,20 @@ func (s *MemoryStore) ListReviews(ctx context.Context, projectID, workItemID str
 		return b.UpdatedAt.Compare(a.UpdatedAt)
 	})
 	return items, nil
+}
+
+func (s *MemoryStore) GetReview(ctx context.Context, projectID, workItemID, id string) (Review, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return Review{}, err
+	}
+	item, ok := s.reviews[projectID][id]
+	if !ok || item.WorkItemID != workItemID {
+		return Review{}, ErrNotFound
+	}
+	return item, nil
 }
 
 func (s *MemoryStore) CreateReview(ctx context.Context, review Review) (Review, error) {

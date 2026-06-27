@@ -54,9 +54,11 @@ type Store interface {
 	DeleteAssignment(ctx context.Context, projectID, id string) error
 
 	ListEvidence(ctx context.Context, projectID, workItemID string) ([]Evidence, error)
+	GetEvidence(ctx context.Context, projectID, workItemID, id string) (Evidence, error)
 	CreateEvidence(ctx context.Context, evidence Evidence) (Evidence, error)
 
 	ListReviews(ctx context.Context, projectID, workItemID string) ([]Review, error)
+	GetReview(ctx context.Context, projectID, workItemID, id string) (Review, error)
 	CreateReview(ctx context.Context, review Review) (Review, error)
 
 	ListHandoffs(ctx context.Context, projectID, workItemID string) ([]Handoff, error)

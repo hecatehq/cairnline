@@ -355,6 +355,35 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "Recorded evidence ev_") {
 		t.Fatalf("record evidence response = %s", output.String())
 	}
+	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListEvidence() after record error = %v", err)
+	}
+	if len(evidence) != 1 {
+		t.Fatalf("evidence after record = %+v, want one evidence record", evidence)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":"evidence.list","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list evidence error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Evidence (1):") || !strings.Contains(got, evidence[0].ID) || !strings.Contains(got, `"structuredContent"`) {
+		t.Fatalf("list evidence response = %s", got)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":102,"method":"tools/call","params":{"name":"evidence.get","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","evidence_id":"` + evidence[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get evidence error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Evidence (1):") || !strings.Contains(got, "file://report.md") {
+		t.Fatalf("get evidence response = %s", got)
+	}
 
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"reviews.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","reviewer_role_id":"` + role.ID + `","body":"Looks good.","verdict":"pass","risk":"low"}}}` + "\n",
@@ -372,6 +401,28 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if len(reviews) != 1 {
 		t.Fatalf("reviews after record = %+v, want one review", reviews)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":103,"method":"tools/call","params":{"name":"reviews.list","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list reviews error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Reviews (1):") || !strings.Contains(got, reviews[0].ID) || !strings.Contains(got, `"structuredContent"`) {
+		t.Fatalf("list reviews response = %s", got)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":104,"method":"tools/call","params":{"name":"reviews.get","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","review_id":"` + reviews[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get review error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Review (1):") || !strings.Contains(got, "risk=low") {
+		t.Fatalf("get review response = %s", got)
 	}
 
 	input = strings.NewReader(
@@ -518,7 +569,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("activity = %+v, want completed assignment bucket", activity)
 	}
 
-	evidence, err := service.ListEvidence(ctx, project.ID, work.ID)
+	evidence, err = service.ListEvidence(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
 	}
