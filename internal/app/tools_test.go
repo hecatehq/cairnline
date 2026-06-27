@@ -173,6 +173,7 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 		ID:        "prop_mcp",
 		ProjectID: project.ID,
 		Title:     "Queue first assignment",
+		Warnings:  []string{"review before apply"},
 		Actions: []core.AssistantAction{
 			{
 				Kind: core.AssistantActionCreateRole,
@@ -210,7 +211,7 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 	if err := server.Serve(ctx, bytes.NewReader(append(proposePayload, '\n')), &output); err != nil {
 		t.Fatalf("Serve(propose) error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Assistant proposal prop_mcp") || !strings.Contains(output.String(), "requires_confirmation=true") || !strings.Contains(output.String(), `"structuredContent"`) {
+	if !strings.Contains(output.String(), "Assistant proposal prop_mcp") || !strings.Contains(output.String(), "Warning: review before apply") || !strings.Contains(output.String(), "requires_confirmation=true") || !strings.Contains(output.String(), `"structuredContent"`) {
 		t.Fatalf("propose response = %s", output.String())
 	}
 	var proposeResponse struct {
@@ -223,6 +224,9 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 	}
 	if proposeResponse.Result.StructuredContent.Status != core.AssistantProposalStatusProposed || proposeResponse.Result.StructuredContent.Proposal.ID != "prop_mcp" {
 		t.Fatalf("proposal record = %+v, want proposed prop_mcp", proposeResponse.Result.StructuredContent)
+	}
+	if len(proposeResponse.Result.StructuredContent.Proposal.Warnings) != 1 || proposeResponse.Result.StructuredContent.Proposal.Warnings[0] != "review before apply" {
+		t.Fatalf("proposal warnings = %+v, want warning in structured proposal", proposeResponse.Result.StructuredContent.Proposal.Warnings)
 	}
 
 	listPayload, err := json.Marshal(map[string]any{

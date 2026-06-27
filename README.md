@@ -121,9 +121,10 @@ Implemented now:
 - read-only project setup-readiness and health summaries for onboarding,
   context/profile/skill gaps, and bounded operator attention
 - deterministic assistant proposal/apply tools with durable proposal records,
-  apply attempts, latest-result state, and repeat-apply protection for confirmed
-  project-state mutations; applying a proposal can create queued assignment
-  coordination records, but it does not launch or supervise agents
+  proposal warnings, apply attempts, latest-result state, and repeat-apply
+  protection for confirmed project-state mutations; applying a proposal can
+  create queued assignment coordination records, but it does not launch or
+  supervise agents
 - embeddable proposal-record import for migration and bridge seeding; import
   preserves ledger state without replaying proposal actions
 

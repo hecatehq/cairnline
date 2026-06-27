@@ -127,6 +127,7 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 		ID:        "prop_public",
 		ProjectID: project.ID,
 		Title:     "Create public work",
+		Warnings:  []string{"operator should confirm scope"},
 		Actions: []cairnline.AssistantAction{{
 			Kind: cairnline.AssistantActionCreateWorkItem,
 			WorkItem: &cairnline.WorkItem{
@@ -142,6 +143,9 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 	var typedRecord cairnline.AssistantProposalRecord = record
 	if typedRecord.Status != cairnline.AssistantProposalStatusProposed {
 		t.Fatalf("proposal status = %q, want public proposed constant", typedRecord.Status)
+	}
+	if len(typedRecord.Proposal.Warnings) != 1 || typedRecord.Proposal.Warnings[0] != "operator should confirm scope" {
+		t.Fatalf("proposal warnings = %+v, want public warnings preserved", typedRecord.Proposal.Warnings)
 	}
 	result, err := service.ApplyAssistantProposalRecord(ctx, typedRecord.ID, true)
 	if err != nil {
@@ -171,6 +175,7 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 			ID:        "prop_import_public",
 			ProjectID: project.ID,
 			Title:     "Imported public proposal",
+			Warnings:  []string{"imported warning"},
 			Actions: []cairnline.AssistantAction{{
 				Kind:     cairnline.AssistantActionCreateWorkItem,
 				WorkItem: &cairnline.WorkItem{ID: "work_import_public", ProjectID: project.ID, Title: "Imported work"},
@@ -188,5 +193,8 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 	}
 	if imported.Status != cairnline.AssistantProposalStatusRejected || imported.LatestResult == nil {
 		t.Fatalf("imported public proposal = %+v, want rejected imported ledger state", imported)
+	}
+	if len(imported.Proposal.Warnings) != 1 || imported.Proposal.Warnings[0] != "imported warning" {
+		t.Fatalf("imported warnings = %+v, want public imported warnings preserved", imported.Proposal.Warnings)
 	}
 }

@@ -226,6 +226,7 @@ type AssistantProposal struct {
 	ProjectID            string            `json:"project_id,omitempty"`
 	Title                string            `json:"title"`
 	Summary              string            `json:"summary,omitempty"`
+	Warnings             []string          `json:"warnings,omitempty"`
 	Source               string            `json:"source,omitempty"`
 	RequiresConfirmation bool              `json:"requires_confirmation"`
 	Actions              []AssistantAction `json:"actions"`

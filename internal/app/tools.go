@@ -174,6 +174,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"project_id":{"type":"string"},
 				"title":{"type":"string","minLength":1},
 				"summary":{"type":"string"},
+				"warnings":{"type":"array","items":{"type":"string"}},
 				"source":{"type":"string"},
 				"actions":{"type":"array","items":{"type":"object"},"minItems":1}
 			},
@@ -3530,6 +3531,9 @@ func formatAssistantProposal(proposal core.AssistantProposal) string {
 	if proposal.Summary != "" {
 		fmt.Fprintf(&b, "%s\n", proposal.Summary)
 	}
+	for _, warning := range proposal.Warnings {
+		fmt.Fprintf(&b, "Warning: %s\n", warning)
+	}
 	fmt.Fprintf(&b, "requires_confirmation=%t actions=%d\n", proposal.RequiresConfirmation, len(proposal.Actions))
 	for idx, action := range proposal.Actions {
 		fmt.Fprintf(&b, "%d. %s", idx+1, action.Kind)
@@ -3549,6 +3553,9 @@ func formatAssistantProposalRecord(record core.AssistantProposalRecord) string {
 	}
 	if record.Proposal.Summary != "" {
 		fmt.Fprintf(&b, "%s\n", record.Proposal.Summary)
+	}
+	for _, warning := range record.Proposal.Warnings {
+		fmt.Fprintf(&b, "Warning: %s\n", warning)
 	}
 	fmt.Fprintf(&b, "source=%s requires_confirmation=%t actions=%d attempts=%d\n", record.Source, record.Proposal.RequiresConfirmation, len(record.Proposal.Actions), len(record.ApplyAttempts))
 	if record.LatestResult != nil {
