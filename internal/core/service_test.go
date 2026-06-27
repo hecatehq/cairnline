@@ -2453,6 +2453,109 @@ func TestService_MemoryCandidateDecisionLifecycle(t *testing.T) {
 	}
 }
 
+func TestService_MemoryEntryImportPreservesTimestamps(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	service.now = func() time.Time {
+		return time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	}
+	project, err := service.CreateProject(ctx, Project{Name: "Imported memory"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	createdAt := time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 6, 21, 9, 30, 0, 0, time.UTC)
+
+	entry, err := service.CreateMemoryEntry(ctx, MemoryEntry{
+		ID:         "mem_imported",
+		ProjectID:  project.ID,
+		Title:      "Imported memory",
+		Body:       "Memory mirrored from an existing coordination store.",
+		TrustLabel: MemoryTrustOperator,
+		SourceKind: MemorySourceOperator,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	if !entry.CreatedAt.Equal(createdAt) || !entry.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("entry timestamps = created:%s updated:%s, want imported timestamps", entry.CreatedAt, entry.UpdatedAt)
+	}
+	if !entry.Enabled {
+		t.Fatalf("entry = %+v, want ordinary create default enabled", entry)
+	}
+
+	importedUpdateAt := time.Date(2026, 6, 22, 11, 0, 0, 0, time.UTC)
+	entry.Enabled = false
+	entry.UpdatedAt = importedUpdateAt
+	updated, err := service.UpdateMemoryEntry(ctx, entry)
+	if err != nil {
+		t.Fatalf("UpdateMemoryEntry() error = %v", err)
+	}
+	if updated.Enabled || !updated.CreatedAt.Equal(createdAt) || !updated.UpdatedAt.Equal(importedUpdateAt) {
+		t.Fatalf("updated entry = %+v, want disabled entry preserving imported timestamps", updated)
+	}
+}
+
+func TestService_MemoryCandidateImportPreservesTimestampsAndResolvedState(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	service.now = func() time.Time {
+		return time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
+	}
+	project, err := service.CreateProject(ctx, Project{Name: "Imported memory candidates"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	createdAt := time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 6, 21, 9, 30, 0, 0, time.UTC)
+
+	candidate, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{
+		ID:                  "memcand_imported",
+		ProjectID:           project.ID,
+		Title:               "Imported candidate",
+		Body:                "Candidate mirrored from an existing coordination store.",
+		SuggestedKind:       "project_pattern",
+		SuggestedTrustLabel: MemoryTrustGenerated,
+		SuggestedSourceKind: MemorySourceGenerated,
+		SourceRefs: []MemoryCandidateSourceRef{{
+			Kind:  "handoff",
+			ID:    "handoff_import",
+			Title: "Imported handoff",
+		}},
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+	if candidate.Status != MemoryCandidatePending || !candidate.CreatedAt.Equal(createdAt) || !candidate.UpdatedAt.Equal(updatedAt) || len(candidate.SourceRefs) != 1 {
+		t.Fatalf("candidate = %+v, want pending imported metadata and timestamps", candidate)
+	}
+
+	importedUpdateAt := time.Date(2026, 6, 22, 11, 0, 0, 0, time.UTC)
+	candidate.Status = MemoryCandidateRejected
+	candidate.StatusReason = "Not durable enough."
+	candidate.PromotedMemoryID = ""
+	candidate.SuggestedKind = ""
+	candidate.SourceRefs = nil
+	candidate.UpdatedAt = importedUpdateAt
+	updated, err := service.UpdateMemoryCandidate(ctx, candidate)
+	if err != nil {
+		t.Fatalf("UpdateMemoryCandidate() error = %v", err)
+	}
+	if updated.Status != MemoryCandidateRejected || updated.StatusReason != "Not durable enough." || updated.PromotedMemoryID != "" {
+		t.Fatalf("updated candidate = %+v, want imported rejected state", updated)
+	}
+	if !updated.CreatedAt.Equal(createdAt) || !updated.UpdatedAt.Equal(importedUpdateAt) {
+		t.Fatalf("updated candidate timestamps = created:%s updated:%s, want imported timestamps", updated.CreatedAt, updated.UpdatedAt)
+	}
+	if updated.SuggestedKind != "" || len(updated.SourceRefs) != 0 {
+		t.Fatalf("updated candidate provenance = kind:%q refs:%+v, want imported cleared provenance", updated.SuggestedKind, updated.SourceRefs)
+	}
+}
+
 func TestService_MemoryEntryLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
