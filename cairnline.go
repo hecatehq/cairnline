@@ -151,6 +151,9 @@ const (
 
 	AssistantActionCreateProject         = core.AssistantActionCreateProject
 	AssistantActionUpdateProject         = core.AssistantActionUpdateProject
+	AssistantActionAttachProjectRoot     = core.AssistantActionAttachProjectRoot
+	AssistantActionRemoveProjectRoot     = core.AssistantActionRemoveProjectRoot
+	AssistantActionSetProjectDefaults    = core.AssistantActionSetProjectDefaults
 	AssistantActionCreateRole            = core.AssistantActionCreateRole
 	AssistantActionUpdateRole            = core.AssistantActionUpdateRole
 	AssistantActionCreateWorkItem        = core.AssistantActionCreateWorkItem
