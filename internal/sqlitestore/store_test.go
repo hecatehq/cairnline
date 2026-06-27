@@ -321,6 +321,221 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "project-delete.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+
+	profile, err := service.CreateAgentProfile(ctx, core.AgentProfile{Name: "Global profile"})
+	if err != nil {
+		t.Fatalf("CreateAgentProfile() error = %v", err)
+	}
+	execution, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Global execution"})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	project, err := service.CreateProject(ctx, core.Project{Name: "Delete me"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer", DefaultProfileID: profile.ID})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Delete scoped rows"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionProfileID: execution.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.CreateProjectSkill(ctx, core.ProjectSkill{ProjectID: project.ID, ID: "review", Title: "Review", Format: core.SkillFormatMarkdown, Status: core.SkillStatusAvailable, TrustLabel: core.SkillTrustWorkspace}); err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, core.Evidence{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: core.ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, SourceAssignmentID: assignment.ID, Title: "Handoff", Body: "Follow up"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if _, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{ProjectID: project.ID, Title: "Accepted memory", Body: "Remember this"}); err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{ProjectID: project.ID, Title: "Candidate", Body: "Review this"}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteProject(ctx, project.ID); err != nil {
+		t.Fatalf("DeleteProject() error = %v", err)
+	}
+	if _, err := service.GetProject(ctx, project.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetProject() after delete error = %v, want ErrNotFound", err)
+	}
+	if _, err := service.ListWorkItems(ctx, project.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListWorkItems() after delete error = %v, want ErrNotFound", err)
+	}
+	if _, err := service.ListMemoryEntries(ctx, project.ID, false); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("ListMemoryEntries() after delete error = %v, want ErrNotFound", err)
+	}
+	profiles, err := service.ListAgentProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentProfiles() error = %v", err)
+	}
+	executionProfiles, err := service.ListExecutionProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionProfiles() error = %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != profile.ID || len(executionProfiles) != 1 || executionProfiles[0].ID != execution.ID {
+		t.Fatalf("global profiles = %+v execution = %+v, want preserved globals", profiles, executionProfiles)
+	}
+}
+
+func TestStore_DeleteWorkItemAndAssignmentScope(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "work-assignment-delete.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+
+	project, err := service.CreateProject(ctx, core.Project{Name: "Cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Delete scoped work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	keepWork, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Keep this work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(keep) error = %v", err)
+	}
+	deletedAssignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(deleted) error = %v", err)
+	}
+	keptAssignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: keepWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(keep) error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: deletedAssignment.ID, Body: "Delete with assignment.", Verdict: core.ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview(deleted assignment) error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, TargetWorkItemID: keepWork.ID, Title: "Handoff", Body: "Continue elsewhere"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	memory, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{ProjectID: project.ID, Title: "Keep project memory", Body: "Project-level candidate stays.", SuggestedSourceID: deletedAssignment.ID})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteAssignment(ctx, project.ID, deletedAssignment.ID); err != nil {
+		t.Fatalf("DeleteAssignment() error = %v", err)
+	}
+	if _, err := service.GetAssignment(ctx, project.ID, deletedAssignment.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetAssignment(deleted) error = %v, want ErrNotFound", err)
+	}
+	if reviews, err := service.ListReviews(ctx, project.ID, work.ID); err != nil || len(reviews) != 0 {
+		t.Fatalf("reviews after assignment delete = %+v error=%v, want none", reviews, err)
+	}
+
+	if err := service.DeleteWorkItem(ctx, project.ID, work.ID); err != nil {
+		t.Fatalf("DeleteWorkItem() error = %v", err)
+	}
+	if _, err := service.GetWorkItem(ctx, project.ID, work.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetWorkItem() after delete error = %v, want ErrNotFound", err)
+	}
+	assignments, err := service.ListAssignments(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() after work delete error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != keptAssignment.ID {
+		t.Fatalf("assignments after work delete = %+v, want kept assignment only", assignments)
+	}
+	candidates, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() after work delete error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ID != memory.ID {
+		t.Fatalf("memory candidates after work delete = %+v, want project-level memory preserved", candidates)
+	}
+}
+
+func TestStore_HandoffLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoffs.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+
+	project, err := service.CreateProject(ctx, core.Project{Name: "Handoff flow"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	fromRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole(from) error = %v", err)
+	}
+	toRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(to) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Ship handoff"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	handoff, err := service.CreateHandoff(ctx, core.Handoff{
+		ProjectID:         project.ID,
+		WorkItemID:        work.ID,
+		FromRoleID:        fromRole.ID,
+		ToRoleID:          toRole.ID,
+		Title:             "Ready for review",
+		Body:              "Implementation is ready.",
+		LinkedArtifactIDs: []string{"evidence_1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	got, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff() error = %v", err)
+	}
+	got.Status = core.HandoffStatusAccepted
+	got.Title = "Accepted for review"
+	got.LinkedMemoryIDs = []string{"mem_1"}
+	updated, err := service.UpdateHandoff(ctx, got)
+	if err != nil {
+		t.Fatalf("UpdateHandoff() error = %v", err)
+	}
+	if updated.Status != core.HandoffStatusAccepted || updated.Title != "Accepted for review" || len(updated.LinkedMemoryIDs) != 1 {
+		t.Fatalf("updated handoff = %+v, want accepted replacement metadata", updated)
+	}
+	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, core.ErrInvalid) {
+		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
+	}
+	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID); err != nil {
+		t.Fatalf("DeleteHandoff() error = %v", err)
+	}
+	if _, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetHandoff(deleted) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestStore_MemoryCandidateDecisionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "candidate.db"))

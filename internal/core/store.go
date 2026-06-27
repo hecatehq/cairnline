@@ -18,6 +18,7 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (Project, error)
 	CreateProject(ctx context.Context, project Project) (Project, error)
 	UpdateProject(ctx context.Context, project Project) (Project, error)
+	DeleteProject(ctx context.Context, id string) error
 
 	ListAgentProfiles(ctx context.Context) ([]AgentProfile, error)
 	GetAgentProfile(ctx context.Context, id string) (AgentProfile, error)
@@ -38,6 +39,7 @@ type Store interface {
 	GetWorkItem(ctx context.Context, projectID, id string) (WorkItem, error)
 	CreateWorkItem(ctx context.Context, item WorkItem) (WorkItem, error)
 	UpdateWorkItem(ctx context.Context, item WorkItem) (WorkItem, error)
+	DeleteWorkItem(ctx context.Context, projectID, id string) error
 
 	ListRoles(ctx context.Context, projectID string) ([]Role, error)
 	GetRole(ctx context.Context, projectID, id string) (Role, error)
@@ -49,6 +51,7 @@ type Store interface {
 	CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 	UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 	ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)
+	DeleteAssignment(ctx context.Context, projectID, id string) error
 
 	ListEvidence(ctx context.Context, projectID, workItemID string) ([]Evidence, error)
 	CreateEvidence(ctx context.Context, evidence Evidence) (Evidence, error)
@@ -57,7 +60,10 @@ type Store interface {
 	CreateReview(ctx context.Context, review Review) (Review, error)
 
 	ListHandoffs(ctx context.Context, projectID, workItemID string) ([]Handoff, error)
+	GetHandoff(ctx context.Context, projectID, workItemID, id string) (Handoff, error)
 	CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
+	UpdateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
+	DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error
 
 	ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error)
 	GetMemoryEntry(ctx context.Context, projectID, id string) (MemoryEntry, error)

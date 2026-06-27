@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,7 +51,18 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.get","arguments":{"id":"` + projects[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Project "+projects[0].ID+": Research notes") || !strings.Contains(output.String(), `"structuredContent"`) {
+		t.Fatalf("get project response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -69,7 +81,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes."}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -80,7 +92,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.list","arguments":{"project_id":"` + projects[0].ID + `"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"work_items.list","arguments":{"project_id":"` + projects[0].ID + `"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -95,7 +107,18 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 		t.Fatalf("ListWorkItems() error = %v", err)
 	}
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"work_items.update","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `","brief":"Updated themes."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"work_items.get","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Work item "+workItems[0].ID+": [ready] Summarize interviews") || !strings.Contains(output.String(), `"structuredContent"`) {
+		t.Fatalf("get work item response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"work_items.update","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `","brief":"Updated themes."}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -110,6 +133,31 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 	if workItems[0].Title != "Summarize interviews" || workItems[0].Brief != "Updated themes." {
 		t.Fatalf("updated work item = %+v, want patch preserving title and replacing brief", workItems[0])
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"work_items.delete","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted work item "+workItems[0].ID) {
+		t.Fatalf("delete work item response = %s", output.String())
+	}
+	if _, err := service.GetWorkItem(context.Background(), projects[0].ID, workItems[0].ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetWorkItem(deleted) error = %v, want ErrNotFound", err)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"projects.delete","arguments":{"id":"` + projects[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted project "+projects[0].ID) {
+		t.Fatalf("delete project response = %s", output.String())
 	}
 }
 
@@ -579,6 +627,198 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if candidateFromResource.ID != candidateID || candidateFromResource.Status != core.MemoryCandidatePending || len(candidateFromResource.SourceRefs) != 1 {
 		t.Fatalf("memory candidate resource = %+v, want pending candidate with provenance", candidateFromResource)
+	}
+}
+
+func TestMCPTools_GetAndDeleteAssignment(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Delete assignment"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Body:         "Delete with assignment.",
+		Verdict:      core.ReviewVerdictPass,
+	}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "assignments.get", map[string]any{
+		"project_id":    project.ID,
+		"assignment_id": assignment.ID,
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get assignment error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Assignment (1):") || !strings.Contains(got, assignment.ID) || !strings.Contains(got, `"structuredContent"`) {
+		t.Fatalf("get assignment response = %s", got)
+	}
+
+	input = toolRequest(t, 2, "assignments.delete", map[string]any{
+		"project_id":    project.ID,
+		"assignment_id": assignment.ID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete assignment error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted assignment "+assignment.ID) {
+		t.Fatalf("delete assignment response = %s", output.String())
+	}
+	if _, err := service.GetAssignment(ctx, project.ID, assignment.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetAssignment(deleted) error = %v, want ErrNotFound", err)
+	}
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListReviews() error = %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Fatalf("reviews = %+v, want deleted assignment review removed", reviews)
+	}
+}
+
+func TestMCPTools_HandoffLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Handoff project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	fromRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole(from) error = %v", err)
+	}
+	toRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(to) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Handoff flow"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "handoffs.create", map[string]any{
+		"project_id":      project.ID,
+		"work_item_id":    work.ID,
+		"from_role_id":    fromRole.ID,
+		"to_role_id":      toRole.ID,
+		"title":           "Ready for review",
+		"body":            "Implementation is ready.",
+		"context_refs":    []string{"ctx_1"},
+		"trust_label":     "operator_reviewed",
+		"provenance_kind": "operator",
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create handoff error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created handoff handoff_") {
+		t.Fatalf("create handoff response = %s", output.String())
+	}
+	handoffs, err := service.ListHandoffs(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListHandoffs() error = %v", err)
+	}
+	if len(handoffs) != 1 || handoffs[0].Status != core.HandoffStatusOpen {
+		t.Fatalf("handoffs = %+v, want one open handoff", handoffs)
+	}
+	handoffID := handoffs[0].ID
+
+	input = toolRequest(t, 2, "handoffs.list", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list handoffs error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Handoffs (1):") || !strings.Contains(got, handoffID) || !strings.Contains(got, `"structuredContent"`) {
+		t.Fatalf("list handoffs response = %s", got)
+	}
+
+	input = toolRequest(t, 3, "handoffs.get", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() get handoff error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Handoff (1):") || !strings.Contains(got, "Ready for review") {
+		t.Fatalf("get handoff response = %s", got)
+	}
+
+	input = toolRequest(t, 4, "handoffs.update", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+		"title":        "Accepted review handoff",
+		"body":         "Reviewer accepted the handoff.",
+		"status":       core.HandoffStatusAccepted,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update handoff error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated handoff "+handoffID+": Accepted review handoff [accepted]") {
+		t.Fatalf("update handoff response = %s", output.String())
+	}
+
+	input = toolRequest(t, 5, "handoffs.update_status", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+		"status":       core.HandoffStatusDismissed,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update handoff status error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated handoff "+handoffID+": dismissed") {
+		t.Fatalf("update handoff status response = %s", output.String())
+	}
+	updated, err := service.GetHandoff(ctx, project.ID, work.ID, handoffID)
+	if err != nil {
+		t.Fatalf("GetHandoff() after status error = %v", err)
+	}
+	if updated.Status != core.HandoffStatusDismissed || updated.Title != "Accepted review handoff" || len(updated.ContextRefs) != 1 {
+		t.Fatalf("updated handoff = %+v, want dismissed with text and refs preserved", updated)
+	}
+
+	input = toolRequest(t, 6, "handoffs.delete", map[string]any{
+		"project_id":   project.ID,
+		"work_item_id": work.ID,
+		"handoff_id":   handoffID,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete handoff error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted handoff "+handoffID) {
+		t.Fatalf("delete handoff response = %s", output.String())
+	}
+	if _, err := service.GetHandoff(ctx, project.ID, work.ID, handoffID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetHandoff(deleted) error = %v, want ErrNotFound", err)
 	}
 }
 

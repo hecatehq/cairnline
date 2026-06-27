@@ -106,6 +106,271 @@ func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
 	}
 }
 
+func TestService_DeleteProjectCascadesProjectScopedState(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	profile, err := service.CreateAgentProfile(ctx, AgentProfile{Name: "Global profile"})
+	if err != nil {
+		t.Fatalf("CreateAgentProfile() error = %v", err)
+	}
+	execution, err := service.CreateExecutionProfile(ctx, ExecutionProfile{Name: "Global execution"})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	project, err := service.CreateProject(ctx, Project{Name: "Delete me"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if got, err := service.GetProject(ctx, project.ID); err != nil || got.ID != project.ID {
+		t.Fatalf("GetProject() = %+v, %v; want created project", got, err)
+	}
+	skill, err := service.CreateProjectSkill(ctx, ProjectSkill{
+		ProjectID:  project.ID,
+		ID:         "review",
+		Title:      "Review",
+		Format:     SkillFormatMarkdown,
+		Status:     SkillStatusAvailable,
+		TrustLabel: SkillTrustWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer", DefaultProfileID: profile.ID})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Delete scoped rows"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:          project.ID,
+		WorkItemID:         work.ID,
+		RoleID:             role.ID,
+		ExecutionProfileID: execution.ID,
+		DesiredAgent:       DesiredAgent{Kind: DesiredAgentAny, SkillIDs: []string{skill.ID}},
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{ProjectID: project.ID, WorkItemID: work.ID, SourceAssignmentID: assignment.ID, Title: "Handoff", Body: "Follow up"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if _, err := service.CreateMemoryEntry(ctx, MemoryEntry{ProjectID: project.ID, Title: "Accepted memory", Body: "Remember this"}); err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{ProjectID: project.ID, Title: "Candidate", Body: "Review this"}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteProject(ctx, project.ID); err != nil {
+		t.Fatalf("DeleteProject() error = %v", err)
+	}
+	if _, err := service.GetProject(ctx, project.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetProject() after delete error = %v, want ErrNotFound", err)
+	}
+	for name, check := range map[string]func() error{
+		"skills": func() error {
+			_, err := service.ListProjectSkills(ctx, project.ID)
+			return err
+		},
+		"roles": func() error {
+			_, err := service.ListRoles(ctx, project.ID)
+			return err
+		},
+		"work items": func() error {
+			_, err := service.ListWorkItems(ctx, project.ID)
+			return err
+		},
+		"assignments": func() error {
+			_, err := service.ListAssignments(ctx, project.ID)
+			return err
+		},
+		"memory entries": func() error {
+			_, err := service.ListMemoryEntries(ctx, project.ID, false)
+			return err
+		},
+		"memory candidates": func() error {
+			_, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID})
+			return err
+		},
+	} {
+		if err := check(); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s after project delete error = %v, want ErrNotFound", name, err)
+		}
+	}
+
+	profiles, err := service.ListAgentProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentProfiles() error = %v", err)
+	}
+	executionProfiles, err := service.ListExecutionProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionProfiles() error = %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != profile.ID || len(executionProfiles) != 1 || executionProfiles[0].ID != execution.ID {
+		t.Fatalf("global profiles = %+v execution = %+v, want preserved globals", profiles, executionProfiles)
+	}
+}
+
+func TestService_DeleteWorkItemAndAssignmentScope(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	project, err := service.CreateProject(ctx, Project{Name: "Cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Delete scoped work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	keepWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Keep this work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(keep) error = %v", err)
+	}
+	deletedAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(deleted) error = %v", err)
+	}
+	keptAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: keepWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(keep) error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: deletedAssignment.ID, Body: "Delete with assignment.", Verdict: ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview(deleted assignment) error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: keepWork.ID, AssignmentID: keptAssignment.ID, Body: "Keep.", Verdict: ReviewVerdictPass}); err != nil {
+		t.Fatalf("CreateReview(kept assignment) error = %v", err)
+	}
+	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, Title: "Evidence", Locator: "file://evidence.md"}); err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{ProjectID: project.ID, WorkItemID: work.ID, TargetWorkItemID: keepWork.ID, Title: "Handoff", Body: "Continue elsewhere"}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	memory, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{ProjectID: project.ID, Title: "Keep project memory", Body: "Project-level candidate stays.", SuggestedSourceID: deletedAssignment.ID})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	if err := service.DeleteAssignment(ctx, project.ID, deletedAssignment.ID); err != nil {
+		t.Fatalf("DeleteAssignment() error = %v", err)
+	}
+	if _, err := service.GetAssignment(ctx, project.ID, deletedAssignment.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetAssignment(deleted) error = %v, want ErrNotFound", err)
+	}
+	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListReviews() after assignment delete error = %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Fatalf("reviews after assignment delete = %+v, want deleted assignment review removed", reviews)
+	}
+
+	if err := service.DeleteWorkItem(ctx, project.ID, work.ID); err != nil {
+		t.Fatalf("DeleteWorkItem() error = %v", err)
+	}
+	if _, err := service.GetWorkItem(ctx, project.ID, work.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetWorkItem() after delete error = %v, want ErrNotFound", err)
+	}
+	assignments, err := service.ListAssignments(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() after work delete error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != keptAssignment.ID {
+		t.Fatalf("assignments after work delete = %+v, want kept assignment only", assignments)
+	}
+	candidates, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() after work delete error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ID != memory.ID {
+		t.Fatalf("memory candidates after work delete = %+v, want project-level memory preserved", candidates)
+	}
+}
+
+func TestService_HandoffLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	project, err := service.CreateProject(ctx, Project{Name: "Handoff flow"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	fromRole, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole(from) error = %v", err)
+	}
+	toRole, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(to) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Ship handoff"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	handoff, err := service.CreateHandoff(ctx, Handoff{
+		ProjectID:             project.ID,
+		WorkItemID:            work.ID,
+		FromRoleID:            fromRole.ID,
+		ToRoleID:              toRole.ID,
+		Title:                 "Ready for review",
+		Body:                  "Implementation is ready.",
+		RecommendedNextAction: "Review it",
+		LinkedArtifactIDs:     []string{"evidence_1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if handoff.Status != HandoffStatusOpen {
+		t.Fatalf("handoff status = %q, want open", handoff.Status)
+	}
+	got, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff() error = %v", err)
+	}
+	got.Title = "Accepted for review"
+	got.Body = "Reviewer accepted the handoff."
+	got.Status = HandoffStatusAccepted
+	got.LinkedMemoryIDs = []string{"mem_1"}
+	updated, err := service.UpdateHandoff(ctx, got)
+	if err != nil {
+		t.Fatalf("UpdateHandoff() error = %v", err)
+	}
+	if updated.Status != HandoffStatusAccepted || updated.Title != "Accepted for review" || len(updated.LinkedMemoryIDs) != 1 {
+		t.Fatalf("updated handoff = %+v, want accepted replacement metadata", updated)
+	}
+	superseded, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, HandoffStatusSuperseded)
+	if err != nil {
+		t.Fatalf("UpdateHandoffStatus() error = %v", err)
+	}
+	if superseded.Status != HandoffStatusSuperseded || superseded.Title != "Accepted for review" {
+		t.Fatalf("status-updated handoff = %+v, want superseded with text preserved", superseded)
+	}
+	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
+	}
+	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID); err != nil {
+		t.Fatalf("DeleteHandoff() error = %v", err)
+	}
+	if _, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetHandoff(deleted) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestService_CreateWorkItemValidatesProject(t *testing.T) {
 	service := NewService(NewMemoryStore())
 

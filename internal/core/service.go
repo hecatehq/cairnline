@@ -27,6 +27,14 @@ func (s *Service) ListProjects(ctx context.Context) ([]Project, error) {
 	return s.store.ListProjects(ctx)
 }
 
+func (s *Service) GetProject(ctx context.Context, id string) (Project, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Project{}, errors.Join(ErrInvalid, errors.New("project id is required"))
+	}
+	return s.store.GetProject(ctx, id)
+}
+
 func (s *Service) CreateProject(ctx context.Context, input Project) (Project, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -81,6 +89,14 @@ func (s *Service) UpdateProject(ctx context.Context, input Project) (Project, er
 		UpdatedAt:      now,
 	}
 	return s.store.UpdateProject(ctx, item)
+}
+
+func (s *Service) DeleteProject(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("project id is required"))
+	}
+	return s.store.DeleteProject(ctx, id)
 }
 
 func (s *Service) ListProjectSkills(ctx context.Context, projectID string) ([]ProjectSkill, error) {
@@ -365,6 +381,18 @@ func (s *Service) ListWorkItems(ctx context.Context, projectID string) ([]WorkIt
 	return s.store.ListWorkItems(ctx, projectID)
 }
 
+func (s *Service) GetWorkItem(ctx context.Context, projectID, id string) (WorkItem, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return WorkItem{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return WorkItem{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	return s.store.GetWorkItem(ctx, projectID, id)
+}
+
 func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem, error) {
 	projectID := strings.TrimSpace(input.ProjectID)
 	title := strings.TrimSpace(input.Title)
@@ -446,6 +474,18 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		UpdatedAt:       s.now(),
 	}
 	return s.store.UpdateWorkItem(ctx, item)
+}
+
+func (s *Service) DeleteWorkItem(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	return s.store.DeleteWorkItem(ctx, projectID, id)
 }
 
 func (s *Service) ListRoles(ctx context.Context, projectID string) ([]Role, error) {
@@ -647,6 +687,18 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	return s.store.CreateAssignment(ctx, item)
 }
 
+func (s *Service) GetAssignment(ctx context.Context, projectID, id string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	return s.store.GetAssignment(ctx, projectID, id)
+}
+
 func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string) (Assignment, error) {
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)
@@ -661,6 +713,18 @@ func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy 
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("claimed_by is required"))
 	}
 	return s.store.ClaimAssignment(ctx, projectID, id, claimedBy, s.now)
+}
+
+func (s *Service) DeleteAssignment(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	return s.store.DeleteAssignment(ctx, projectID, id)
 }
 
 func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, status, executionRef string) (Assignment, error) {
@@ -975,6 +1039,22 @@ func (s *Service) ListHandoffs(ctx context.Context, projectID, workItemID string
 	return s.store.ListHandoffs(ctx, projectID, workItemID)
 }
 
+func (s *Service) GetHandoff(ctx context.Context, projectID, workItemID, id string) (Handoff, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	return s.store.GetHandoff(ctx, projectID, workItemID, id)
+}
+
 func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, error) {
 	projectID := strings.TrimSpace(input.ProjectID)
 	workItemID := strings.TrimSpace(input.WorkItemID)
@@ -1025,6 +1105,90 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		UpdatedAt:             now,
 	}
 	return s.store.CreateHandoff(ctx, item)
+}
+
+func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	workItemID := strings.TrimSpace(input.WorkItemID)
+	id := strings.TrimSpace(input.ID)
+	title := strings.TrimSpace(input.Title)
+	body := strings.TrimSpace(input.Body)
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = HandoffStatusOpen
+	}
+	if projectID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	if title == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff title is required"))
+	}
+	if body == "" {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff body is required"))
+	}
+	if !isHandoffStatus(status) {
+		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff status is invalid"))
+	}
+	existing, err := s.store.GetHandoff(ctx, projectID, workItemID, id)
+	if err != nil {
+		return Handoff{}, err
+	}
+	item := Handoff{
+		ID:                    id,
+		ProjectID:             projectID,
+		WorkItemID:            workItemID,
+		SourceAssignmentID:    strings.TrimSpace(input.SourceAssignmentID),
+		SourceRunID:           strings.TrimSpace(input.SourceRunID),
+		SourceChatSessionID:   strings.TrimSpace(input.SourceChatSessionID),
+		SourceMessageID:       strings.TrimSpace(input.SourceMessageID),
+		FromRoleID:            strings.TrimSpace(input.FromRoleID),
+		ToRoleID:              strings.TrimSpace(input.ToRoleID),
+		TargetAssignmentID:    strings.TrimSpace(input.TargetAssignmentID),
+		TargetWorkItemID:      strings.TrimSpace(input.TargetWorkItemID),
+		Title:                 title,
+		Body:                  body,
+		RecommendedNextAction: strings.TrimSpace(input.RecommendedNextAction),
+		LinkedArtifactIDs:     compactStrings(input.LinkedArtifactIDs),
+		LinkedMemoryIDs:       compactStrings(input.LinkedMemoryIDs),
+		ContextRefs:           compactStrings(input.ContextRefs),
+		Status:                status,
+		ProvenanceKind:        strings.TrimSpace(input.ProvenanceKind),
+		TrustLabel:            strings.TrimSpace(input.TrustLabel),
+		CreatedAt:             existing.CreatedAt,
+		UpdatedAt:             s.now(),
+	}
+	return s.store.UpdateHandoff(ctx, item)
+}
+
+func (s *Service) UpdateHandoffStatus(ctx context.Context, projectID, workItemID, id, status string) (Handoff, error) {
+	existing, err := s.GetHandoff(ctx, projectID, workItemID, id)
+	if err != nil {
+		return Handoff{}, err
+	}
+	existing.Status = status
+	return s.UpdateHandoff(ctx, existing)
+}
+
+func (s *Service) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	return s.store.DeleteHandoff(ctx, projectID, workItemID, id)
 }
 
 func (s *Service) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error) {
