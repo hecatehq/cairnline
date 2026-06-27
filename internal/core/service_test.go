@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestService_CreateRootlessProjectAndWorkItem(t *testing.T) {
@@ -1633,6 +1634,87 @@ func TestService_AssistantProposalRecordCapturesPartialFailure(t *testing.T) {
 	}
 	if afterApply.Status != AssistantProposalStatusPartial || afterApply.LatestResult == nil || len(afterApply.ApplyAttempts) != 1 || afterApply.ApplyAttempts[0].ErrorMessage == "" {
 		t.Fatalf("record after partial = %+v, want partial ledger state with error", afterApply)
+	}
+}
+
+func TestService_ImportAssistantProposalRecordPreservesLedgerWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assistant import"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	appliedAt := time.Date(2026, 6, 27, 8, 15, 0, 0, time.UTC)
+	record, err := service.ImportAssistantProposalRecord(ctx, AssistantProposalRecord{
+		ID:        "prop_import",
+		ProjectID: project.ID,
+		Source:    AssistantProposalSourceAssistant,
+		Proposal: AssistantProposal{
+			ID:        "prop_import",
+			ProjectID: project.ID,
+			Title:     "Imported proposal",
+			Actions: []AssistantAction{{
+				Kind: AssistantActionCreateWorkItem,
+				WorkItem: &WorkItem{
+					ID:        "work_imported",
+					ProjectID: project.ID,
+					Title:     "Should not be applied during import",
+				},
+			}},
+		},
+		Status: AssistantProposalStatusApplied,
+		LatestResult: &AssistantApplyResult{
+			ProposalID:         "prop_import",
+			Status:             AssistantApplyStatusApplied,
+			Applied:            true,
+			Confirmed:          true,
+			TotalActionCount:   1,
+			AppliedActionCount: 1,
+		},
+		ApplyAttempts: []AssistantApplyAttempt{{
+			ID:         "paatt_import",
+			ProposalID: "prop_import",
+			Status:     AssistantApplyStatusApplied,
+			Confirmed:  true,
+			Result: AssistantApplyResult{
+				ProposalID:         "prop_import",
+				Status:             AssistantApplyStatusApplied,
+				Applied:            true,
+				Confirmed:          true,
+				TotalActionCount:   1,
+				AppliedActionCount: 1,
+			},
+			CreatedAt: appliedAt,
+		}},
+		CreatedAt: appliedAt.Add(-time.Hour),
+		UpdatedAt: appliedAt,
+		AppliedAt: &appliedAt,
+	})
+	if err != nil {
+		t.Fatalf("ImportAssistantProposalRecord() error = %v", err)
+	}
+	if record.Status != AssistantProposalStatusApplied || record.LatestResult == nil || len(record.ApplyAttempts) != 1 || record.AppliedAt == nil {
+		t.Fatalf("imported record = %+v, want applied ledger state", record)
+	}
+	if _, err := service.GetWorkItem(ctx, project.ID, "work_imported"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetWorkItem() after import error = %v, want ErrNotFound because import must not apply actions", err)
+	}
+	if result, err := service.ApplyAssistantProposalRecord(ctx, record.ID, true); !errors.Is(err, ErrConflict) || !result.Applied {
+		t.Fatalf("ApplyAssistantProposalRecord() after imported applied record result=%+v error=%v, want replay conflict with latest result", result, err)
+	}
+	record.Status = AssistantProposalStatusRejected
+	record.LatestResult = &AssistantApplyResult{
+		ProposalID:       record.ID,
+		Status:           AssistantApplyStatusRejected,
+		TotalActionCount: 1,
+	}
+	record.AppliedAt = nil
+	updated, err := service.ImportAssistantProposalRecord(ctx, record)
+	if err != nil {
+		t.Fatalf("ImportAssistantProposalRecord(update) error = %v", err)
+	}
+	if updated.Status != AssistantProposalStatusRejected || updated.AppliedAt != nil || updated.LatestResult == nil || updated.LatestResult.Status != AssistantApplyStatusRejected {
+		t.Fatalf("updated imported record = %+v, want rejected imported state", updated)
 	}
 }
 

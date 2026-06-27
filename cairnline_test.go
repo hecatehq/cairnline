@@ -162,4 +162,31 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 	if typedAttempt.ProposalID != typedRecord.ID || typedAttempt.Status != cairnline.AssistantApplyStatusApplied {
 		t.Fatalf("typed attempt = %+v, want public attempt alias", typedAttempt)
 	}
+
+	imported, err := service.ImportAssistantProposalRecord(ctx, cairnline.AssistantProposalRecord{
+		ID:        "prop_import_public",
+		ProjectID: project.ID,
+		Source:    cairnline.AssistantProposalSourceAssistant,
+		Proposal: cairnline.AssistantProposal{
+			ID:        "prop_import_public",
+			ProjectID: project.ID,
+			Title:     "Imported public proposal",
+			Actions: []cairnline.AssistantAction{{
+				Kind:     cairnline.AssistantActionCreateWorkItem,
+				WorkItem: &cairnline.WorkItem{ID: "work_import_public", ProjectID: project.ID, Title: "Imported work"},
+			}},
+		},
+		Status: cairnline.AssistantProposalStatusRejected,
+		LatestResult: &cairnline.AssistantApplyResult{
+			ProposalID:       "prop_import_public",
+			Status:           cairnline.AssistantApplyStatusRejected,
+			TotalActionCount: 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ImportAssistantProposalRecord() error = %v", err)
+	}
+	if imported.Status != cairnline.AssistantProposalStatusRejected || imported.LatestResult == nil {
+		t.Fatalf("imported public proposal = %+v, want rejected imported ledger state", imported)
+	}
 }
