@@ -3593,9 +3593,12 @@ func formatAssistantApplyResult(result core.AssistantApplyResult) string {
 }
 
 func assistantActionResultRefs(action core.AssistantActionResult) []string {
-	refs := make([]string, 0, 6)
+	refs := make([]string, 0, 7)
 	if action.ProjectID != "" {
 		refs = append(refs, "project="+action.ProjectID)
+	}
+	if action.RootID != "" {
+		refs = append(refs, "root="+action.RootID)
 	}
 	if action.RoleID != "" {
 		refs = append(refs, "role="+action.RoleID)

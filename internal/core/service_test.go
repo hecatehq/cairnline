@@ -1494,6 +1494,83 @@ func TestService_AssistantProposalApply(t *testing.T) {
 	}
 }
 
+func TestService_AssistantProposalApplyProjectRootActions(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{
+		Name: "Root actions",
+		Roots: []Root{{
+			ID:     "root_main",
+			Path:   "/workspace/main",
+			Active: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	proposal := AssistantProposal{
+		ID:        "prop_roots",
+		ProjectID: project.ID,
+		Title:     "Adjust project roots",
+		Actions: []AssistantAction{
+			{
+				Kind:   AssistantActionAttachProjectRoot,
+				Target: AssistantTarget{ProjectID: project.ID},
+				Root: &Root{
+					ID:        "root_worktree",
+					Path:      "/workspace/worktree",
+					Kind:      "git_worktree",
+					GitBranch: "feature/root-actions",
+					Active:    true,
+				},
+			},
+			{
+				Kind:    AssistantActionSetProjectDefaults,
+				Project: &Project{ID: project.ID, DefaultRootID: "root_worktree"},
+			},
+			{
+				Kind:   AssistantActionRemoveProjectRoot,
+				Target: AssistantTarget{ProjectID: project.ID, RootID: "root_main"},
+			},
+		},
+	}
+	normalized, err := service.AssistantPropose(ctx, proposal)
+	if err != nil {
+		t.Fatalf("AssistantPropose() error = %v", err)
+	}
+	if normalized.ProjectID != project.ID || len(normalized.Actions) != 3 || normalized.Actions[0].Root == nil || normalized.Actions[0].Root.Path != "/workspace/worktree" {
+		t.Fatalf("normalized proposal = %+v, want root action metadata", normalized)
+	}
+	applied, err := service.ApplyAssistantProposal(ctx, proposal, true)
+	if err != nil {
+		t.Fatalf("ApplyAssistantProposal() error = %v result=%+v", err, applied)
+	}
+	if !applied.Applied || applied.AppliedActionCount != 3 || len(applied.Actions) != 3 {
+		t.Fatalf("applied = %+v, want three applied root actions", applied)
+	}
+	if applied.Actions[0].RootID != "root_worktree" || applied.Actions[1].RootID != "root_worktree" || applied.Actions[2].RootID != "root_main" {
+		t.Fatalf("applied action refs = %+v, want root ids for attach/default/remove", applied.Actions)
+	}
+	updated, err := service.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetProject() error = %v", err)
+	}
+	if updated.DefaultRootID != "root_worktree" || len(updated.Roots) != 1 || updated.Roots[0].ID != "root_worktree" || updated.Roots[0].GitBranch != "feature/root-actions" {
+		t.Fatalf("updated project = %+v, want worktree root as default after root actions", updated)
+	}
+	if result, err := service.ApplyAssistantProposal(ctx, AssistantProposal{
+		ID:        "prop_remove_missing",
+		ProjectID: project.ID,
+		Title:     "Remove missing root",
+		Actions: []AssistantAction{{
+			Kind:   AssistantActionRemoveProjectRoot,
+			Target: AssistantTarget{ProjectID: project.ID, RootID: "root_missing"},
+		}},
+	}, true); !errors.Is(err, ErrNotFound) || result.Status != AssistantApplyStatusRejected || result.AppliedActionCount != 0 {
+		t.Fatalf("remove missing root result=%+v error=%v, want rejected ErrNotFound", result, err)
+	}
+}
+
 func TestService_AssistantProposalRecordLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

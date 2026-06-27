@@ -263,6 +263,7 @@ type AssistantAction struct {
 	Summary         string           `json:"summary,omitempty"`
 	Target          AssistantTarget  `json:"target,omitempty"`
 	Project         *Project         `json:"project,omitempty"`
+	Root            *Root            `json:"root,omitempty"`
 	Role            *Role            `json:"role,omitempty"`
 	WorkItem        *WorkItem        `json:"work_item,omitempty"`
 	Assignment      *Assignment      `json:"assignment,omitempty"`
@@ -274,6 +275,7 @@ type AssistantAction struct {
 
 type AssistantTarget struct {
 	ProjectID    string `json:"project_id,omitempty"`
+	RootID       string `json:"root_id,omitempty"`
 	RoleID       string `json:"role_id,omitempty"`
 	WorkItemID   string `json:"work_item_id,omitempty"`
 	AssignmentID string `json:"assignment_id,omitempty"`
@@ -296,6 +298,7 @@ type AssistantActionResult struct {
 	Kind              string `json:"kind"`
 	Status            string `json:"status"`
 	ProjectID         string `json:"project_id,omitempty"`
+	RootID            string `json:"root_id,omitempty"`
 	RoleID            string `json:"role_id,omitempty"`
 	WorkItemID        string `json:"work_item_id,omitempty"`
 	AssignmentID      string `json:"assignment_id,omitempty"`
@@ -649,6 +652,9 @@ const (
 
 	AssistantActionCreateProject         = "create_project"
 	AssistantActionUpdateProject         = "update_project"
+	AssistantActionAttachProjectRoot     = "attach_project_root"
+	AssistantActionRemoveProjectRoot     = "remove_project_root"
+	AssistantActionSetProjectDefaults    = "set_project_defaults"
 	AssistantActionCreateRole            = "create_role"
 	AssistantActionUpdateRole            = "update_role"
 	AssistantActionCreateWorkItem        = "create_work_item"

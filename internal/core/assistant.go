@@ -217,6 +217,7 @@ func normalizeAssistantAction(input AssistantAction) AssistantAction {
 		Summary:         strings.TrimSpace(input.Summary),
 		Target:          normalizeAssistantTarget(input.Target),
 		Project:         cloneProjectPtr(input.Project),
+		Root:            cloneRootPtr(input.Root),
 		Role:            cloneRolePtr(input.Role),
 		WorkItem:        cloneWorkItemPtr(input.WorkItem),
 		Assignment:      cloneAssignmentPtr(input.Assignment),
@@ -230,6 +231,7 @@ func normalizeAssistantAction(input AssistantAction) AssistantAction {
 func normalizeAssistantTarget(input AssistantTarget) AssistantTarget {
 	return AssistantTarget{
 		ProjectID:    strings.TrimSpace(input.ProjectID),
+		RootID:       strings.TrimSpace(input.RootID),
 		RoleID:       strings.TrimSpace(input.RoleID),
 		WorkItemID:   strings.TrimSpace(input.WorkItemID),
 		AssignmentID: strings.TrimSpace(input.AssignmentID),
@@ -246,6 +248,22 @@ func validateAssistantAction(action AssistantAction) error {
 	case AssistantActionCreateProject:
 		return requireAssistantPayload(action.Project, "project")
 	case AssistantActionUpdateProject:
+		if err := requireAssistantPayload(action.Project, "project"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(action.Project.ID) == "" {
+			return errors.Join(ErrInvalid, errors.New("project id is required"))
+		}
+	case AssistantActionAttachProjectRoot:
+		if strings.TrimSpace(action.Target.ProjectID) == "" {
+			return errors.Join(ErrInvalid, errors.New("target.project_id is required"))
+		}
+		return requireAssistantPayload(action.Root, "root")
+	case AssistantActionRemoveProjectRoot:
+		if strings.TrimSpace(action.Target.ProjectID) == "" || strings.TrimSpace(action.Target.RootID) == "" {
+			return errors.Join(ErrInvalid, errors.New("target.project_id and target.root_id are required"))
+		}
+	case AssistantActionSetProjectDefaults:
 		if err := requireAssistantPayload(action.Project, "project"); err != nil {
 			return err
 		}
@@ -363,6 +381,21 @@ func (s *Service) applyAssistantAction(ctx context.Context, action AssistantActi
 		item, err := s.UpdateProject(ctx, *action.Project)
 		result.ProjectID = item.ID
 		return result, err
+	case AssistantActionAttachProjectRoot:
+		item, root, err := s.applyAttachProjectRoot(ctx, action.Target.ProjectID, *action.Root)
+		result.ProjectID = item.ID
+		result.RootID = root.ID
+		return result, err
+	case AssistantActionRemoveProjectRoot:
+		item, err := s.applyRemoveProjectRoot(ctx, action.Target.ProjectID, action.Target.RootID)
+		result.ProjectID = item.ID
+		result.RootID = strings.TrimSpace(action.Target.RootID)
+		return result, err
+	case AssistantActionSetProjectDefaults:
+		item, err := s.applySetProjectDefaults(ctx, *action.Project)
+		result.ProjectID = item.ID
+		result.RootID = item.DefaultRootID
+		return result, err
 	case AssistantActionCreateRole:
 		item, err := s.CreateRole(ctx, *action.Role)
 		result.ProjectID = item.ProjectID
@@ -427,6 +460,74 @@ func (s *Service) applyAssistantAction(ctx context.Context, action AssistantActi
 	}
 }
 
+func (s *Service) applyAttachProjectRoot(ctx context.Context, projectID string, input Root) (Project, Root, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return Project{}, Root{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	roots := normalizeRoots([]Root{input})
+	if len(roots) == 0 {
+		return Project{}, Root{}, errors.Join(ErrInvalid, errors.New("root path is required"))
+	}
+	root := roots[0]
+	for _, existing := range project.Roots {
+		if existing.ID == root.ID {
+			return Project{}, Root{}, errors.Join(ErrDuplicate, fmt.Errorf("root %q already exists", root.ID))
+		}
+	}
+	project.Roots = append(project.Roots, root)
+	updated, err := s.UpdateProject(ctx, project)
+	return updated, root, err
+}
+
+func (s *Service) applyRemoveProjectRoot(ctx context.Context, projectID, rootID string) (Project, error) {
+	projectID = strings.TrimSpace(projectID)
+	rootID = strings.TrimSpace(rootID)
+	if projectID == "" || rootID == "" {
+		return Project{}, errors.Join(ErrInvalid, errors.New("project_id and root_id are required"))
+	}
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, err
+	}
+	roots := project.Roots[:0]
+	found := false
+	for _, root := range project.Roots {
+		if root.ID == rootID {
+			found = true
+			continue
+		}
+		roots = append(roots, root)
+	}
+	if !found {
+		return Project{}, errors.Join(ErrNotFound, fmt.Errorf("root %q", rootID))
+	}
+	project.Roots = roots
+	if project.DefaultRootID == rootID {
+		project.DefaultRootID = ""
+	}
+	return s.UpdateProject(ctx, project)
+}
+
+func (s *Service) applySetProjectDefaults(ctx context.Context, input Project) (Project, error) {
+	projectID := strings.TrimSpace(input.ID)
+	if projectID == "" {
+		return Project{}, errors.Join(ErrInvalid, errors.New("project id is required"))
+	}
+	project, err := s.store.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, err
+	}
+	if strings.TrimSpace(input.DefaultRootID) != "" {
+		project.DefaultRootID = strings.TrimSpace(input.DefaultRootID)
+	}
+	return s.UpdateProject(ctx, project)
+}
+
 func cloneProjectPtr(input *Project) *Project {
 	if input == nil {
 		return nil
@@ -434,6 +535,14 @@ func cloneProjectPtr(input *Project) *Project {
 	item := *input
 	item.Roots = append([]Root(nil), input.Roots...)
 	item.ContextSources = append([]Source(nil), input.ContextSources...)
+	return &item
+}
+
+func cloneRootPtr(input *Root) *Root {
+	if input == nil {
+		return nil
+	}
+	item := *input
 	return &item
 }
 
@@ -570,6 +679,14 @@ func assistantProposalProjectID(proposal AssistantProposal) string {
 		}
 		switch action.Kind {
 		case AssistantActionCreateProject, AssistantActionUpdateProject:
+			if action.Project != nil && strings.TrimSpace(action.Project.ID) != "" {
+				return strings.TrimSpace(action.Project.ID)
+			}
+		case AssistantActionAttachProjectRoot, AssistantActionRemoveProjectRoot:
+			if strings.TrimSpace(action.Target.ProjectID) != "" {
+				return strings.TrimSpace(action.Target.ProjectID)
+			}
+		case AssistantActionSetProjectDefaults:
 			if action.Project != nil && strings.TrimSpace(action.Project.ID) != "" {
 				return strings.TrimSpace(action.Project.ID)
 			}
