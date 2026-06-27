@@ -128,6 +128,30 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, projectOperationsBrief(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "projects.setup_readiness",
+		Title:       "Project setup readiness",
+		Description: "Return a read-only onboarding checklist for a project coordination space.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string","minLength":1}},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, projectSetupReadiness(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "projects.health",
+		Title:       "Project health",
+		Description: "Return read-only project attention, setup, context, handoff, review, and assignment signals.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string","minLength":1}},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, projectHealth(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "projects.activity",
 		Title:       "Project activity",
 		Description: "Return a read-only project activity projection grouped by assignment state.",
@@ -1267,6 +1291,46 @@ func projectOperationsBrief(service *core.Service) mcp.ToolHandler {
 		return mcp.CallToolResult{
 			Content:           mcp.TextContent(formatProjectOperationsBrief(brief)),
 			StructuredContent: brief,
+		}, nil
+	}
+}
+
+func projectSetupReadiness(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		readiness, err := service.ProjectSetupReadiness(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatProjectSetupReadiness(readiness)),
+			StructuredContent: readiness,
+		}, nil
+	}
+}
+
+func projectHealth(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		health, err := service.ProjectHealth(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatProjectHealth(health)),
+			StructuredContent: health,
 		}, nil
 	}
 }
@@ -3119,6 +3183,98 @@ func formatWorkItemCloseoutReadiness(readiness core.WorkItemCloseoutReadiness) s
 	}
 	if len(readiness.MissingEvidenceAssignmentIDs) > 0 {
 		fmt.Fprintf(&b, "Missing evidence assignments: %s\n", strings.Join(readiness.MissingEvidenceAssignmentIDs, ", "))
+	}
+	return b.String()
+}
+
+func formatProjectSetupReadiness(readiness core.ProjectSetupReadiness) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Setup readiness %s\n", readiness.ProjectID)
+	fmt.Fprintf(&b, "show_onboarding=%t setup_started=%t first_work_ready=%t\n", readiness.ShowOnboarding, readiness.SetupStarted, readiness.FirstWorkReady)
+	fmt.Fprintf(&b, "Summary: work_items=%d roles=%d skills=%d execution_profiles=%d sources=%d memory=%d candidates=%d purpose=%t active_root=%t\n",
+		readiness.Summary.WorkItemCount,
+		readiness.Summary.RoleCount,
+		readiness.Summary.SkillCount,
+		readiness.Summary.ExecutionProfileCount,
+		readiness.Summary.EnabledContextSourceCount,
+		readiness.Summary.SavedMemoryCount,
+		readiness.Summary.PendingMemoryCandidateCount,
+		readiness.Summary.HasPurpose,
+		readiness.Summary.HasActiveRoot,
+	)
+	if readiness.PrimaryAction.Kind != "" {
+		fmt.Fprintf(&b, "Primary action: %s (%s)\n", readiness.PrimaryAction.Label, readiness.PrimaryAction.Kind)
+	}
+	if len(readiness.Checks) > 0 {
+		b.WriteString("Checks:\n")
+		for _, check := range readiness.Checks {
+			fmt.Fprintf(&b, "- [%s] %s", check.Status, check.Label)
+			if check.Optional {
+				b.WriteString(" optional")
+			}
+			if check.Detail != "" {
+				fmt.Fprintf(&b, " — %s", check.Detail)
+			}
+			if check.Action != nil {
+				fmt.Fprintf(&b, " action=%s", check.Action.Kind)
+			}
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func formatProjectHealth(health core.ProjectHealth) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Project health %s: %s\n", health.ProjectID, health.Status)
+	fmt.Fprintf(&b, "%s\n", health.Title)
+	if health.Detail != "" {
+		fmt.Fprintf(&b, "%s\n", health.Detail)
+	}
+	fmt.Fprintf(&b, "Counts: attention=%d/%d omitted=%d setup_todo=%d active=%d blocked=%d memory_candidates=%d review_follow_ups=%d open_handoffs=%d profile_refs=%d skill_issues=%d\n",
+		health.Summary.AttentionCount,
+		health.Summary.AvailableAttentionCount,
+		health.Summary.OmittedAttentionCount,
+		health.Summary.SetupTodoCount,
+		health.Summary.ActiveAssignmentCount,
+		health.Summary.BlockedAssignmentCount,
+		health.Summary.PendingMemoryCandidateCount,
+		health.Summary.ReviewFollowUpCount,
+		health.Summary.OpenHandoffCount,
+		health.Summary.MissingProfileReferenceCount,
+		health.Summary.ProjectSkillIssueCount,
+	)
+	if len(health.Attention) > 0 {
+		b.WriteString("Attention:\n")
+		for _, item := range health.Attention {
+			fmt.Fprintf(&b, "- [%s/%s]", item.Kind, item.Severity)
+			if item.Status != "" {
+				fmt.Fprintf(&b, " %s", item.Status)
+			}
+			fmt.Fprintf(&b, " %s", item.Title)
+			if item.WorkItemID != "" {
+				fmt.Fprintf(&b, " work=%s", item.WorkItemID)
+			}
+			if item.AssignmentID != "" {
+				fmt.Fprintf(&b, " assignment=%s", item.AssignmentID)
+			}
+			if item.ArtifactID != "" {
+				fmt.Fprintf(&b, " artifact=%s", item.ArtifactID)
+			}
+			if item.HandoffID != "" {
+				fmt.Fprintf(&b, " handoff=%s", item.HandoffID)
+			}
+			if item.MemoryCandidateID != "" {
+				fmt.Fprintf(&b, " memory_candidate=%s", item.MemoryCandidateID)
+			}
+			if item.ActionKind != "" {
+				fmt.Fprintf(&b, " action=%s", item.ActionKind)
+			}
+			if item.Detail != "" {
+				fmt.Fprintf(&b, " — %s", item.Detail)
+			}
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }

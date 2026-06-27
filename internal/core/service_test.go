@@ -1253,6 +1253,158 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	}
 }
 
+func TestService_ProjectSetupReadiness(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Setup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	readiness, err := service.ProjectSetupReadiness(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectSetupReadiness(pristine) error = %v", err)
+	}
+	if !readiness.ShowOnboarding || readiness.SetupStarted || readiness.FirstWorkReady {
+		t.Fatalf("pristine readiness = %+v, want onboarding without setup started", readiness)
+	}
+	if readiness.Summary.WorkItemCount != 0 || readiness.Summary.RoleCount != 0 || readiness.Summary.HasPurpose || readiness.Summary.HasActiveRoot {
+		t.Fatalf("pristine summary = %+v, want empty setup", readiness.Summary)
+	}
+	if readiness.PrimaryAction.Kind != ProjectSetupActionSetupProject {
+		t.Fatalf("primary action = %+v, want setup project", readiness.PrimaryAction)
+	}
+	if check := setupCheckByID(readiness.Checks, "workspace_source"); check.Status != ProjectSetupStatusOptional || !check.Optional {
+		t.Fatalf("workspace check = %+v, want optional rootless project", check)
+	}
+	if check := setupCheckByID(readiness.Checks, "purpose"); check.Status != ProjectSetupStatusTodo || check.Action == nil || check.Action.Kind != ProjectSetupActionUpdateProject {
+		t.Fatalf("purpose check = %+v, want todo update action", check)
+	}
+
+	project.Description = "Coordinate setup."
+	project.Roots = []Root{{ID: "root", Path: t.TempDir(), Kind: "workspace", Active: true}}
+	project.DefaultRootID = "root"
+	project.ContextSources = []Source{{Kind: "workspace_instruction", Title: "AGENTS.md", Enabled: true}}
+	if _, err := service.UpdateProject(ctx, project); err != nil {
+		t.Fatalf("UpdateProject() error = %v", err)
+	}
+	if _, err := service.CreateExecutionProfile(ctx, ExecutionProfile{Name: "Local execution"}); err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	if _, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"}); err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	if _, err := service.CreateProjectSkill(ctx, ProjectSkill{ProjectID: project.ID, ID: "review", Title: "Review", Format: SkillFormatMarkdown, Status: SkillStatusAvailable, TrustLabel: SkillTrustWorkspace}); err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	if _, err := service.CreateMemoryEntry(ctx, MemoryEntry{ProjectID: project.ID, Title: "Memory", Body: "Remember setup."}); err != nil {
+		t.Fatalf("CreateMemoryEntry() error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{ProjectID: project.ID, Title: "Candidate", Body: "Review me."}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+
+	readiness, err = service.ProjectSetupReadiness(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectSetupReadiness(configured) error = %v", err)
+	}
+	if readiness.ShowOnboarding || !readiness.SetupStarted || !readiness.FirstWorkReady {
+		t.Fatalf("configured readiness = %+v, want setup started and first work ready", readiness)
+	}
+	if readiness.Summary.RoleCount != 1 || readiness.Summary.SkillCount != 1 || readiness.Summary.ExecutionProfileCount != 1 || readiness.Summary.EnabledContextSourceCount != 1 || readiness.Summary.SavedMemoryCount != 1 || readiness.Summary.PendingMemoryCandidateCount != 1 {
+		t.Fatalf("configured summary = %+v, want all setup counts", readiness.Summary)
+	}
+	for _, id := range []string{"purpose", "workspace_source", "execution_profiles", "sources_memory", "roles"} {
+		if check := setupCheckByID(readiness.Checks, id); check.Status != ProjectSetupStatusReady {
+			t.Fatalf("check %s = %+v, want ready", id, check)
+		}
+	}
+	if check := setupCheckByID(readiness.Checks, "first_work_item"); check.Status != ProjectSetupStatusTodo || check.Action == nil || check.Action.Kind != ProjectSetupActionCreateWorkItem {
+		t.Fatalf("first work check = %+v, want create work action", check)
+	}
+	if _, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "First work"}); err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	readiness, err = service.ProjectSetupReadiness(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectSetupReadiness(after work) error = %v", err)
+	}
+	if readiness.FirstWorkReady || readiness.Summary.WorkItemCount != 1 {
+		t.Fatalf("after-work readiness = %+v, want first work no longer ready-to-create", readiness)
+	}
+}
+
+func TestService_ProjectHealth(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{
+		Name:           "Health",
+		Description:    "Track attention.",
+		ContextSources: []Source{{Kind: "workspace_instruction", Title: "AGENTS.md", Enabled: true}},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{
+		ProjectID:       project.ID,
+		Name:            "Reviewer",
+		DefaultSkillIDs: []string{"missing-skill", "disabled-skill"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	disabledSkill, err := service.CreateProjectSkill(ctx, ProjectSkill{ProjectID: project.ID, ID: "disabled-skill", Title: "Disabled", Format: SkillFormatMarkdown, Status: SkillStatusAvailable, TrustLabel: SkillTrustWorkspace})
+	if err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	disabledSkill.Enabled = false
+	if _, err := service.UpdateProjectSkill(ctx, disabledSkill); err != nil {
+		t.Fatalf("UpdateProjectSkill(disabled) error = %v", err)
+	}
+	if _, err := service.CreateMemoryCandidate(ctx, MemoryCandidate{ProjectID: project.ID, Title: "Candidate", Body: "Check this."}); err != nil {
+		t.Fatalf("CreateMemoryCandidate() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Review work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	queued, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, DesiredAgent: DesiredAgent{SkillIDs: []string{"missing-skill"}}})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	completed, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(completed) error = %v", err)
+	}
+	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, "run-complete"); err != nil {
+		t.Fatalf("CompleteAssignment() error = %v", err)
+	}
+	review, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: completed.ID, Title: "Needs follow-up", Body: "Please follow up.", Verdict: ReviewVerdictConcerns})
+	if err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if _, err := service.CreateHandoff(ctx, Handoff{ProjectID: project.ID, WorkItemID: work.ID, Title: "Open handoff", Body: "Decide next path.", LinkedArtifactIDs: []string{review.ID}}); err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+
+	health, err := service.ProjectHealth(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectHealth() error = %v", err)
+	}
+	if health.Status != ProjectHealthStatusAttention || health.Summary.AttentionCount == 0 || health.Summary.AvailableAttentionCount < health.Summary.AttentionCount {
+		t.Fatalf("health = %+v, want attention status", health)
+	}
+	if health.Summary.BlockedAssignmentCount != 1 || health.Summary.PendingMemoryCandidateCount != 1 || health.Summary.OpenHandoffCount != 1 || health.Summary.ReviewFollowUpCount != 1 {
+		t.Fatalf("health summary = %+v, want assignment/memory/handoff/review counts", health.Summary)
+	}
+	if health.Summary.MissingProfileReferenceCount != 0 || health.Summary.ProjectSkillIssueCount == 0 {
+		t.Fatalf("health summary = %+v, want skill issues without service-created missing profiles", health.Summary)
+	}
+	if !containsHealthAttention(health.Attention, ProjectOperationKindAssignment, queued.ID) {
+		t.Fatalf("health attention = %+v, want queued assignment", health.Attention)
+	}
+}
+
 func TestService_ProjectActivity(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
@@ -1603,6 +1755,27 @@ func containsOperation(items []ProjectOperationItem, kind, workItemID, refID str
 			continue
 		}
 		if refID == "" || item.AssignmentID == refID || item.ArtifactID == refID || item.MemoryCandidateID == refID {
+			return true
+		}
+	}
+	return false
+}
+
+func setupCheckByID(checks []ProjectSetupReadinessCheck, id string) ProjectSetupReadinessCheck {
+	for _, check := range checks {
+		if check.ID == id {
+			return check
+		}
+	}
+	return ProjectSetupReadinessCheck{}
+}
+
+func containsHealthAttention(items []ProjectHealthAttentionItem, kind, refID string) bool {
+	for _, item := range items {
+		if item.Kind != kind {
+			continue
+		}
+		if refID == "" || item.AssignmentID == refID || item.ArtifactID == refID || item.HandoffID == refID || item.MemoryCandidateID == refID {
 			return true
 		}
 	}

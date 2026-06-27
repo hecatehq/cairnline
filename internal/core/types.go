@@ -127,6 +127,100 @@ type WorkItemCloseoutReadiness struct {
 	OpenHandoffIDs               []string                  `json:"open_handoff_ids,omitempty"`
 }
 
+type ProjectSetupReadiness struct {
+	ProjectID      string                       `json:"project_id"`
+	ShowOnboarding bool                         `json:"show_onboarding"`
+	SetupStarted   bool                         `json:"setup_started"`
+	FirstWorkReady bool                         `json:"first_work_ready"`
+	Summary        ProjectSetupReadinessSummary `json:"summary"`
+	PrimaryAction  ProjectSetupReadinessAction  `json:"primary_action"`
+	Checks         []ProjectSetupReadinessCheck `json:"checks"`
+	CreatedAt      time.Time                    `json:"created_at"`
+}
+
+type ProjectSetupReadinessSummary struct {
+	WorkItemCount               int  `json:"work_item_count"`
+	RoleCount                   int  `json:"role_count"`
+	SkillCount                  int  `json:"skill_count"`
+	ExecutionProfileCount       int  `json:"execution_profile_count"`
+	EnabledContextSourceCount   int  `json:"enabled_context_source_count"`
+	SavedMemoryCount            int  `json:"saved_memory_count"`
+	PendingMemoryCandidateCount int  `json:"pending_memory_candidate_count"`
+	HasPurpose                  bool `json:"has_purpose"`
+	HasActiveRoot               bool `json:"has_active_root"`
+	HasExecutionProfile         bool `json:"has_execution_profile"`
+}
+
+type ProjectSetupReadinessCheck struct {
+	ID       string                       `json:"id"`
+	Label    string                       `json:"label"`
+	Detail   string                       `json:"detail"`
+	Status   string                       `json:"status"`
+	Optional bool                         `json:"optional,omitempty"`
+	Action   *ProjectSetupReadinessAction `json:"action,omitempty"`
+}
+
+type ProjectSetupReadinessAction struct {
+	Kind      string `json:"kind"`
+	ProjectID string `json:"project_id"`
+	Label     string `json:"label"`
+}
+
+type ProjectHealth struct {
+	ProjectID string                       `json:"project_id"`
+	Status    string                       `json:"status"`
+	Title     string                       `json:"title"`
+	Detail    string                       `json:"detail,omitempty"`
+	Summary   ProjectHealthSummary         `json:"summary"`
+	Attention []ProjectHealthAttentionItem `json:"attention,omitempty"`
+	CreatedAt time.Time                    `json:"created_at"`
+}
+
+type ProjectHealthSummary struct {
+	AttentionCount               int  `json:"attention_count"`
+	AvailableAttentionCount      int  `json:"available_attention_count"`
+	OmittedAttentionCount        int  `json:"omitted_attention_count"`
+	AttentionLimit               int  `json:"attention_limit"`
+	SetupTodoCount               int  `json:"setup_todo_count"`
+	MissingProjectRoot           bool `json:"missing_project_root"`
+	HasExecutionProfile          bool `json:"has_execution_profile"`
+	EnabledMemoryCount           int  `json:"enabled_memory_count"`
+	SavedMemoryCount             int  `json:"saved_memory_count"`
+	EnabledContextSourceCount    int  `json:"enabled_context_source_count"`
+	PendingMemoryCandidateCount  int  `json:"pending_memory_candidate_count"`
+	PromotedMemoryCandidateCount int  `json:"promoted_memory_candidate_count"`
+	RejectedMemoryCandidateCount int  `json:"rejected_memory_candidate_count"`
+	OpenHandoffCount             int  `json:"open_handoff_count"`
+	AcceptedHandoffCount         int  `json:"accepted_handoff_count"`
+	SupersededHandoffCount       int  `json:"superseded_handoff_count"`
+	DismissedHandoffCount        int  `json:"dismissed_handoff_count"`
+	ReviewFollowUpCount          int  `json:"review_follow_up_count"`
+	BlockedReviewCount           int  `json:"blocked_review_count"`
+	ChangesRequestedReviewCount  int  `json:"changes_requested_review_count"`
+	ActiveAssignmentCount        int  `json:"active_assignment_count"`
+	BlockedAssignmentCount       int  `json:"blocked_assignment_count"`
+	MissingProfileReferenceCount int  `json:"missing_profile_reference_count"`
+	ProjectSkillIssueCount       int  `json:"project_skill_issue_count"`
+}
+
+type ProjectHealthAttentionItem struct {
+	ID                string    `json:"id"`
+	ProjectID         string    `json:"project_id"`
+	Kind              string    `json:"kind"`
+	Severity          string    `json:"severity"`
+	Status            string    `json:"status,omitempty"`
+	Title             string    `json:"title"`
+	Detail            string    `json:"detail,omitempty"`
+	ActionKind        string    `json:"action_kind,omitempty"`
+	ActionLabel       string    `json:"action_label,omitempty"`
+	WorkItemID        string    `json:"work_item_id,omitempty"`
+	AssignmentID      string    `json:"assignment_id,omitempty"`
+	ArtifactID        string    `json:"artifact_id,omitempty"`
+	HandoffID         string    `json:"handoff_id,omitempty"`
+	MemoryCandidateID string    `json:"memory_candidate_id,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+}
+
 type ProjectOperationsBrief struct {
 	ProjectID string                  `json:"project_id"`
 	Status    string                  `json:"status"`
@@ -446,12 +540,29 @@ const (
 	ProjectOperationsStatusClear     = "clear"
 	ProjectOperationsStatusAttention = "attention"
 
+	ProjectSetupStatusReady    = "ready"
+	ProjectSetupStatusTodo     = "todo"
+	ProjectSetupStatusOptional = "optional"
+
+	ProjectSetupActionSetupProject            = "setup_project"
+	ProjectSetupActionCreateWorkItem          = "create_work_item"
+	ProjectSetupActionUpdateProject           = "update_project"
+	ProjectSetupActionManageContext           = "manage_context"
+	ProjectSetupActionManageExecutionProfiles = "manage_execution_profiles"
+	ProjectSetupActionManageRoles             = "manage_roles"
+
+	ProjectHealthStatusClear     = "clear"
+	ProjectHealthStatusAttention = "attention"
+
 	ProjectOperationKindAssignment      = "assignment"
 	ProjectOperationKindCloseoutReady   = "closeout_ready"
 	ProjectOperationKindHandoff         = "handoff"
 	ProjectOperationKindMemoryCandidate = "memory_candidate"
 	ProjectOperationKindMissingEvidence = "missing_evidence"
 	ProjectOperationKindReviewFollowUp  = "review_follow_up"
+	ProjectOperationKindProjectSetup    = "project_setup"
+	ProjectOperationKindProfile         = "profile"
+	ProjectOperationKindSkill           = "skill"
 	ProjectOperationKindWorkItem        = "work_item"
 
 	ProjectOperationSeverityBlocked = "blocked"

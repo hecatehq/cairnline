@@ -311,6 +311,20 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(memoryEntries) != 1 || memoryEntries[0].ID != memoryEntry.ID || memoryEntries[0].TrustLabel != core.MemoryTrustOperator {
 		t.Fatalf("memory entries = %+v, want persisted accepted memory", memoryEntries)
 	}
+	setup, err := reopenedService.ProjectSetupReadiness(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectSetupReadiness() error = %v", err)
+	}
+	if setup.ShowOnboarding || !setup.SetupStarted || setup.Summary.WorkItemCount != 1 || setup.Summary.RoleCount != 1 || setup.Summary.SkillCount != 1 || setup.Summary.ExecutionProfileCount != 1 {
+		t.Fatalf("setup readiness = %+v, want persisted configured setup", setup)
+	}
+	health, err := reopenedService.ProjectHealth(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ProjectHealth() error = %v", err)
+	}
+	if health.Status != core.ProjectHealthStatusAttention || health.Summary.PendingMemoryCandidateCount != 1 || health.Summary.ProjectSkillIssueCount == 0 {
+		t.Fatalf("health = %+v, want pending memory and missing skill attention", health)
+	}
 	launchPacket, err := reopenedService.AssignmentLaunchPacket(ctx, project.ID, assignment.ID)
 	if err != nil {
 		t.Fatalf("AssignmentLaunchPacket() error = %v", err)
