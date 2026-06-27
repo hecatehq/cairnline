@@ -650,6 +650,40 @@ Body should not be stored in the skill registry.
 	}
 }
 
+func TestService_CreateProjectSkillPreservesImportedTimestamps(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	service.now = func() time.Time {
+		return time.Date(2026, 6, 27, 20, 0, 0, 0, time.UTC)
+	}
+	project, err := service.CreateProject(ctx, Project{Name: "Imported skill project"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	discoveredAt := time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC)
+	createdAt := time.Date(2026, 6, 21, 10, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 6, 22, 11, 0, 0, 0, time.UTC)
+
+	skill, err := service.CreateProjectSkill(ctx, ProjectSkill{
+		ProjectID:    project.ID,
+		ID:           "backend",
+		Title:        "Backend",
+		Path:         ".agents/skills/backend/SKILL.md",
+		Format:       SkillFormatMarkdown,
+		Status:       SkillStatusAvailable,
+		TrustLabel:   SkillTrustWorkspace,
+		DiscoveredAt: discoveredAt,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+	if !skill.DiscoveredAt.Equal(discoveredAt) || !skill.CreatedAt.Equal(createdAt) || !skill.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("skill timestamps = discovered:%s created:%s updated:%s, want imported timestamps", skill.DiscoveredAt, skill.CreatedAt, skill.UpdatedAt)
+	}
+}
+
 func TestService_ProjectSkillsDiscoveryUsesGuidanceLinkedRoots(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

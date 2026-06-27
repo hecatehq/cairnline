@@ -1954,8 +1954,16 @@ func (s *Service) normalizeProjectSkill(input ProjectSkill, creating bool) (Proj
 	}
 	now := s.now()
 	createdAt := input.CreatedAt
-	if creating || createdAt.IsZero() {
+	if createdAt.IsZero() {
 		createdAt = now
+	}
+	updatedAt := input.UpdatedAt
+	if creating {
+		if updatedAt.IsZero() {
+			updatedAt = createdAt
+		}
+	} else {
+		updatedAt = now
 	}
 	discoveredAt := input.DiscoveredAt
 	if discoveredAt.IsZero() && strings.TrimSpace(input.Path) != "" {
@@ -1980,7 +1988,7 @@ func (s *Service) normalizeProjectSkill(input ProjectSkill, creating bool) (Proj
 		Warnings:     compactStrings(input.Warnings),
 		DiscoveredAt: discoveredAt,
 		CreatedAt:    createdAt,
-		UpdatedAt:    now,
+		UpdatedAt:    updatedAt,
 	}, nil
 }
 
