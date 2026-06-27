@@ -455,6 +455,88 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	}
 }
 
+func TestStore_DeleteProfilesAndRoles(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "delete-profiles-roles.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+
+	profile, err := service.CreateAgentProfile(ctx, core.AgentProfile{Name: "Temporary profile"})
+	if err != nil {
+		t.Fatalf("CreateAgentProfile() error = %v", err)
+	}
+	executionProfile, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Temporary execution"})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	if err := service.DeleteAgentProfile(ctx, profile.ID); err != nil {
+		t.Fatalf("DeleteAgentProfile() error = %v", err)
+	}
+	if err := service.DeleteExecutionProfile(ctx, executionProfile.ID); err != nil {
+		t.Fatalf("DeleteExecutionProfile() error = %v", err)
+	}
+	profiles, err := service.ListAgentProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentProfiles() error = %v", err)
+	}
+	executionProfiles, err := service.ListExecutionProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionProfiles() error = %v", err)
+	}
+	if len(profiles) != 0 || len(executionProfiles) != 0 {
+		t.Fatalf("profiles = %+v execution = %+v, want deleted globals removed", profiles, executionProfiles)
+	}
+	if err := service.DeleteAgentProfile(ctx, profile.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("DeleteAgentProfile(deleted) error = %v, want ErrNotFound", err)
+	}
+	if err := service.DeleteExecutionProfile(ctx, executionProfile.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("DeleteExecutionProfile(deleted) error = %v, want ErrNotFound", err)
+	}
+
+	project, err := service.CreateProject(ctx, core.Project{Name: "Role cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	spareRole, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Spare reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(spare) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Keep referenced role"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if err := service.DeleteRole(ctx, project.ID, spareRole.ID); err != nil {
+		t.Fatalf("DeleteRole(spare) error = %v", err)
+	}
+	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("DeleteRole(referenced) error = %v, want ErrConflict", err)
+	}
+	if err := service.DeleteAssignment(ctx, project.ID, assignment.ID); err != nil {
+		t.Fatalf("DeleteAssignment() error = %v", err)
+	}
+	if err := service.DeleteRole(ctx, project.ID, role.ID); err != nil {
+		t.Fatalf("DeleteRole(unreferenced) error = %v", err)
+	}
+	roles, err := service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() error = %v", err)
+	}
+	if len(roles) != 0 {
+		t.Fatalf("roles after deletes = %+v, want none", roles)
+	}
+}
+
 func TestStore_DeleteWorkItemAndAssignmentScope(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "work-assignment-delete.db"))

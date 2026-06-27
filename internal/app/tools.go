@@ -268,6 +268,17 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, updateAgentProfile(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "profiles.delete",
+		Title:       "Delete agent profile",
+		Description: "Delete a portable agent behavior and context-policy profile.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"id":{"type":"string","minLength":1}},
+			"required":["id"]
+		}`),
+	}, deleteAgentProfile(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "execution_profiles.list",
 		Title:       "List execution profiles",
 		Description: "List optional host/runtime-specific execution hints.",
@@ -320,6 +331,17 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["id","name"]
 		}`),
 	}, updateExecutionProfile(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "execution_profiles.delete",
+		Title:       "Delete execution profile",
+		Description: "Delete optional host/runtime-specific execution hints.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"id":{"type":"string","minLength":1}},
+			"required":["id"]
+		}`),
+	}, deleteExecutionProfile(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "skills.list",
@@ -538,6 +560,20 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","id"]
 		}`),
 	}, updateRole(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "roles.delete",
+		Title:       "Delete role",
+		Description: "Delete an unreferenced project-native responsibility.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","id"]
+		}`),
+	}, deleteRole(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.list",
@@ -1653,6 +1689,24 @@ func updateAgentProfile(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func deleteAgentProfile(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteAgentProfile(ctx, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted agent profile %s", strings.TrimSpace(input.ID))),
+		}, nil
+	}
+}
+
 func listExecutionProfiles(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		items, err := service.ListExecutionProfiles(ctx)
@@ -1756,6 +1810,24 @@ func updateExecutionProfile(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated execution profile %s: %s", item.ID, item.Name)),
+		}, nil
+	}
+}
+
+func deleteExecutionProfile(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteExecutionProfile(ctx, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted execution profile %s", strings.TrimSpace(input.ID))),
 		}, nil
 	}
 }
@@ -2141,6 +2213,25 @@ func updateRole(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated role %s: %s", item.ID, item.Name)),
+		}, nil
+	}
+}
+
+func deleteRole(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		ID        string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteRole(ctx, input.ProjectID, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted role %s", strings.TrimSpace(input.ID))),
 		}, nil
 	}
 }

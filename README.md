@@ -64,9 +64,11 @@ Implemented now:
   - `profiles.list`
   - `profiles.create`
   - `profiles.update`
+  - `profiles.delete`
   - `execution_profiles.list`
   - `execution_profiles.create`
   - `execution_profiles.update`
+  - `execution_profiles.delete`
   - `skills.list`
   - `skills.create`
   - `skills.update`
@@ -74,6 +76,7 @@ Implemented now:
   - `roles.list`
   - `roles.create`
   - `roles.update`
+  - `roles.delete`
   - `work_items.list`
   - `work_items.get`
   - `work_items.create`

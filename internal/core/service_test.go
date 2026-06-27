@@ -438,6 +438,99 @@ func TestService_ProfileLifecycle(t *testing.T) {
 	if updatedExecution.Name != "Cloud execution" || updatedExecution.ProviderHint != "cloud" {
 		t.Fatalf("updated execution profile = %+v, want replacement values", updatedExecution)
 	}
+
+	if err := service.DeleteAgentProfile(ctx, updatedProfile.ID); err != nil {
+		t.Fatalf("DeleteAgentProfile() error = %v", err)
+	}
+	profiles, err := service.ListAgentProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentProfiles() after delete error = %v", err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("profiles after delete = %+v, want none", profiles)
+	}
+	if err := service.DeleteAgentProfile(ctx, updatedProfile.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteAgentProfile(deleted) error = %v, want ErrNotFound", err)
+	}
+
+	if err := service.DeleteExecutionProfile(ctx, updatedExecution.ID); err != nil {
+		t.Fatalf("DeleteExecutionProfile() error = %v", err)
+	}
+	executionProfiles, err := service.ListExecutionProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionProfiles() after delete error = %v", err)
+	}
+	if len(executionProfiles) != 0 {
+		t.Fatalf("execution profiles after delete = %+v, want none", executionProfiles)
+	}
+	if err := service.DeleteExecutionProfile(ctx, updatedExecution.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteExecutionProfile(deleted) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestService_DeleteRoleRequiresNoAssignments(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	project, err := service.CreateProject(ctx, Project{Name: "Role cleanup"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	spareRole, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Spare reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole(spare) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Keep referenced roles"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+
+	if err := service.DeleteRole(ctx, project.ID, spareRole.ID); err != nil {
+		t.Fatalf("DeleteRole(spare) error = %v", err)
+	}
+	roles, err := service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() after spare delete error = %v", err)
+	}
+	if len(roles) != 1 || roles[0].ID != role.ID {
+		t.Fatalf("roles after spare delete = %+v, want referenced role only", roles)
+	}
+
+	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("DeleteRole(referenced) error = %v, want ErrConflict", err)
+	}
+	roles, err = service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() after conflict error = %v", err)
+	}
+	if len(roles) != 1 || roles[0].ID != role.ID {
+		t.Fatalf("roles after conflict = %+v, want referenced role preserved", roles)
+	}
+
+	if err := service.DeleteAssignment(ctx, project.ID, assignment.ID); err != nil {
+		t.Fatalf("DeleteAssignment() error = %v", err)
+	}
+	if err := service.DeleteRole(ctx, project.ID, role.ID); err != nil {
+		t.Fatalf("DeleteRole(unreferenced) error = %v", err)
+	}
+	roles, err = service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() after role delete error = %v", err)
+	}
+	if len(roles) != 0 {
+		t.Fatalf("roles after role delete = %+v, want none", roles)
+	}
+	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteRole(deleted) error = %v, want ErrNotFound", err)
+	}
 }
 
 func TestService_ProjectSkillsDiscoveryAndLaunchResolution(t *testing.T) {
