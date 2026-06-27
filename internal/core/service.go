@@ -722,12 +722,7 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	if err != nil {
 		return Assignment{}, err
 	}
-	desiredAgent := input.DesiredAgent
-	desiredAgent.Kind = strings.TrimSpace(desiredAgent.Kind)
-	if desiredAgent.Kind == "" {
-		desiredAgent.Kind = DesiredAgentAny
-	}
-	desiredAgent.SkillIDs = compactStrings(desiredAgent.SkillIDs)
+	desiredAgent := normalizeDesiredAgent(input.DesiredAgent)
 	now := s.now()
 	item := Assignment{
 		ID:                 firstNonEmpty(strings.TrimSpace(input.ID), newID("asgn")),
@@ -746,6 +741,84 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 		UpdatedAt:          now,
 	}
 	return s.store.CreateAssignment(ctx, item)
+}
+
+func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assignment, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	id := strings.TrimSpace(input.ID)
+	workItemID := strings.TrimSpace(input.WorkItemID)
+	roleID := strings.TrimSpace(input.RoleID)
+	rootID := strings.TrimSpace(input.RootID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if workItemID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if roleID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("role_id is required"))
+	}
+	existing, err := s.store.GetAssignment(ctx, projectID, id)
+	if err != nil {
+		return Assignment{}, err
+	}
+	if _, err := s.store.GetWorkItem(ctx, projectID, workItemID); err != nil {
+		return Assignment{}, err
+	}
+	if _, err := s.store.GetRole(ctx, projectID, roleID); err != nil {
+		return Assignment{}, err
+	}
+	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
+		return Assignment{}, err
+	}
+	profileID := strings.TrimSpace(input.ProfileID)
+	if profileID != "" {
+		if _, err := s.store.GetAgentProfile(ctx, profileID); err != nil {
+			return Assignment{}, err
+		}
+	}
+	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
+	if executionProfileID != "" {
+		if _, err := s.store.GetExecutionProfile(ctx, executionProfileID); err != nil {
+			return Assignment{}, err
+		}
+	}
+	executionMode, err := normalizeExecutionMode(input.ExecutionMode, false)
+	if err != nil {
+		return Assignment{}, err
+	}
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = existing.Status
+	}
+	if !isAssignmentStatus(status) {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment status is invalid"))
+	}
+	claimedBy := strings.TrimSpace(input.ClaimedBy)
+	if claimedBy == "" {
+		claimedBy = existing.ClaimedBy
+	}
+	item := Assignment{
+		ID:                 id,
+		ProjectID:          projectID,
+		WorkItemID:         workItemID,
+		RoleID:             roleID,
+		RootID:             rootID,
+		ProfileID:          profileID,
+		ExecutionProfileID: executionProfileID,
+		ExecutionMode:      executionMode,
+		Status:             status,
+		DesiredAgent:       normalizeDesiredAgent(input.DesiredAgent),
+		ClaimedBy:          claimedBy,
+		ExecutionRef:       strings.TrimSpace(input.ExecutionRef),
+		ContextSnapshotID:  strings.TrimSpace(input.ContextSnapshotID),
+		CreatedAt:          existing.CreatedAt,
+		UpdatedAt:          s.now(),
+	}
+	return s.store.UpdateAssignment(ctx, item)
 }
 
 func (s *Service) GetAssignment(ctx context.Context, projectID, id string) (Assignment, error) {
@@ -2290,6 +2363,15 @@ func isCompletionAssignmentStatus(status string) bool {
 	}
 }
 
+func isAssignmentStatus(status string) bool {
+	switch status {
+	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentReview, AssignmentCompleted, AssignmentFailed, AssignmentCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 func isTerminalAssignmentStatus(status string) bool {
 	switch status {
 	case AssignmentCompleted, AssignmentFailed, AssignmentCancelled:
@@ -2306,6 +2388,16 @@ func isProgressAssignmentStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeDesiredAgent(input DesiredAgent) DesiredAgent {
+	desiredAgent := input
+	desiredAgent.Kind = strings.TrimSpace(desiredAgent.Kind)
+	if desiredAgent.Kind == "" {
+		desiredAgent.Kind = DesiredAgentAny
+	}
+	desiredAgent.SkillIDs = compactStrings(desiredAgent.SkillIDs)
+	return desiredAgent
 }
 
 func normalizeReviewVerdict(value string) (string, error) {

@@ -635,6 +635,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"project_id":{"type":"string","minLength":1},
 				"work_item_id":{"type":"string","minLength":1},
 				"role_id":{"type":"string","minLength":1},
+				"root_id":{"type":"string"},
 				"profile_id":{"type":"string"},
 				"execution_profile_id":{"type":"string"},
 				"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
@@ -644,6 +645,31 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","work_item_id","role_id"]
 		}`),
 	}, createAssignment(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.update",
+		Title:       "Update assignment metadata",
+		Description: "Update assignment coordination metadata such as work item, role, root, profiles, execution mode, desired agent, status, and context refs.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"role_id":{"type":"string","minLength":1},
+				"root_id":{"type":"string"},
+				"profile_id":{"type":"string"},
+				"execution_profile_id":{"type":"string"},
+				"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
+				"desired_agent_kind":{"type":"string"},
+				"skill_ids":{"type":"array","items":{"type":"string"}},
+				"status":{"type":"string","enum":["queued","claimed","running","awaiting_review","completed","failed","cancelled"]},
+				"execution_ref":{"type":"string"},
+				"context_snapshot_id":{"type":"string"}
+			},
+			"required":["project_id","assignment_id","work_item_id","role_id"]
+		}`),
+	}, updateAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.claim",
@@ -2381,6 +2407,61 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(detail),
+		}, nil
+	}
+}
+
+func updateAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID          string   `json:"project_id"`
+		AssignmentID       string   `json:"assignment_id"`
+		WorkItemID         string   `json:"work_item_id"`
+		RoleID             string   `json:"role_id"`
+		RootID             string   `json:"root_id"`
+		ProfileID          string   `json:"profile_id"`
+		ExecutionProfileID string   `json:"execution_profile_id"`
+		ExecutionMode      string   `json:"execution_mode"`
+		DesiredAgentKind   string   `json:"desired_agent_kind"`
+		SkillIDs           []string `json:"skill_ids"`
+		Status             string   `json:"status"`
+		ExecutionRef       string   `json:"execution_ref"`
+		ContextSnapshotID  string   `json:"context_snapshot_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.UpdateAssignment(ctx, core.Assignment{
+			ProjectID:          input.ProjectID,
+			ID:                 input.AssignmentID,
+			WorkItemID:         input.WorkItemID,
+			RoleID:             input.RoleID,
+			RootID:             input.RootID,
+			ProfileID:          input.ProfileID,
+			ExecutionProfileID: input.ExecutionProfileID,
+			ExecutionMode:      input.ExecutionMode,
+			Status:             input.Status,
+			DesiredAgent: core.DesiredAgent{
+				Kind:     input.DesiredAgentKind,
+				SkillIDs: input.SkillIDs,
+			},
+			ExecutionRef:      input.ExecutionRef,
+			ContextSnapshotID: input.ContextSnapshotID,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		detail := fmt.Sprintf("Updated assignment %s: work=%s role=%s status=%s", item.ID, item.WorkItemID, item.RoleID, item.Status)
+		if item.ExecutionMode != "" {
+			detail += " mode=" + item.ExecutionMode
+		}
+		if item.RootID != "" {
+			detail += " root=" + item.RootID
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(detail),
+			StructuredContent: item,
 		}, nil
 	}
 }

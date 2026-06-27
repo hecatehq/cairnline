@@ -122,6 +122,25 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment() error = %v", err)
 	}
+	assignment, err = service.UpdateAssignment(ctx, core.Assignment{
+		ProjectID:          project.ID,
+		ID:                 assignment.ID,
+		WorkItemID:         work.ID,
+		RoleID:             role.ID,
+		RootID:             "root_main",
+		ProfileID:          profile.ID,
+		ExecutionProfileID: executionProfile.ID,
+		ExecutionMode:      core.ExecutionMCPPull,
+		Status:             core.AssignmentQueued,
+		DesiredAgent: core.DesiredAgent{
+			Kind:     "any",
+			SkillIDs: []string{"review", "evidence"},
+		},
+		ContextSnapshotID: "ctx-prep",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAssignment() error = %v", err)
+	}
 	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
 		t.Fatalf("ClaimAssignment() error = %v", err)
 	}
@@ -269,8 +288,8 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].Status != core.AssignmentCompleted || assignments[0].ExecutionRef != "run-1" {
 		t.Fatalf("assignments = %+v, want completed assignment", assignments)
 	}
-	if assignments[0].RootID != "root_main" {
-		t.Fatalf("assignment root = %q, want root_main", assignments[0].RootID)
+	if assignments[0].RootID != "root_main" || assignments[0].ProfileID != profile.ID || assignments[0].ContextSnapshotID != "ctx-prep" || len(assignments[0].DesiredAgent.SkillIDs) != 2 {
+		t.Fatalf("assignment metadata = %+v, want persisted root/profile/context/desired-agent update", assignments[0])
 	}
 	packet, err := reopenedService.AssignmentContext(ctx, project.ID, assignment.ID)
 	if err != nil {

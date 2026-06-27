@@ -545,6 +545,41 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("assignment root = %q, want root_review", assignments[0].RootID)
 	}
 	assignmentID := assignments[0].ID
+	updatedWork, err := service.CreateWorkItem(ctx, core.WorkItem{
+		ProjectID: project.ID,
+		Title:     "Review MCP pull updated",
+		Brief:     "Retargeted work item.",
+		RootID:    "root_review",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(updated) error = %v", err)
+	}
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","profile_id":"profile_reviewer","execution_profile_id":"exec_local","execution_mode":"mcp_pull","desired_agent_kind":"codex","skill_ids":["review","backend","backend"],"status":"queued","execution_ref":"chat-1","context_snapshot_id":"ctx-1"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update assignment error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Updated assignment "+assignmentID) || !strings.Contains(output.String(), `"structuredContent"`) {
+		t.Fatalf("update assignment response = %s", output.String())
+	}
+	var updateAssignmentResponse struct {
+		Result struct {
+			StructuredContent core.Assignment `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &updateAssignmentResponse); err != nil {
+		t.Fatalf("update assignment response did not unmarshal: %v\n%s", err, output.String())
+	}
+	updatedAssignment := updateAssignmentResponse.Result.StructuredContent
+	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.ProfileID != "profile_reviewer" || updatedAssignment.ExecutionProfileID != "exec_local" || updatedAssignment.ContextSnapshotID != "ctx-1" {
+		t.Fatalf("updated assignment = %+v, want retargeted assignment metadata", updatedAssignment)
+	}
+	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" {
+		t.Fatalf("updated assignment desired agent = %+v, want normalized desired agent", updatedAssignment.DesiredAgent)
+	}
+	work = updatedWork
 
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"artifacts.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","kind":"decision_note","title":"Decision","body":"Record a generic collaboration artifact.","author_role_id":"` + role.ID + `","provenance_kind":"operator","trust_label":"operator_reviewed"}}}` + "\n",
@@ -592,7 +627,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"assignments.next","arguments":{"project_id":"` + project.ID + `","agent_kind":"any","skill_ids":["review"]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"assignments.next","arguments":{"project_id":"` + project.ID + `","agent_kind":"any","skill_ids":["review","backend"]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -636,7 +671,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.next","arguments":{"project_id":"` + project.ID + `","agent_kind":"any","skill_ids":["review"]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.next","arguments":{"project_id":"` + project.ID + `","agent_kind":"any","skill_ids":["review","backend"]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

@@ -969,6 +969,73 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if got := assignment.DesiredAgent.SkillIDs; len(got) != 1 || got[0] != "review" {
 		t.Fatalf("skill ids = %+v, want deduped review id", got)
 	}
+	implementer, err := service.CreateRole(ctx, Role{
+		ProjectID:                 project.ID,
+		Name:                      "Implementer",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateRole(implementer) error = %v", err)
+	}
+	updatedWork, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID: project.ID,
+		Title:     "Updated assignment target",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(updated target) error = %v", err)
+	}
+	updatedAssignment, err := service.UpdateAssignment(ctx, Assignment{
+		ProjectID:          project.ID,
+		ID:                 assignment.ID,
+		WorkItemID:         updatedWork.ID,
+		RoleID:             implementer.ID,
+		ProfileID:          profile.ID,
+		ExecutionProfileID: executionProfile.ID,
+		ExecutionMode:      ExecutionExternalAdapter,
+		Status:             AssignmentQueued,
+		DesiredAgent: DesiredAgent{
+			Kind:     "codex",
+			SkillIDs: []string{"review", "backend", "backend"},
+		},
+		ExecutionRef:      "chat-1",
+		ContextSnapshotID: "ctx-1",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAssignment() error = %v", err)
+	}
+	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.RoleID != implementer.ID || updatedAssignment.ExecutionMode != ExecutionExternalAdapter || updatedAssignment.ProfileID != profile.ID || updatedAssignment.ExecutionProfileID != executionProfile.ID {
+		t.Fatalf("updated assignment = %+v, want replacement metadata", updatedAssignment)
+	}
+	if updatedAssignment.CreatedAt != assignment.CreatedAt {
+		t.Fatalf("updated assignment created_at = %s, want original %s", updatedAssignment.CreatedAt, assignment.CreatedAt)
+	}
+	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" || updatedAssignment.ExecutionRef != "chat-1" || updatedAssignment.ContextSnapshotID != "ctx-1" {
+		t.Fatalf("updated assignment desired/context = %+v/%q/%q, want normalized desired agent and refs", updatedAssignment.DesiredAgent, updatedAssignment.ExecutionRef, updatedAssignment.ContextSnapshotID)
+	}
+	if _, err := service.UpdateAssignment(ctx, Assignment{
+		ProjectID:     project.ID,
+		ID:            assignment.ID,
+		WorkItemID:    "missing",
+		RoleID:        implementer.ID,
+		ExecutionMode: ExecutionMCPPull,
+		Status:        AssignmentQueued,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateAssignment(missing work item) error = %v, want ErrNotFound", err)
+	}
+	if _, err := service.UpdateAssignment(ctx, Assignment{
+		ProjectID:     project.ID,
+		ID:            assignment.ID,
+		WorkItemID:    updatedWork.ID,
+		RoleID:        implementer.ID,
+		ExecutionMode: ExecutionMCPPull,
+		Status:        "paused",
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UpdateAssignment(invalid status) error = %v, want ErrInvalid", err)
+	}
+	work = updatedWork
+	role = implementer
+	assignment = updatedAssignment
 	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, "run-queued"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("UpdateAssignmentStatus() before claim error = %v, want ErrConflict", err)
 	}
@@ -986,6 +1053,23 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if running.Status != AssignmentRunning || running.ExecutionRef != "run-123" {
 		t.Fatalf("running assignment = %+v, want running with execution ref", running)
+	}
+	runningUpdated, err := service.UpdateAssignment(ctx, Assignment{
+		ProjectID:         project.ID,
+		ID:                assignment.ID,
+		WorkItemID:        work.ID,
+		RoleID:            role.ID,
+		ExecutionMode:     ExecutionOrchestrated,
+		Status:            AssignmentRunning,
+		DesiredAgent:      DesiredAgent{Kind: "hecate", SkillIDs: []string{"review"}},
+		ExecutionRef:      "run-456",
+		ContextSnapshotID: "ctx-running",
+	})
+	if err != nil {
+		t.Fatalf("UpdateAssignment(running) error = %v", err)
+	}
+	if runningUpdated.Status != AssignmentRunning || runningUpdated.ClaimedBy != "agent-a" || runningUpdated.ExecutionMode != ExecutionOrchestrated || runningUpdated.ExecutionRef != "run-456" || runningUpdated.ContextSnapshotID != "ctx-running" {
+		t.Fatalf("running updated assignment = %+v, want metadata update preserving claim", runningUpdated)
 	}
 
 	packet, err := service.AssignmentContext(ctx, project.ID, assignment.ID)
