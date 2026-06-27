@@ -120,6 +120,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			description TEXT NOT NULL DEFAULT '',
 			instructions TEXT NOT NULL DEFAULT '',
 			default_profile_id TEXT NOT NULL DEFAULT '',
+			default_execution_profile_id TEXT NOT NULL DEFAULT '',
 			default_skill_ids_json TEXT NOT NULL DEFAULT '[]',
 			default_execution_mode TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (project_id, id),
@@ -260,6 +261,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "assignments", "root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	if err := s.ensureColumn(ctx, "roles", "default_execution_profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "evidence", "assignment_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -683,7 +687,7 @@ func (s *Store) ListRoles(ctx context.Context, projectID string) ([]core.Role, e
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? ORDER BY name ASC`, projectID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_execution_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? ORDER BY name ASC`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -704,7 +708,7 @@ func (s *Store) GetRole(ctx context.Context, projectID, id string) (core.Role, e
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return core.Role{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_execution_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
 	return scanRole(row)
 }
 
@@ -713,8 +717,8 @@ func (s *Store) CreateRole(ctx context.Context, role core.Role) (core.Role, erro
 	if err != nil {
 		return core.Role{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO roles (project_id, id, name, description, instructions, default_profile_id, default_skill_ids_json, default_execution_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		role.ProjectID, role.ID, role.Name, role.Description, role.Instructions, role.DefaultProfileID, skills, role.DefaultExecutionMode)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO roles (project_id, id, name, description, instructions, default_profile_id, default_execution_profile_id, default_skill_ids_json, default_execution_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		role.ProjectID, role.ID, role.Name, role.Description, role.Instructions, role.DefaultProfileID, role.DefaultExecutionProfileID, skills, role.DefaultExecutionMode)
 	if err != nil {
 		return core.Role{}, mapSQLiteWriteError(err)
 	}
@@ -726,8 +730,8 @@ func (s *Store) UpdateRole(ctx context.Context, role core.Role) (core.Role, erro
 	if err != nil {
 		return core.Role{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, description = ?, instructions = ?, default_profile_id = ?, default_skill_ids_json = ?, default_execution_mode = ? WHERE project_id = ? AND id = ?`,
-		role.Name, role.Description, role.Instructions, role.DefaultProfileID, skills, role.DefaultExecutionMode, role.ProjectID, role.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, description = ?, instructions = ?, default_profile_id = ?, default_execution_profile_id = ?, default_skill_ids_json = ?, default_execution_mode = ? WHERE project_id = ? AND id = ?`,
+		role.Name, role.Description, role.Instructions, role.DefaultProfileID, role.DefaultExecutionProfileID, skills, role.DefaultExecutionMode, role.ProjectID, role.ID)
 	if err != nil {
 		return core.Role{}, err
 	}
@@ -1451,7 +1455,7 @@ func scanWorkItem(row scanner) (core.WorkItem, error) {
 func scanRole(row scanner) (core.Role, error) {
 	var item core.Role
 	var skillIDsJSON string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.Name, &item.Description, &item.Instructions, &item.DefaultProfileID, &skillIDsJSON, &item.DefaultExecutionMode); err != nil {
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Name, &item.Description, &item.Instructions, &item.DefaultProfileID, &item.DefaultExecutionProfileID, &skillIDsJSON, &item.DefaultExecutionMode); err != nil {
 		return core.Role{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(skillIDsJSON, &item.DefaultSkillIDs); err != nil {

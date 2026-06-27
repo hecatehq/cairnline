@@ -733,28 +733,40 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAgentProfile() error = %v", err)
 	}
+	executionProfile, err := service.CreateExecutionProfile(ctx, ExecutionProfile{Name: "Local execution"})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
 	role, err := service.CreateRole(ctx, Role{
-		ProjectID:        project.ID,
-		Name:             "Implementer",
-		DefaultProfileID: profile.ID,
+		ProjectID:                 project.ID,
+		Name:                      "Implementer",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
+	if role.DefaultExecutionProfileID != executionProfile.ID {
+		t.Fatalf("role = %+v, want default execution profile", role)
+	}
 	updatedRole, err := service.UpdateRole(ctx, Role{
-		ProjectID:            project.ID,
-		ID:                   role.ID,
-		Name:                 "Senior implementer",
-		Description:          "Owns implementation.",
-		DefaultProfileID:     profile.ID,
-		DefaultSkillIDs:      []string{"backend", "backend"},
-		DefaultExecutionMode: ExecutionMCPPull,
+		ProjectID:                 project.ID,
+		ID:                        role.ID,
+		Name:                      "Senior implementer",
+		Description:               "Owns implementation.",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
+		DefaultSkillIDs:           []string{"backend", "backend"},
+		DefaultExecutionMode:      ExecutionMCPPull,
 	})
 	if err != nil {
 		t.Fatalf("UpdateRole() error = %v", err)
 	}
-	if updatedRole.Name != "Senior implementer" || len(updatedRole.DefaultSkillIDs) != 1 || updatedRole.DefaultExecutionMode != ExecutionMCPPull {
+	if updatedRole.Name != "Senior implementer" || len(updatedRole.DefaultSkillIDs) != 1 || updatedRole.DefaultExecutionMode != ExecutionMCPPull || updatedRole.DefaultExecutionProfileID != executionProfile.ID {
 		t.Fatalf("updated role = %+v, want replacement defaults", updatedRole)
+	}
+	if _, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Missing execution", DefaultExecutionProfileID: "missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateRole(missing execution profile) error = %v, want ErrNotFound", err)
 	}
 
 	work, err := service.CreateWorkItem(ctx, WorkItem{
@@ -818,10 +830,11 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 	role, err := service.CreateRole(ctx, Role{
-		ProjectID:        project.ID,
-		Name:             "Reviewer",
-		Instructions:     "Check the evidence and record blockers.",
-		DefaultProfileID: profile.ID,
+		ProjectID:                 project.ID,
+		Name:                      "Reviewer",
+		Instructions:              "Check the evidence and record blockers.",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -836,10 +849,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 
 	assignment, err := service.CreateAssignment(ctx, Assignment{
-		ProjectID:          project.ID,
-		WorkItemID:         work.ID,
-		RoleID:             role.ID,
-		ExecutionProfileID: executionProfile.ID,
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
 		DesiredAgent: DesiredAgent{
 			Kind:     "any",
 			SkillIDs: []string{"review", "review"},

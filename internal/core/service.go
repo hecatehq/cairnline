@@ -526,19 +526,26 @@ func (s *Service) CreateRole(ctx context.Context, input Role) (Role, error) {
 			return Role{}, err
 		}
 	}
+	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
+	if defaultExecutionProfileID != "" {
+		if _, err := s.store.GetExecutionProfile(ctx, defaultExecutionProfileID); err != nil {
+			return Role{}, err
+		}
+	}
 	executionMode, err := normalizeExecutionMode(input.DefaultExecutionMode, true)
 	if err != nil {
 		return Role{}, err
 	}
 	item := Role{
-		ID:                   firstNonEmpty(strings.TrimSpace(input.ID), newID("role")),
-		ProjectID:            projectID,
-		Name:                 name,
-		Description:          strings.TrimSpace(input.Description),
-		Instructions:         strings.TrimSpace(input.Instructions),
-		DefaultProfileID:     defaultProfileID,
-		DefaultSkillIDs:      compactStrings(input.DefaultSkillIDs),
-		DefaultExecutionMode: executionMode,
+		ID:                        firstNonEmpty(strings.TrimSpace(input.ID), newID("role")),
+		ProjectID:                 projectID,
+		Name:                      name,
+		Description:               strings.TrimSpace(input.Description),
+		Instructions:              strings.TrimSpace(input.Instructions),
+		DefaultProfileID:          defaultProfileID,
+		DefaultExecutionProfileID: defaultExecutionProfileID,
+		DefaultSkillIDs:           compactStrings(input.DefaultSkillIDs),
+		DefaultExecutionMode:      executionMode,
 	}
 	return s.store.CreateRole(ctx, item)
 }
@@ -565,19 +572,26 @@ func (s *Service) UpdateRole(ctx context.Context, input Role) (Role, error) {
 			return Role{}, err
 		}
 	}
+	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
+	if defaultExecutionProfileID != "" {
+		if _, err := s.store.GetExecutionProfile(ctx, defaultExecutionProfileID); err != nil {
+			return Role{}, err
+		}
+	}
 	executionMode, err := normalizeExecutionMode(input.DefaultExecutionMode, true)
 	if err != nil {
 		return Role{}, err
 	}
 	item := Role{
-		ID:                   id,
-		ProjectID:            projectID,
-		Name:                 name,
-		Description:          strings.TrimSpace(input.Description),
-		Instructions:         strings.TrimSpace(input.Instructions),
-		DefaultProfileID:     defaultProfileID,
-		DefaultSkillIDs:      compactStrings(input.DefaultSkillIDs),
-		DefaultExecutionMode: executionMode,
+		ID:                        id,
+		ProjectID:                 projectID,
+		Name:                      name,
+		Description:               strings.TrimSpace(input.Description),
+		Instructions:              strings.TrimSpace(input.Instructions),
+		DefaultProfileID:          defaultProfileID,
+		DefaultExecutionProfileID: defaultExecutionProfileID,
+		DefaultSkillIDs:           compactStrings(input.DefaultSkillIDs),
+		DefaultExecutionMode:      executionMode,
 	}
 	return s.store.UpdateRole(ctx, item)
 }
@@ -860,8 +874,9 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		}
 	}
 	var executionProfile *ExecutionProfile
-	if packetContext.Assignment.ExecutionProfileID != "" {
-		resolvedExecutionProfile, err := s.store.GetExecutionProfile(ctx, packetContext.Assignment.ExecutionProfileID)
+	executionProfileID := firstNonEmpty(packetContext.Assignment.ExecutionProfileID, executionProfileIDFromRole(packetContext.Role))
+	if executionProfileID != "" {
+		resolvedExecutionProfile, err := s.store.GetExecutionProfile(ctx, executionProfileID)
 		if err != nil {
 			if !errors.Is(err, ErrNotFound) {
 				return AssignmentLaunchPacket{}, err
@@ -2213,6 +2228,13 @@ func profileIDFromRole(role *Role) string {
 		return ""
 	}
 	return role.DefaultProfileID
+}
+
+func executionProfileIDFromRole(role *Role) string {
+	if role == nil {
+		return ""
+	}
+	return role.DefaultExecutionProfileID
 }
 
 func (s *Service) validateProjectRoot(ctx context.Context, projectID, rootID string) error {

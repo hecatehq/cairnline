@@ -25,9 +25,10 @@ local MCP server, but its contracts are not stable yet.
 Implemented now:
 
 - portable core types for projects with roots/default root metadata, context
-  source provenance metadata, roles, profiles, work items, assignments, skill
-  metadata, assignment-scoped evidence, reviews, handoffs with source/target
-  refs, accepted memory, and memory candidates
+  source provenance metadata, roles with agent/execution-profile defaults,
+  profiles, work items, assignments, skill metadata, assignment-scoped evidence,
+  reviews, handoffs with source/target refs, accepted memory, and memory
+  candidates
 - in-memory service for projects, profiles, roles, work items, assignments,
   assistant proposal records including project-root/default-root actions, and
   collaboration artifacts

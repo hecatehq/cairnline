@@ -84,12 +84,13 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateProjectSkill() error = %v", err)
 	}
 	role, err := service.CreateRole(ctx, core.Role{
-		ProjectID:            project.ID,
-		Name:                 "Reviewer",
-		Instructions:         "Review the durable trail.",
-		DefaultProfileID:     profile.ID,
-		DefaultSkillIDs:      []string{"review", "evidence"},
-		DefaultExecutionMode: core.ExecutionMCPPull,
+		ProjectID:                 project.ID,
+		Name:                      "Reviewer",
+		Instructions:              "Review the durable trail.",
+		DefaultProfileID:          profile.ID,
+		DefaultExecutionProfileID: executionProfile.ID,
+		DefaultSkillIDs:           []string{"review", "evidence"},
+		DefaultExecutionMode:      core.ExecutionMCPPull,
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -232,7 +233,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRoles() error = %v", err)
 	}
-	if len(roles) != 1 || roles[0].ID != role.ID || len(roles[0].DefaultSkillIDs) != 2 {
+	if len(roles) != 1 || roles[0].ID != role.ID || roles[0].DefaultExecutionProfileID != executionProfile.ID || len(roles[0].DefaultSkillIDs) != 2 {
 		t.Fatalf("roles = %+v, want persisted role metadata", roles)
 	}
 	skills, err := reopenedService.ListProjectSkills(ctx, project.ID)
