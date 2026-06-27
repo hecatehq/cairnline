@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hecatehq/cairnline/internal/core"
 )
@@ -850,6 +851,100 @@ func TestStore_MemoryEntryLifecycle(t *testing.T) {
 	}
 	if _, err := service.GetMemoryEntry(ctx, project.ID, entry.ID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("GetMemoryEntry(deleted) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStore_MemoryListsUseHecateCompatibleOrder(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "memory_order.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Memory order"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	base := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+
+	enabled, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{
+		ID:         "mem_enabled",
+		ProjectID:  project.ID,
+		Title:      "Enabled memory",
+		Body:       "Enabled entries sort before disabled entries.",
+		TrustLabel: core.MemoryTrustOperator,
+		SourceKind: core.MemorySourceOperator,
+		CreatedAt:  base,
+		UpdatedAt:  base,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry(enabled) error = %v", err)
+	}
+	disabled, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{
+		ID:         "mem_disabled",
+		ProjectID:  project.ID,
+		Title:      "Disabled memory",
+		Body:       "Disabled entries remain inspectable but sort after enabled entries.",
+		TrustLabel: core.MemoryTrustOperator,
+		SourceKind: core.MemorySourceOperator,
+		CreatedAt:  base.Add(time.Minute),
+		UpdatedAt:  base.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryEntry(disabled) error = %v", err)
+	}
+	disabled.Enabled = false
+	disabled.UpdatedAt = base.Add(2 * time.Minute)
+	if _, err := service.UpdateMemoryEntry(ctx, disabled); err != nil {
+		t.Fatalf("UpdateMemoryEntry(disabled) error = %v", err)
+	}
+	entries, err := service.ListMemoryEntries(ctx, project.ID, true)
+	if err != nil {
+		t.Fatalf("ListMemoryEntries() error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].ID != enabled.ID || entries[1].ID != disabled.ID {
+		t.Fatalf("entries = %+v, want enabled memory before newer disabled memory", entries)
+	}
+
+	pending, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
+		ID:                  "memcand_pending",
+		ProjectID:           project.ID,
+		Title:               "Pending candidate",
+		Body:                "Pending candidates need operator review.",
+		SuggestedTrustLabel: core.MemoryTrustGenerated,
+		SuggestedSourceKind: core.MemorySourceGenerated,
+		CreatedAt:           base,
+		UpdatedAt:           base,
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(pending) error = %v", err)
+	}
+	rejected, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
+		ID:                  "memcand_rejected",
+		ProjectID:           project.ID,
+		Title:               "Rejected candidate",
+		Body:                "Resolved candidates sort after pending candidates.",
+		SuggestedTrustLabel: core.MemoryTrustGenerated,
+		SuggestedSourceKind: core.MemorySourceGenerated,
+		CreatedAt:           base.Add(time.Minute),
+		UpdatedAt:           base.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreateMemoryCandidate(rejected) error = %v", err)
+	}
+	rejected.Status = core.MemoryCandidateRejected
+	rejected.StatusReason = "Not durable."
+	rejected.UpdatedAt = base.Add(2 * time.Minute)
+	if _, err := service.UpdateMemoryCandidate(ctx, rejected); err != nil {
+		t.Fatalf("UpdateMemoryCandidate(rejected) error = %v", err)
+	}
+	candidates, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{ProjectID: project.ID, IncludeResolved: true})
+	if err != nil {
+		t.Fatalf("ListMemoryCandidates() error = %v", err)
+	}
+	if len(candidates) != 2 || candidates[0].ID != pending.ID || candidates[1].ID != rejected.ID {
+		t.Fatalf("candidates = %+v, want pending candidate before newer rejected candidate", candidates)
 	}
 }
 
