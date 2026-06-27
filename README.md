@@ -90,6 +90,9 @@ Implemented now:
   - `assignments.launch_packet`
   - `assignments.complete`
   - `assignments.delete`
+  - `artifacts.list`
+  - `artifacts.get`
+  - `artifacts.create`
   - `evidence.list`
   - `evidence.get`
   - `evidence.record`
