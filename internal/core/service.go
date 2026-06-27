@@ -7,13 +7,22 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
-const maxSkillMetadataBytes = 64 * 1024
+const (
+	maxGuidanceMetadataBytes = 64 * 1024
+	maxSkillMetadataBytes    = 64 * 1024
+)
+
+type skillDiscoveryBase struct {
+	path       string
+	sourceRefs []string
+}
 
 type Service struct {
 	store       Store
@@ -172,8 +181,8 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 			continue
 		}
 		rootPath := filepath.Clean(root.Path)
-		for _, base := range []string{SkillPathAgents, SkillPathCairnline} {
-			basePath := filepath.Join(rootPath, filepath.FromSlash(base))
+		for _, base := range projectSkillDiscoveryBases(rootPath, root, project.ContextSources) {
+			basePath := filepath.Join(rootPath, filepath.FromSlash(base.path))
 			entries, err := os.ReadDir(basePath)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -210,6 +219,7 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 					Enabled:      true,
 					Status:       SkillStatusAvailable,
 					TrustLabel:   SkillTrustWorkspace,
+					SourceRefs:   compactStrings(base.sourceRefs),
 					DiscoveredAt: now,
 					CreatedAt:    now,
 					UpdatedAt:    now,
@@ -217,6 +227,9 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 				if prior, ok := discovered[id]; ok {
 					prior.Status = SkillStatusConflict
 					prior.Warnings = appendUnique(prior.Warnings, "skill id is declared by multiple paths: "+prior.Path+" and "+item.Path)
+					for _, ref := range item.SourceRefs {
+						prior.SourceRefs = appendUnique(prior.SourceRefs, ref)
+					}
 					discovered[id] = prior
 					item.Status = SkillStatusConflict
 					item.Warnings = prior.Warnings
@@ -1863,6 +1876,207 @@ func validSkillStatus(value string) bool {
 	default:
 		return false
 	}
+}
+
+func projectSkillDiscoveryBases(rootPath string, root Root, sources []Source) []skillDiscoveryBase {
+	bases := []skillDiscoveryBase{
+		{path: SkillPathAgents},
+		{path: SkillPathHecate},
+		{path: SkillPathCairnline},
+	}
+	seen := map[string]int{
+		SkillPathAgents:    0,
+		SkillPathHecate:    1,
+		SkillPathCairnline: 2,
+	}
+	for _, source := range sources {
+		if !skillGuidanceSourceForRoot(source, root.ID) {
+			continue
+		}
+		body, ok := readGuidanceSource(rootPath, source)
+		if !ok {
+			continue
+		}
+		for _, dir := range skillBaseDirsFromGuidance(source.Locator, body) {
+			if shouldSkipSkillDiscoveryPath(dir) {
+				continue
+			}
+			if idx, ok := seen[dir]; ok {
+				bases[idx].sourceRefs = appendUnique(bases[idx].sourceRefs, source.ID)
+				continue
+			}
+			seen[dir] = len(bases)
+			bases = append(bases, skillDiscoveryBase{
+				path:       dir,
+				sourceRefs: compactStrings([]string{source.ID}),
+			})
+		}
+	}
+	return bases
+}
+
+func skillGuidanceSourceForRoot(source Source, rootID string) bool {
+	if !source.Enabled {
+		return false
+	}
+	locator, ok := cleanSkillDiscoveryRelativePath(source.Locator)
+	if !ok || shouldSkipSkillDiscoveryPath(locator) {
+		return false
+	}
+	if source.Metadata != nil {
+		sourceRootID := strings.TrimSpace(source.Metadata["root_id"])
+		if sourceRootID != "" && rootID != "" && sourceRootID != rootID {
+			return false
+		}
+	}
+	if source.Kind == "workspace_instruction" || source.Format == "agents_md" || source.Format == "claude_md" {
+		return true
+	}
+	switch strings.ToLower(path.Base(locator)) {
+	case "agents.md", "claude.md", "claude.local.md":
+		return true
+	default:
+		return false
+	}
+}
+
+func readGuidanceSource(rootPath string, source Source) (string, bool) {
+	locator, ok := cleanSkillDiscoveryRelativePath(source.Locator)
+	if !ok {
+		return "", false
+	}
+	filePath := filepath.Join(rootPath, filepath.FromSlash(locator))
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() || info.Size() > maxGuidanceMetadataBytes {
+		return "", false
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxGuidanceMetadataBytes))
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+func skillBaseDirsFromGuidance(sourceLocator, body string) []string {
+	sourceDir := path.Dir(filepath.ToSlash(strings.TrimSpace(sourceLocator)))
+	if sourceDir == "." {
+		sourceDir = ""
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, token := range guidancePathTokens(body) {
+		for _, dir := range skillBaseDirsFromToken(sourceDir, token) {
+			if _, ok := seen[dir]; ok {
+				continue
+			}
+			seen[dir] = struct{}{}
+			out = append(out, dir)
+		}
+	}
+	return out
+}
+
+func guidancePathTokens(body string) []string {
+	var out []string
+	var builder strings.Builder
+	flush := func() {
+		if builder.Len() == 0 {
+			return
+		}
+		token := strings.Trim(builder.String(), "`'\"()[]{}<>.,;:")
+		builder.Reset()
+		if token != "" {
+			out = append(out, token)
+		}
+	}
+	for _, r := range body {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-', r == '/', r == '*', r == '@':
+			builder.WriteRune(r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+func skillBaseDirsFromToken(sourceDir, token string) []string {
+	token = strings.TrimSpace(strings.TrimPrefix(token, "@"))
+	if token == "" || strings.Contains(token, "://") || strings.HasPrefix(token, "#") {
+		return nil
+	}
+	token = filepath.ToSlash(token)
+	token = strings.TrimPrefix(token, "./")
+	if path.IsAbs(token) {
+		return nil
+	}
+	cleaned := path.Clean(token)
+	if sourceDir != "" && !strings.HasPrefix(cleaned, ".agents/") && !strings.HasPrefix(cleaned, ".hecate/") && !strings.HasPrefix(cleaned, ".cairnline/") {
+		cleaned = path.Clean(path.Join(sourceDir, cleaned))
+	}
+	cleaned, ok := cleanSkillDiscoveryRelativePath(cleaned)
+	if !ok {
+		return nil
+	}
+	lower := strings.ToLower(cleaned)
+	switch {
+	case strings.Contains(lower, "/*/skill.md"):
+		idx := strings.Index(lower, "/*/skill.md")
+		base := cleaned[:idx]
+		if base != "" && base != "." {
+			return []string{base}
+		}
+	case strings.HasSuffix(lower, "/skill.md"):
+		skillDir := path.Dir(cleaned)
+		base := path.Dir(skillDir)
+		if base != "." && base != "/" {
+			return []string{base}
+		}
+	case strings.HasSuffix(lower, "/skills/readme.md"):
+		return []string{path.Dir(cleaned)}
+	case strings.HasSuffix(lower, "/skills"):
+		return []string{cleaned}
+	default:
+		if idx := strings.Index(lower, "/skills/"); idx >= 0 {
+			return []string{cleaned[:idx+len("/skills")]}
+		}
+	}
+	return nil
+}
+
+func cleanSkillDiscoveryRelativePath(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.Contains(trimmed, "://") || filepath.IsAbs(trimmed) {
+		return "", false
+	}
+	rel := filepath.ToSlash(trimmed)
+	rel = strings.TrimPrefix(rel, "./")
+	if path.IsAbs(rel) {
+		return "", false
+	}
+	rel = path.Clean(rel)
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
+}
+
+func shouldSkipSkillDiscoveryPath(rel string) bool {
+	cleaned, ok := cleanSkillDiscoveryRelativePath(rel)
+	if !ok {
+		return false
+	}
+	return cleaned == ".worktrees" || strings.HasPrefix(cleaned, ".worktrees/") ||
+		cleaned == ".claude/worktrees" || strings.HasPrefix(cleaned, ".claude/worktrees/")
 }
 
 type skillFileMetadata struct {

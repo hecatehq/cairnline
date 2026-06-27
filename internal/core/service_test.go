@@ -452,6 +452,7 @@ description: Work on backend code with tests.
 
 Body should not be stored in the skill registry.
 `)
+	writeSkill(t, root, SkillPathHecate, "qa", "# QA reviewer\n")
 
 	project, err := service.CreateProject(ctx, Project{
 		Name: "Skill project",
@@ -469,15 +470,22 @@ Body should not be stored in the skill registry.
 	if err != nil {
 		t.Fatalf("DiscoverProjectSkills() error = %v", err)
 	}
-	if len(skills) != 1 {
-		t.Fatalf("skills = %+v, want one discovered skill", skills)
+	if len(skills) != 2 {
+		t.Fatalf("skills = %+v, want two discovered skills", skills)
 	}
-	skill := skills[0]
+	skill := findProjectSkillForTest(skills, "backend")
+	if skill == nil {
+		t.Fatalf("skills = %+v, missing backend skill", skills)
+	}
 	if skill.ID != "backend" || skill.Title != "Backend implementer" || skill.Description != "Work on backend code with tests." || skill.Path != ".agents/skills/backend/SKILL.md" {
 		t.Fatalf("skill = %+v, want parsed metadata and relative path", skill)
 	}
 	if strings.Contains(skill.Description, "Body should not be stored") {
 		t.Fatalf("skill description includes body content: %+v", skill)
+	}
+	qa := findProjectSkillForTest(skills, "qa")
+	if qa == nil || qa.Path != ".hecate/skills/qa/SKILL.md" || qa.Title != "QA reviewer" {
+		t.Fatalf("qa skill = %+v, want Hecate-compatible discovered skill", qa)
 	}
 
 	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
@@ -527,7 +535,7 @@ Body should not be stored in the skill registry.
 	}
 
 	skill.Enabled = false
-	if _, err := service.UpdateProjectSkill(ctx, skill); err != nil {
+	if _, err := service.UpdateProjectSkill(ctx, *skill); err != nil {
 		t.Fatalf("UpdateProjectSkill() error = %v", err)
 	}
 	packet, err = service.AssignmentLaunchPacket(ctx, project.ID, assignment.ID)
@@ -539,12 +547,102 @@ Body should not be stored in the skill registry.
 	}
 }
 
+func TestService_ProjectSkillsDiscoveryUsesGuidanceLinkedRoots(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	root := t.TempDir()
+	writeSkill(t, root, "docs-ai/skills", "research", "# Researcher\n")
+	writeSkill(t, root, "docs/guidance/local-skills", "release", "# Release Manager\n")
+	writeSkill(t, root, ".worktrees/refactor/docs-ai/skills", "worktree", "# Worktree Skill\n")
+	writeSkill(t, root, "ignored/skills", "disabled", "# Disabled\n")
+	writeProjectTestFile(t, root, "AGENTS.md", "Use @docs-ai/skills/research/SKILL.md and `.worktrees/refactor/docs-ai/skills/worktree/SKILL.md`.\n")
+	writeProjectTestFile(t, root, "docs/guidance/CLAUDE.md", "Use local-skills/release/SKILL.md and https://example.com/skills/cloud/SKILL.md.\n")
+	writeProjectTestFile(t, root, "OTHER.md", "Use ignored/skills/wrong-root/SKILL.md.\n")
+	writeProjectTestFile(t, root, "DISABLED.md", "Use ignored/skills/disabled/SKILL.md.\n")
+
+	project, err := service.CreateProject(ctx, Project{
+		Name: "Guidance skills",
+		Roots: []Root{{
+			ID:     "root_main",
+			Path:   root,
+			Kind:   "workspace",
+			Active: true,
+		}},
+		ContextSources: []Source{
+			{
+				ID:      "src_agents",
+				Kind:    "workspace_instruction",
+				Title:   "AGENTS.md",
+				Locator: "AGENTS.md",
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+			{
+				ID:      "src_claude",
+				Title:   "CLAUDE.md",
+				Locator: "docs/guidance/CLAUDE.md",
+				Enabled: true,
+				Format:  "claude_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+			{
+				ID:      "src_wrong_root",
+				Kind:    "workspace_instruction",
+				Title:   "OTHER.md",
+				Locator: "OTHER.md",
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "other_root",
+				},
+			},
+			{
+				ID:      "src_disabled",
+				Kind:    "workspace_instruction",
+				Title:   "DISABLED.md",
+				Locator: "DISABLED.md",
+				Enabled: false,
+				Format:  "agents_md",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	skills, err := service.DiscoverProjectSkills(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("DiscoverProjectSkills() error = %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("skills = %+v, want two guidance-linked skills", skills)
+	}
+	research := findProjectSkillForTest(skills, "research")
+	if research == nil || research.Path != "docs-ai/skills/research/SKILL.md" || !containsString(research.SourceRefs, "src_agents") {
+		t.Fatalf("research skill = %+v, want AGENTS.md-linked skill with source ref", research)
+	}
+	release := findProjectSkillForTest(skills, "release")
+	if release == nil || release.Path != "docs/guidance/local-skills/release/SKILL.md" || !containsString(release.SourceRefs, "src_claude") {
+		t.Fatalf("release skill = %+v, want CLAUDE.md-linked skill with source ref", release)
+	}
+	if skipped := findProjectSkillForTest(skills, "worktree"); skipped != nil {
+		t.Fatalf("worktree skill = %+v, want nested worktree link skipped", skipped)
+	}
+	if disabled := findProjectSkillForTest(skills, "disabled"); disabled != nil {
+		t.Fatalf("disabled-source skill = %+v, want disabled guidance source skipped", disabled)
+	}
+}
+
 func TestService_ProjectSkillsDiscoveryMarksConflicts(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 	root := t.TempDir()
 	writeSkill(t, root, SkillPathAgents, "backend", "# Backend\n")
-	writeSkill(t, root, SkillPathCairnline, "backend", "# Backend duplicate\n")
+	writeSkill(t, root, SkillPathHecate, "backend", "# Backend duplicate\n")
 	project, err := service.CreateProject(ctx, Project{
 		Name: "Conflict project",
 		Roots: []Root{{
@@ -2162,6 +2260,26 @@ func writeSkill(t *testing.T, root, base, id, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v", path, err)
 	}
+}
+
+func writeProjectTestFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
+}
+
+func findProjectSkillForTest(skills []ProjectSkill, id string) *ProjectSkill {
+	for index := range skills {
+		if skills[index].ID == id {
+			return &skills[index]
+		}
+	}
+	return nil
 }
 
 func containsString(values []string, want string) bool {
