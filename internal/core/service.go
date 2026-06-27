@@ -329,6 +329,14 @@ func (s *Service) UpdateAgentProfile(ctx context.Context, input AgentProfile) (A
 	return s.store.UpdateAgentProfile(ctx, item)
 }
 
+func (s *Service) DeleteAgentProfile(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("profile id is required"))
+	}
+	return s.store.DeleteAgentProfile(ctx, id)
+}
+
 func (s *Service) ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error) {
 	return s.store.ListExecutionProfiles(ctx)
 }
@@ -386,6 +394,14 @@ func (s *Service) UpdateExecutionProfile(ctx context.Context, input ExecutionPro
 		UpdatedAt:      s.now(),
 	}
 	return s.store.UpdateExecutionProfile(ctx, item)
+}
+
+func (s *Service) DeleteExecutionProfile(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("execution profile id is required"))
+	}
+	return s.store.DeleteExecutionProfile(ctx, id)
 }
 
 func (s *Service) ListWorkItems(ctx context.Context, projectID string) ([]WorkItem, error) {
@@ -594,6 +610,18 @@ func (s *Service) UpdateRole(ctx context.Context, input Role) (Role, error) {
 		DefaultExecutionMode:      executionMode,
 	}
 	return s.store.UpdateRole(ctx, item)
+}
+
+func (s *Service) DeleteRole(ctx context.Context, projectID, id string) error {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return errors.Join(ErrInvalid, errors.New("role_id is required"))
+	}
+	return s.store.DeleteRole(ctx, projectID, id)
 }
 
 func (s *Service) ListAssignments(ctx context.Context, projectID string) ([]Assignment, error) {

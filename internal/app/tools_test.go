@@ -161,6 +161,107 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 }
 
+func TestMCPTools_DeleteProfilesAndRoles(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"profiles.create","arguments":{"id":"profile_temp","name":"Temporary profile"}}}` + "\n",
+	)
+	var output bytes.Buffer
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve(profile create) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created agent profile profile_temp") {
+		t.Fatalf("create profile response = %s", output.String())
+	}
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"profiles.delete","arguments":{"id":"profile_temp"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve(profile delete) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted agent profile profile_temp") {
+		t.Fatalf("delete profile response = %s", output.String())
+	}
+	profiles, err := service.ListAgentProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListAgentProfiles() error = %v", err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("profiles after delete = %+v, want none", profiles)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execution_profiles.create","arguments":{"id":"exec_temp","name":"Temporary execution","agent_kind":"any"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve(execution create) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created execution profile exec_temp") {
+		t.Fatalf("create execution profile response = %s", output.String())
+	}
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"execution_profiles.delete","arguments":{"id":"exec_temp"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve(execution delete) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted execution profile exec_temp") {
+		t.Fatalf("delete execution profile response = %s", output.String())
+	}
+	executionProfiles, err := service.ListExecutionProfiles(ctx)
+	if err != nil {
+		t.Fatalf("ListExecutionProfiles() error = %v", err)
+	}
+	if len(executionProfiles) != 0 {
+		t.Fatalf("execution profiles after delete = %+v, want none", executionProfiles)
+	}
+
+	project, err := service.CreateProject(ctx, core.Project{Name: "Delete role"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"roles.create","arguments":{"project_id":"` + project.ID + `","name":"Temporary role"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve(role create) error = %v", err)
+	}
+	roles, err := service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() error = %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("roles after create = %+v, want one role", roles)
+	}
+	if !strings.Contains(output.String(), "Created role "+roles[0].ID+": Temporary role") {
+		t.Fatalf("create role response = %s", output.String())
+	}
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"roles.delete","arguments":{"project_id":"` + project.ID + `","id":"` + roles[0].ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve(role delete) error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted role "+roles[0].ID) {
+		t.Fatalf("delete role response = %s", output.String())
+	}
+	roles, err = service.ListRoles(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoles() after delete error = %v", err)
+	}
+	if len(roles) != 0 {
+		t.Fatalf("roles after delete = %+v, want none", roles)
+	}
+}
+
 func TestMCPTools_AssistantProposalApply(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())

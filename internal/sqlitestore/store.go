@@ -501,6 +501,14 @@ func (s *Store) UpdateAgentProfile(ctx context.Context, profile core.AgentProfil
 	return profile, requireAffected(result)
 }
 
+func (s *Store) DeleteAgentProfile(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM agent_profiles WHERE id = ?`, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
+}
+
 func (s *Store) ListExecutionProfiles(ctx context.Context) ([]core.ExecutionProfile, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at FROM execution_profiles ORDER BY name ASC`)
 	if err != nil {
@@ -548,6 +556,14 @@ func (s *Store) UpdateExecutionProfile(ctx context.Context, profile core.Executi
 		return core.ExecutionProfile{}, err
 	}
 	return profile, requireAffected(result)
+}
+
+func (s *Store) DeleteExecutionProfile(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM execution_profiles WHERE id = ?`, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
 }
 
 func (s *Store) ListProjectSkills(ctx context.Context, projectID string) ([]core.ProjectSkill, error) {
@@ -754,6 +770,24 @@ func (s *Store) UpdateRole(ctx context.Context, role core.Role) (core.Role, erro
 		return core.Role{}, err
 	}
 	return role, requireAffected(result)
+}
+
+func (s *Store) DeleteRole(ctx context.Context, projectID, id string) error {
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return err
+	}
+	var assignmentCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM assignments WHERE project_id = ? AND role_id = ?`, projectID, id).Scan(&assignmentCount); err != nil {
+		return err
+	}
+	if assignmentCount > 0 {
+		return core.ErrConflict
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
 }
 
 func (s *Store) ListAssignments(ctx context.Context, projectID string) ([]core.Assignment, error) {

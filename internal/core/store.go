@@ -24,11 +24,13 @@ type Store interface {
 	GetAgentProfile(ctx context.Context, id string) (AgentProfile, error)
 	CreateAgentProfile(ctx context.Context, profile AgentProfile) (AgentProfile, error)
 	UpdateAgentProfile(ctx context.Context, profile AgentProfile) (AgentProfile, error)
+	DeleteAgentProfile(ctx context.Context, id string) error
 
 	ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error)
 	GetExecutionProfile(ctx context.Context, id string) (ExecutionProfile, error)
 	CreateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error)
 	UpdateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error)
+	DeleteExecutionProfile(ctx context.Context, id string) error
 
 	ListProjectSkills(ctx context.Context, projectID string) ([]ProjectSkill, error)
 	GetProjectSkill(ctx context.Context, projectID, id string) (ProjectSkill, error)
@@ -45,6 +47,7 @@ type Store interface {
 	GetRole(ctx context.Context, projectID, id string) (Role, error)
 	CreateRole(ctx context.Context, role Role) (Role, error)
 	UpdateRole(ctx context.Context, role Role) (Role, error)
+	DeleteRole(ctx context.Context, projectID, id string) error
 
 	ListAssignments(ctx context.Context, projectID string) ([]Assignment, error)
 	GetAssignment(ctx context.Context, projectID, id string) (Assignment, error)

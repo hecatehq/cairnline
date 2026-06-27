@@ -164,6 +164,17 @@ func (s *MemoryStore) UpdateAgentProfile(ctx context.Context, profile AgentProfi
 	return profile, nil
 }
 
+func (s *MemoryStore) DeleteAgentProfile(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.agent[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.agent, id)
+	return nil
+}
+
 func (s *MemoryStore) ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -209,6 +220,17 @@ func (s *MemoryStore) UpdateExecutionProfile(ctx context.Context, profile Execut
 	}
 	s.execution[profile.ID] = profile
 	return profile, nil
+}
+
+func (s *MemoryStore) DeleteExecutionProfile(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.execution[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.execution, id)
+	return nil
 }
 
 func (s *MemoryStore) ListProjectSkills(ctx context.Context, projectID string) ([]ProjectSkill, error) {
@@ -437,6 +459,25 @@ func (s *MemoryStore) UpdateRole(ctx context.Context, role Role) (Role, error) {
 	}
 	s.roles[role.ProjectID][role.ID] = role
 	return role, nil
+}
+
+func (s *MemoryStore) DeleteRole(ctx context.Context, projectID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := s.roles[projectID][id]; !ok {
+		return ErrNotFound
+	}
+	for _, assignment := range s.assignments[projectID] {
+		if assignment.RoleID == id {
+			return ErrConflict
+		}
+	}
+	delete(s.roles[projectID], id)
+	return nil
 }
 
 func (s *MemoryStore) ListAssignments(ctx context.Context, projectID string) ([]Assignment, error) {
