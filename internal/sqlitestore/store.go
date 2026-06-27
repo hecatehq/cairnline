@@ -377,6 +377,45 @@ func (s *Store) UpdateProject(ctx context.Context, project core.Project) (core.P
 	return project, requireAffected(result)
 }
 
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	rollback := func() {
+		_ = tx.Rollback()
+	}
+	for _, table := range []string{
+		"evidence",
+		"reviews",
+		"handoffs",
+		"memory_candidates",
+		"memory_entries",
+		"assignments",
+		"project_skills",
+		"work_items",
+		"roles",
+	} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = ?`, id); err != nil {
+			rollback()
+			return mapSQLiteWriteError(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ListAgentProfiles(ctx context.Context) ([]core.AgentProfile, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at FROM agent_profiles ORDER BY name ASC`)
 	if err != nil {
@@ -593,6 +632,39 @@ func (s *Store) UpdateWorkItem(ctx context.Context, item core.WorkItem) (core.Wo
 	return item, requireAffected(result)
 }
 
+func (s *Store) DeleteWorkItem(ctx context.Context, projectID, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	rollback := func() {
+		_ = tx.Rollback()
+	}
+	for _, table := range []string{"evidence", "reviews", "assignments"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = ? AND work_item_id = ?`, projectID, id); err != nil {
+			rollback()
+			return mapSQLiteWriteError(err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM handoffs WHERE project_id = ? AND (work_item_id = ? OR target_work_item_id = ?)`, projectID, id, id); err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM work_items WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ListRoles(ctx context.Context, projectID string) ([]core.Role, error) {
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return nil, err
@@ -729,6 +801,33 @@ func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy st
 	return core.Assignment{}, core.ErrConflict
 }
 
+func (s *Store) DeleteAssignment(ctx context.Context, projectID, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	rollback := func() {
+		_ = tx.Rollback()
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM reviews WHERE project_id = ? AND assignment_id = ?`, projectID, id); err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM assignments WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) ([]core.Evidence, error) {
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return nil, err
@@ -824,6 +923,14 @@ func (s *Store) ListHandoffs(ctx context.Context, projectID, workItemID string) 
 	return out, rows.Err()
 }
 
+func (s *Store) GetHandoff(ctx context.Context, projectID, workItemID, id string) (core.Handoff, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return core.Handoff{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	return scanHandoff(row)
+}
+
 func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
 	if handoff.SourceAssignmentID != "" {
 		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.SourceAssignmentID)
@@ -876,6 +983,71 @@ func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 		return core.Handoff{}, mapSQLiteWriteError(err)
 	}
 	return handoff, nil
+}
+
+func (s *Store) UpdateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
+	if handoff.SourceAssignmentID != "" {
+		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.SourceAssignmentID)
+		if err != nil {
+			return core.Handoff{}, err
+		}
+		if assignment.WorkItemID != handoff.WorkItemID {
+			return core.Handoff{}, core.ErrNotFound
+		}
+	}
+	if handoff.FromRoleID != "" {
+		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.FromRoleID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	if handoff.ToRoleID != "" {
+		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.ToRoleID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	if handoff.TargetAssignmentID != "" {
+		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.TargetAssignmentID)
+		if err != nil {
+			return core.Handoff{}, err
+		}
+		if handoff.TargetWorkItemID != "" && assignment.WorkItemID != handoff.TargetWorkItemID {
+			return core.Handoff{}, core.ErrNotFound
+		}
+	}
+	if handoff.TargetWorkItemID != "" {
+		if err := s.requireWorkItem(ctx, handoff.ProjectID, handoff.TargetWorkItemID); err != nil {
+			return core.Handoff{}, err
+		}
+	}
+	linkedArtifactIDs, err := encodeJSON(handoff.LinkedArtifactIDs)
+	if err != nil {
+		return core.Handoff{}, err
+	}
+	linkedMemoryIDs, err := encodeJSON(handoff.LinkedMemoryIDs)
+	if err != nil {
+		return core.Handoff{}, err
+	}
+	contextRefs, err := encodeJSON(handoff.ContextRefs)
+	if err != nil {
+		return core.Handoff{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE handoffs SET source_assignment_id = ?, source_run_id = ?, source_chat_session_id = ?, source_message_id = ?, from_role_id = ?, to_role_id = ?, target_assignment_id = ?, target_work_item_id = ?, title = ?, body = ?, recommended_next_action = ?, linked_artifact_ids_json = ?, linked_memory_ids_json = ?, context_refs_json = ?, status = ?, provenance_kind = ?, trust_label = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND work_item_id = ? AND id = ?`,
+		handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID, handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID, handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs, handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt), handoff.ProjectID, handoff.WorkItemID, handoff.ID)
+	if err != nil {
+		return core.Handoff{}, mapSQLiteWriteError(err)
+	}
+	if err := requireAffected(result); err != nil {
+		return core.Handoff{}, err
+	}
+	return handoff, nil
+}
+
+func (s *Store) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	if err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return requireAffected(result)
 }
 
 func (s *Store) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]core.MemoryEntry, error) {

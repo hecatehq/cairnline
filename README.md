@@ -44,8 +44,10 @@ Implemented now:
   - `cairnline://projects/{project_id}/memory-candidates/{memory_candidate_id}`
 - MCP tools:
   - `projects.list`
+  - `projects.get`
   - `projects.create`
   - `projects.update`
+  - `projects.delete`
   - `projects.activity`
   - `projects.operations_brief`
   - `profiles.list`
@@ -62,10 +64,13 @@ Implemented now:
   - `roles.create`
   - `roles.update`
   - `work_items.list`
+  - `work_items.get`
   - `work_items.create`
   - `work_items.update`
+  - `work_items.delete`
   - `work_items.closeout_readiness`
   - `assignments.list`
+  - `assignments.get`
   - `assignments.next`
   - `assignments.create`
   - `assignments.claim`
@@ -73,9 +78,15 @@ Implemented now:
   - `assignments.context`
   - `assignments.launch_packet`
   - `assignments.complete`
+  - `assignments.delete`
   - `evidence.record`
   - `reviews.record`
   - `handoffs.create`
+  - `handoffs.list`
+  - `handoffs.get`
+  - `handoffs.update`
+  - `handoffs.update_status`
+  - `handoffs.delete`
   - `memory_entries.list`
   - `memory_entries.get`
   - `memory_entries.create`

@@ -22,6 +22,18 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, listProjects(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "projects.get",
+		Title:       "Get project",
+		Description: "Return one durable project coordination space.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"id":{"type":"string","minLength":1}},
+			"required":["id"]
+		}`),
+		Annotations: readOnly,
+	}, getProject(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "projects.create",
 		Title:       "Create project",
 		Description: "Create a rootless or workspace-backed project coordination space.",
@@ -91,6 +103,17 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["id"]
 		}`),
 	}, updateProject(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "projects.delete",
+		Title:       "Delete project",
+		Description: "Delete a project and its project-scoped coordination records. Global profiles and execution profiles are not deleted.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"id":{"type":"string","minLength":1}},
+			"required":["id"]
+		}`),
+	}, deleteProject(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "projects.operations_brief",
@@ -302,6 +325,21 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, listWorkItems(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "work_items.get",
+		Title:       "Get work item",
+		Description: "Return one work item for a project.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","id"]
+		}`),
+		Annotations: readOnly,
+	}, getWorkItem(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "work_items.create",
 		Title:       "Create work item",
 		Description: "Create a reviewable work item under a project.",
@@ -338,6 +376,20 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","id"]
 		}`),
 	}, updateWorkItem(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "work_items.delete",
+		Title:       "Delete work item",
+		Description: "Delete a work item and its assignments, evidence, reviews, and handoffs.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","id"]
+		}`),
+	}, deleteWorkItem(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "work_items.closeout_readiness",
@@ -416,6 +468,21 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 		}`),
 		Annotations: readOnly,
 	}, listAssignments(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.get",
+		Title:       "Get assignment",
+		Description: "Get one coordination assignment by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id"]
+		}`),
+		Annotations: readOnly,
+	}, getAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.next",
@@ -534,6 +601,20 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, completeAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.delete",
+		Title:       "Delete assignment",
+		Description: "Delete an assignment and assignment-linked reviews.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id"]
+		}`),
+	}, deleteAssignment(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "evidence.record",
 		Title:       "Record evidence",
 		Description: "Record proof, output, or an external locator for a work item.",
@@ -602,6 +683,100 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","work_item_id","title","body"]
 		}`),
 	}, createHandoff(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "handoffs.list",
+		Title:       "List handoffs",
+		Description: "List structured handoffs for a work item.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id"]
+		}`),
+		Annotations: readOnly,
+	}, listHandoffs(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "handoffs.get",
+		Title:       "Get handoff",
+		Description: "Get one structured handoff by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"handoff_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id","handoff_id"]
+		}`),
+		Annotations: readOnly,
+	}, getHandoff(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "handoffs.update",
+		Title:       "Update handoff",
+		Description: "Patch handoff text, roles, source/target refs, or status.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"handoff_id":{"type":"string","minLength":1},
+				"source_assignment_id":{"type":"string"},
+				"source_run_id":{"type":"string"},
+				"source_chat_session_id":{"type":"string"},
+				"source_message_id":{"type":"string"},
+				"from_role_id":{"type":"string"},
+				"to_role_id":{"type":"string"},
+				"target_assignment_id":{"type":"string"},
+				"target_work_item_id":{"type":"string"},
+				"title":{"type":"string"},
+				"body":{"type":"string"},
+				"recommended_next_action":{"type":"string"},
+				"linked_artifact_ids":{"type":"array","items":{"type":"string"}},
+				"linked_memory_ids":{"type":"array","items":{"type":"string"}},
+				"context_refs":{"type":"array","items":{"type":"string"}},
+				"status":{"type":"string","enum":["open","accepted","superseded","dismissed"]},
+				"provenance_kind":{"type":"string"},
+				"trust_label":{"type":"string"}
+			},
+			"required":["project_id","work_item_id","handoff_id"]
+		}`),
+	}, updateHandoff(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "handoffs.update_status",
+		Title:       "Update handoff status",
+		Description: "Transition a handoff status without changing its text or refs.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"handoff_id":{"type":"string","minLength":1},
+				"status":{"type":"string","enum":["open","accepted","superseded","dismissed"]}
+			},
+			"required":["project_id","work_item_id","handoff_id","status"]
+		}`),
+	}, updateHandoffStatus(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "handoffs.delete",
+		Title:       "Delete handoff",
+		Description: "Delete a handoff record without deleting linked work.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"handoff_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id","handoff_id"]
+		}`),
+	}, deleteHandoff(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "memory_entries.list",
@@ -813,6 +988,37 @@ func listProjects(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func getProject(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetProject(ctx, input.ID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		var detail strings.Builder
+		fmt.Fprintf(&detail, "Project %s: %s", item.ID, item.Name)
+		if item.Description != "" {
+			fmt.Fprintf(&detail, " — %s", item.Description)
+		}
+		if len(item.Roots) > 0 {
+			fmt.Fprintf(&detail, "\nRoots: %d", len(item.Roots))
+		}
+		if len(item.ContextSources) > 0 {
+			fmt.Fprintf(&detail, "\nContext sources: %d", len(item.ContextSources))
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(detail.String()),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
 type rootArgs struct {
 	ID        string `json:"id"`
 	Path      string `json:"path"`
@@ -920,19 +1126,9 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
-		projects, err := service.ListProjects(ctx)
+		existing, err := service.GetProject(ctx, input.ID)
 		if err != nil {
 			return mcp.CallToolResult{}, err
-		}
-		var existing core.Project
-		for _, project := range projects {
-			if project.ID == input.ID {
-				existing = project
-				break
-			}
-		}
-		if existing.ID == "" {
-			return mcp.CallToolResult{}, core.ErrNotFound
 		}
 		if input.Name != nil {
 			existing.Name = *input.Name
@@ -958,6 +1154,24 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated project %s: %s", item.ID, item.Name)),
+		}, nil
+	}
+}
+
+func deleteProject(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ID string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteProject(ctx, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted project %s", strings.TrimSpace(input.ID))),
 		}, nil
 	}
 }
@@ -1320,6 +1534,35 @@ func listWorkItems(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func getWorkItem(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		ID        string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetWorkItem(ctx, input.ProjectID, input.ID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		var detail strings.Builder
+		fmt.Fprintf(&detail, "Work item %s: [%s] %s", item.ID, item.Status, item.Title)
+		if item.Brief != "" {
+			fmt.Fprintf(&detail, " — %s", item.Brief)
+		}
+		if item.RootID != "" {
+			fmt.Fprintf(&detail, "\nRoot: %s", item.RootID)
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(detail.String()),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
 func createWorkItem(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID   string `json:"project_id"`
@@ -1366,19 +1609,9 @@ func updateWorkItem(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
-		workItems, err := service.ListWorkItems(ctx, input.ProjectID)
+		existing, err := service.GetWorkItem(ctx, input.ProjectID, input.ID)
 		if err != nil {
 			return mcp.CallToolResult{}, err
-		}
-		var existing core.WorkItem
-		for _, item := range workItems {
-			if item.ID == input.ID {
-				existing = item
-				break
-			}
-		}
-		if existing.ID == "" {
-			return mcp.CallToolResult{}, core.ErrNotFound
 		}
 		if input.Title != nil {
 			existing.Title = *input.Title
@@ -1407,6 +1640,25 @@ func updateWorkItem(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Updated work item %s: %s", item.ID, item.Title)),
+		}, nil
+	}
+}
+
+func deleteWorkItem(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		ID        string `json:"id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteWorkItem(ctx, input.ProjectID, input.ID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted work item %s", strings.TrimSpace(input.ID))),
 		}, nil
 	}
 }
@@ -1584,6 +1836,27 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 			b.WriteByte('\n')
 		}
 		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+	}
+}
+
+func getAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID    string `json:"project_id"`
+		AssignmentID string `json:"assignment_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatAssignments("Assignment", []core.Assignment{item})),
+			StructuredContent: item,
+		}, nil
 	}
 }
 
@@ -1771,6 +2044,25 @@ func completeAssignment(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func deleteAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID    string `json:"project_id"`
+		AssignmentID string `json:"assignment_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteAssignment(ctx, input.ProjectID, input.AssignmentID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted assignment %s", strings.TrimSpace(input.AssignmentID))),
+		}, nil
+	}
+}
+
 func recordEvidence(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID    string `json:"project_id"`
@@ -1896,6 +2188,186 @@ func createHandoff(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(detail),
+		}, nil
+	}
+}
+
+func listHandoffs(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListHandoffs(ctx, input.ProjectID, input.WorkItemID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatHandoffs("Handoffs", items)),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func getHandoff(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+		HandoffID  string `json:"handoff_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatHandoffs("Handoff", []core.Handoff{item})),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func updateHandoff(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID             string    `json:"project_id"`
+		WorkItemID            string    `json:"work_item_id"`
+		HandoffID             string    `json:"handoff_id"`
+		SourceAssignmentID    *string   `json:"source_assignment_id"`
+		SourceRunID           *string   `json:"source_run_id"`
+		SourceChatSessionID   *string   `json:"source_chat_session_id"`
+		SourceMessageID       *string   `json:"source_message_id"`
+		FromRoleID            *string   `json:"from_role_id"`
+		ToRoleID              *string   `json:"to_role_id"`
+		TargetAssignmentID    *string   `json:"target_assignment_id"`
+		TargetWorkItemID      *string   `json:"target_work_item_id"`
+		Title                 *string   `json:"title"`
+		Body                  *string   `json:"body"`
+		RecommendedNextAction *string   `json:"recommended_next_action"`
+		LinkedArtifactIDs     *[]string `json:"linked_artifact_ids"`
+		LinkedMemoryIDs       *[]string `json:"linked_memory_ids"`
+		ContextRefs           *[]string `json:"context_refs"`
+		Status                *string   `json:"status"`
+		ProvenanceKind        *string   `json:"provenance_kind"`
+		TrustLabel            *string   `json:"trust_label"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		existing, err := service.GetHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if input.SourceAssignmentID != nil {
+			existing.SourceAssignmentID = *input.SourceAssignmentID
+		}
+		if input.SourceRunID != nil {
+			existing.SourceRunID = *input.SourceRunID
+		}
+		if input.SourceChatSessionID != nil {
+			existing.SourceChatSessionID = *input.SourceChatSessionID
+		}
+		if input.SourceMessageID != nil {
+			existing.SourceMessageID = *input.SourceMessageID
+		}
+		if input.FromRoleID != nil {
+			existing.FromRoleID = *input.FromRoleID
+		}
+		if input.ToRoleID != nil {
+			existing.ToRoleID = *input.ToRoleID
+		}
+		if input.TargetAssignmentID != nil {
+			existing.TargetAssignmentID = *input.TargetAssignmentID
+		}
+		if input.TargetWorkItemID != nil {
+			existing.TargetWorkItemID = *input.TargetWorkItemID
+		}
+		if input.Title != nil {
+			existing.Title = *input.Title
+		}
+		if input.Body != nil {
+			existing.Body = *input.Body
+		}
+		if input.RecommendedNextAction != nil {
+			existing.RecommendedNextAction = *input.RecommendedNextAction
+		}
+		if input.LinkedArtifactIDs != nil {
+			existing.LinkedArtifactIDs = *input.LinkedArtifactIDs
+		}
+		if input.LinkedMemoryIDs != nil {
+			existing.LinkedMemoryIDs = *input.LinkedMemoryIDs
+		}
+		if input.ContextRefs != nil {
+			existing.ContextRefs = *input.ContextRefs
+		}
+		if input.Status != nil {
+			existing.Status = *input.Status
+		}
+		if input.ProvenanceKind != nil {
+			existing.ProvenanceKind = *input.ProvenanceKind
+		}
+		if input.TrustLabel != nil {
+			existing.TrustLabel = *input.TrustLabel
+		}
+		item, err := service.UpdateHandoff(ctx, existing)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Updated handoff %s: %s [%s]", item.ID, item.Title, item.Status)),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func updateHandoffStatus(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+		HandoffID  string `json:"handoff_id"`
+		Status     string `json:"status"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.UpdateHandoffStatus(ctx, input.ProjectID, input.WorkItemID, input.HandoffID, input.Status)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Updated handoff %s: %s", item.ID, item.Status)),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func deleteHandoff(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+		HandoffID  string `json:"handoff_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if err := service.DeleteHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID); err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Deleted handoff %s", strings.TrimSpace(input.HandoffID))),
 		}, nil
 	}
 }
@@ -2399,6 +2871,28 @@ func formatAssignments(title string, items []core.Assignment) string {
 		}
 		if len(item.DesiredAgent.SkillIDs) > 0 {
 			fmt.Fprintf(&b, " skills=%s", strings.Join(item.DesiredAgent.SkillIDs, ","))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatHandoffs(title string, items []core.Handoff) string {
+	if len(items) == 0 {
+		return "No handoffs."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s: [%s] %s", item.ID, item.Status, item.Title)
+		if item.FromRoleID != "" {
+			fmt.Fprintf(&b, " from=%s", item.FromRoleID)
+		}
+		if item.ToRoleID != "" {
+			fmt.Fprintf(&b, " to=%s", item.ToRoleID)
+		}
+		if item.TargetAssignmentID != "" {
+			fmt.Fprintf(&b, " target_assignment=%s", item.TargetAssignmentID)
 		}
 		b.WriteByte('\n')
 	}
