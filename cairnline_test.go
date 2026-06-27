@@ -128,14 +128,26 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 		ProjectID: project.ID,
 		Title:     "Create public work",
 		Warnings:  []string{"operator should confirm scope"},
-		Actions: []cairnline.AssistantAction{{
-			Kind: cairnline.AssistantActionCreateWorkItem,
-			WorkItem: &cairnline.WorkItem{
-				ID:        "work_public",
-				ProjectID: project.ID,
-				Title:     "Public API work",
+		Actions: []cairnline.AssistantAction{
+			{
+				Kind:   cairnline.AssistantActionAttachProjectRoot,
+				Target: cairnline.AssistantTarget{ProjectID: project.ID},
+				Root:   &cairnline.Root{ID: "root_public", Path: "/workspace/public", Active: true},
 			},
-		}},
+			{
+				Kind:    cairnline.AssistantActionSetProjectDefaults,
+				Project: &cairnline.Project{ID: project.ID, DefaultRootID: "root_public"},
+			},
+			{
+				Kind: cairnline.AssistantActionCreateWorkItem,
+				WorkItem: &cairnline.WorkItem{
+					ID:        "work_public",
+					ProjectID: project.ID,
+					Title:     "Public API work",
+					RootID:    "root_public",
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateAssistantProposal() error = %v", err)
@@ -154,6 +166,9 @@ func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 	var typedResult cairnline.AssistantApplyResult = result
 	if typedResult.Status != cairnline.AssistantApplyStatusApplied || !typedResult.Applied {
 		t.Fatalf("apply result = %+v, want public applied status", typedResult)
+	}
+	if typedResult.AppliedActionCount != 3 || len(typedResult.Actions) != 3 || typedResult.Actions[0].RootID != "root_public" || typedResult.Actions[1].RootID != "root_public" {
+		t.Fatalf("apply action refs = %+v, want public root action refs", typedResult.Actions)
 	}
 	applied, err := service.GetAssistantProposal(ctx, typedRecord.ID)
 	if err != nil {
