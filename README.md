@@ -49,7 +49,9 @@ Implemented now:
   - `projects.update`
   - `projects.delete`
   - `projects.activity`
+  - `projects.health`
   - `projects.operations_brief`
+  - `projects.setup_readiness`
   - `profiles.list`
   - `profiles.create`
   - `profiles.update`
@@ -112,6 +114,8 @@ Implemented now:
 - read-only project activity projections grouped by active, blocked, completed,
   and recent assignment state; queued assignments are attention items until
   claimed, while claimed/running/review assignments are active
+- read-only project setup-readiness and health summaries for onboarding,
+  context/profile/skill gaps, and bounded operator attention
 
 Planned next:
 

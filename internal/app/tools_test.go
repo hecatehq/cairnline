@@ -547,6 +547,52 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"projects.setup_readiness","arguments":{"project_id":"` + project.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() setup readiness error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Setup readiness "+project.ID) || !strings.Contains(output.String(), "setup_started=true") {
+		t.Fatalf("setup readiness response = %s", output.String())
+	}
+	var setupResponse struct {
+		Result struct {
+			StructuredContent core.ProjectSetupReadiness `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &setupResponse); err != nil {
+		t.Fatalf("setup readiness response did not unmarshal: %v\n%s", err, output.String())
+	}
+	setup := setupResponse.Result.StructuredContent
+	if setup.ShowOnboarding || !setup.SetupStarted || setup.Summary.WorkItemCount == 0 || setup.Summary.RoleCount == 0 {
+		t.Fatalf("setup readiness = %+v, want configured project with work and roles", setup)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":182,"method":"tools/call","params":{"name":"projects.health","arguments":{"project_id":"` + project.ID + `"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() health error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Project health "+project.ID+": attention") || !strings.Contains(output.String(), "closeout_ready") {
+		t.Fatalf("health response = %s", output.String())
+	}
+	var healthResponse struct {
+		Result struct {
+			StructuredContent core.ProjectHealth `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &healthResponse); err != nil {
+		t.Fatalf("health response did not unmarshal: %v\n%s", err, output.String())
+	}
+	health := healthResponse.Result.StructuredContent
+	if health.Status != core.ProjectHealthStatusAttention || health.Summary.PendingMemoryCandidateCount != 1 || health.Summary.AttentionCount == 0 {
+		t.Fatalf("health = %+v, want pending memory attention", health)
+	}
+
+	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"projects.activity","arguments":{"project_id":"` + project.ID + `"}}}` + "\n",
 	)
 	output.Reset()

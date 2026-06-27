@@ -33,6 +33,13 @@ type AgentProfile = core.AgentProfile
 type ExecutionProfile = core.ExecutionProfile
 type WorkItem = core.WorkItem
 type WorkItemCloseoutReadiness = core.WorkItemCloseoutReadiness
+type ProjectSetupReadiness = core.ProjectSetupReadiness
+type ProjectSetupReadinessSummary = core.ProjectSetupReadinessSummary
+type ProjectSetupReadinessCheck = core.ProjectSetupReadinessCheck
+type ProjectSetupReadinessAction = core.ProjectSetupReadinessAction
+type ProjectHealth = core.ProjectHealth
+type ProjectHealthSummary = core.ProjectHealthSummary
+type ProjectHealthAttentionItem = core.ProjectHealthAttentionItem
 type ProjectOperationsBrief = core.ProjectOperationsBrief
 type ProjectOperationsCounts = core.ProjectOperationsCounts
 type ProjectOperationItem = core.ProjectOperationItem
@@ -112,12 +119,29 @@ const (
 	ProjectOperationsStatusClear     = core.ProjectOperationsStatusClear
 	ProjectOperationsStatusAttention = core.ProjectOperationsStatusAttention
 
+	ProjectSetupStatusReady    = core.ProjectSetupStatusReady
+	ProjectSetupStatusTodo     = core.ProjectSetupStatusTodo
+	ProjectSetupStatusOptional = core.ProjectSetupStatusOptional
+
+	ProjectSetupActionSetupProject            = core.ProjectSetupActionSetupProject
+	ProjectSetupActionCreateWorkItem          = core.ProjectSetupActionCreateWorkItem
+	ProjectSetupActionUpdateProject           = core.ProjectSetupActionUpdateProject
+	ProjectSetupActionManageContext           = core.ProjectSetupActionManageContext
+	ProjectSetupActionManageExecutionProfiles = core.ProjectSetupActionManageExecutionProfiles
+	ProjectSetupActionManageRoles             = core.ProjectSetupActionManageRoles
+
+	ProjectHealthStatusClear     = core.ProjectHealthStatusClear
+	ProjectHealthStatusAttention = core.ProjectHealthStatusAttention
+
 	ProjectOperationKindAssignment      = core.ProjectOperationKindAssignment
 	ProjectOperationKindCloseoutReady   = core.ProjectOperationKindCloseoutReady
 	ProjectOperationKindHandoff         = core.ProjectOperationKindHandoff
 	ProjectOperationKindMemoryCandidate = core.ProjectOperationKindMemoryCandidate
 	ProjectOperationKindMissingEvidence = core.ProjectOperationKindMissingEvidence
 	ProjectOperationKindReviewFollowUp  = core.ProjectOperationKindReviewFollowUp
+	ProjectOperationKindProjectSetup    = core.ProjectOperationKindProjectSetup
+	ProjectOperationKindProfile         = core.ProjectOperationKindProfile
+	ProjectOperationKindSkill           = core.ProjectOperationKindSkill
 	ProjectOperationKindWorkItem        = core.ProjectOperationKindWorkItem
 
 	ProjectOperationSeverityBlocked = core.ProjectOperationSeverityBlocked
