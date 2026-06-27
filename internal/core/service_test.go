@@ -1292,6 +1292,111 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestService_CollaborationImportPreservesTimestamps(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	project, err := service.CreateProject(ctx, Project{Name: "Cairnline"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Review imported collaboration"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+
+	createdAt := time.Date(2026, 6, 3, 12, 3, 30, 0, time.UTC)
+	updatedAt := time.Date(2026, 6, 3, 12, 6, 30, 0, time.UTC)
+	artifact, err := service.CreateArtifact(ctx, Artifact{
+		ID:           "art_imported_decision",
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Kind:         "decision_note",
+		Title:        "Imported decision",
+		Body:         "Keep the imported timestamp.",
+		AuthorRoleID: role.ID,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateArtifact() error = %v", err)
+	}
+	if !artifact.CreatedAt.Equal(createdAt) || !artifact.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("artifact timestamps = %s/%s, want %s/%s", artifact.CreatedAt, artifact.UpdatedAt, createdAt, updatedAt)
+	}
+	gotArtifact, err := service.GetArtifact(ctx, project.ID, work.ID, artifact.ID)
+	if err != nil {
+		t.Fatalf("GetArtifact() error = %v", err)
+	}
+	if !gotArtifact.CreatedAt.Equal(createdAt) || !gotArtifact.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("stored artifact timestamps = %s/%s, want %s/%s", gotArtifact.CreatedAt, gotArtifact.UpdatedAt, createdAt, updatedAt)
+	}
+
+	evidence, err := service.CreateEvidence(ctx, Evidence{
+		ID:           "ev_imported",
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Title:        "Imported evidence",
+		Locator:      "https://example.invalid/evidence",
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateEvidence() error = %v", err)
+	}
+	if !evidence.CreatedAt.Equal(createdAt) || !evidence.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("evidence timestamps = %s/%s, want %s/%s", evidence.CreatedAt, evidence.UpdatedAt, createdAt, updatedAt)
+	}
+	gotEvidence, err := service.GetEvidence(ctx, project.ID, work.ID, evidence.ID)
+	if err != nil {
+		t.Fatalf("GetEvidence() error = %v", err)
+	}
+	if !gotEvidence.CreatedAt.Equal(createdAt) || !gotEvidence.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("stored evidence timestamps = %s/%s, want %s/%s", gotEvidence.CreatedAt, gotEvidence.UpdatedAt, createdAt, updatedAt)
+	}
+
+	review, err := service.CreateReview(ctx, Review{
+		ID:             "rev_imported",
+		ProjectID:      project.ID,
+		WorkItemID:     work.ID,
+		AssignmentID:   assignment.ID,
+		ReviewerRoleID: role.ID,
+		Title:          "Imported review",
+		Body:           "Review timestamp should survive import.",
+		Verdict:        ReviewVerdictPass,
+		Risk:           ReviewRiskLow,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateReview() error = %v", err)
+	}
+	if !review.CreatedAt.Equal(createdAt) || !review.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("review timestamps = %s/%s, want %s/%s", review.CreatedAt, review.UpdatedAt, createdAt, updatedAt)
+	}
+	gotReview, err := service.GetReview(ctx, project.ID, work.ID, review.ID)
+	if err != nil {
+		t.Fatalf("GetReview() error = %v", err)
+	}
+	if !gotReview.CreatedAt.Equal(createdAt) || !gotReview.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("stored review timestamps = %s/%s, want %s/%s", gotReview.CreatedAt, gotReview.UpdatedAt, createdAt, updatedAt)
+	}
+}
+
 func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
