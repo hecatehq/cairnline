@@ -1479,7 +1479,7 @@ func (s *Service) CreateMemoryEntry(ctx context.Context, input MemoryEntry) (Mem
 	if trustLabel == "" {
 		trustLabel = MemoryTrustOperator
 	}
-	now := s.now()
+	createdAt, updatedAt := importedTimestamps(input.CreatedAt, input.UpdatedAt, s.now())
 	item := MemoryEntry{
 		ID:         firstNonEmpty(strings.TrimSpace(input.ID), newID("mem")),
 		ProjectID:  projectID,
@@ -1489,8 +1489,8 @@ func (s *Service) CreateMemoryEntry(ctx context.Context, input MemoryEntry) (Mem
 		SourceKind: strings.TrimSpace(input.SourceKind),
 		SourceID:   strings.TrimSpace(input.SourceID),
 		Enabled:    true,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
 	}
 	return s.store.CreateMemoryEntry(ctx, item)
 }
@@ -1520,6 +1520,10 @@ func (s *Service) UpdateMemoryEntry(ctx context.Context, input MemoryEntry) (Mem
 	if err != nil {
 		return MemoryEntry{}, err
 	}
+	updatedAt := input.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = s.now()
+	}
 	item := MemoryEntry{
 		ID:         id,
 		ProjectID:  projectID,
@@ -1530,7 +1534,7 @@ func (s *Service) UpdateMemoryEntry(ctx context.Context, input MemoryEntry) (Mem
 		SourceID:   strings.TrimSpace(input.SourceID),
 		Enabled:    input.Enabled,
 		CreatedAt:  existing.CreatedAt,
-		UpdatedAt:  s.now(),
+		UpdatedAt:  updatedAt,
 	}
 	return s.store.UpdateMemoryEntry(ctx, item)
 }
@@ -1586,7 +1590,7 @@ func (s *Service) CreateMemoryCandidate(ctx context.Context, input MemoryCandida
 	}
 	suggestedTrustLabel := firstNonEmpty(strings.TrimSpace(input.SuggestedTrustLabel), MemoryTrustGenerated)
 	suggestedSourceKind := firstNonEmpty(strings.TrimSpace(input.SuggestedSourceKind), MemorySourceGenerated)
-	now := s.now()
+	createdAt, updatedAt := importedTimestamps(input.CreatedAt, input.UpdatedAt, s.now())
 	item := MemoryCandidate{
 		ID:                  firstNonEmpty(strings.TrimSpace(input.ID), newID("memcand")),
 		ProjectID:           projectID,
@@ -1598,8 +1602,8 @@ func (s *Service) CreateMemoryCandidate(ctx context.Context, input MemoryCandida
 		SuggestedSourceID:   strings.TrimSpace(input.SuggestedSourceID),
 		SourceRefs:          normalizeMemoryCandidateSourceRefs(input.SourceRefs),
 		Status:              MemoryCandidatePending,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		CreatedAt:           createdAt,
+		UpdatedAt:           updatedAt,
 	}
 	return s.store.CreateMemoryCandidate(ctx, item)
 }
@@ -1632,6 +1636,10 @@ func (s *Service) UpdateMemoryCandidate(ctx context.Context, input MemoryCandida
 	if err != nil {
 		return MemoryCandidate{}, err
 	}
+	updatedAt := input.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = s.now()
+	}
 	item := MemoryCandidate{
 		ID:                  id,
 		ProjectID:           projectID,
@@ -1646,7 +1654,7 @@ func (s *Service) UpdateMemoryCandidate(ctx context.Context, input MemoryCandida
 		StatusReason:        strings.TrimSpace(input.StatusReason),
 		PromotedMemoryID:    strings.TrimSpace(input.PromotedMemoryID),
 		CreatedAt:           existing.CreatedAt,
-		UpdatedAt:           s.now(),
+		UpdatedAt:           updatedAt,
 	}
 	if item.Status != MemoryCandidatePromoted {
 		item.PromotedMemoryID = ""
@@ -1784,6 +1792,19 @@ func isMemoryCandidateStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func importedTimestamps(createdAt, updatedAt, fallback time.Time) (time.Time, time.Time) {
+	if fallback.IsZero() {
+		fallback = time.Now().UTC()
+	}
+	if createdAt.IsZero() {
+		createdAt = fallback
+	}
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
+	return createdAt, updatedAt
 }
 
 func firstNonEmpty(values ...string) string {
