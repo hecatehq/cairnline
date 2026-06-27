@@ -53,6 +53,10 @@ type Store interface {
 	ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)
 	DeleteAssignment(ctx context.Context, projectID, id string) error
 
+	ListArtifacts(ctx context.Context, projectID, workItemID string) ([]Artifact, error)
+	GetArtifact(ctx context.Context, projectID, workItemID, id string) (Artifact, error)
+	CreateArtifact(ctx context.Context, artifact Artifact) (Artifact, error)
+
 	ListEvidence(ctx context.Context, projectID, workItemID string) ([]Evidence, error)
 	GetEvidence(ctx context.Context, projectID, workItemID, id string) (Evidence, error)
 	CreateEvidence(ctx context.Context, evidence Evidence) (Evidence, error)

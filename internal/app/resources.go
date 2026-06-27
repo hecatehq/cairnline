@@ -148,6 +148,7 @@ type workItemResourcePayload struct {
 	ProjectID   string            `json:"project_id"`
 	WorkItem    core.WorkItem     `json:"work_item"`
 	Assignments []core.Assignment `json:"assignments,omitempty"`
+	Artifacts   []core.Artifact   `json:"artifacts,omitempty"`
 	Evidence    []core.Evidence   `json:"evidence,omitempty"`
 	Reviews     []core.Review     `json:"reviews,omitempty"`
 	Handoffs    []core.Handoff    `json:"handoffs,omitempty"`
@@ -228,6 +229,10 @@ func buildWorkItemResource(ctx context.Context, service *core.Service, projectID
 		return workItemResourcePayload{}, err
 	}
 	assignments = filterAssignmentsByWorkItem(assignments, workItemID)
+	artifacts, err := service.ListArtifacts(ctx, projectID, workItemID)
+	if err != nil {
+		return workItemResourcePayload{}, err
+	}
 	evidence, err := service.ListEvidence(ctx, projectID, workItemID)
 	if err != nil {
 		return workItemResourcePayload{}, err
@@ -244,6 +249,7 @@ func buildWorkItemResource(ctx context.Context, service *core.Service, projectID
 		ProjectID:   projectID,
 		WorkItem:    workItem,
 		Assignments: assignments,
+		Artifacts:   artifacts,
 		Evidence:    evidence,
 		Reviews:     reviews,
 		Handoffs:    handoffs,

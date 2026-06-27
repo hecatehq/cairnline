@@ -837,6 +837,10 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
 	}
+	artifacts, err := s.store.ListArtifacts(ctx, packetContext.Project.ID, packetContext.WorkItem.ID)
+	if err != nil {
+		return AssignmentLaunchPacket{}, err
+	}
 	evidence, err := s.store.ListEvidence(ctx, packetContext.Project.ID, packetContext.WorkItem.ID)
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
@@ -901,6 +905,7 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		ExecutionProfile: executionProfile,
 		Skills:           resolvedSkills,
 		Assignment:       packetContext.Assignment,
+		Artifacts:        artifacts,
 		Evidence:         evidence,
 		Reviews:          reviews,
 		Handoffs:         handoffs,
@@ -940,6 +945,85 @@ func (s *Service) CompleteAssignment(ctx context.Context, projectID, id, status,
 	}
 	item.UpdatedAt = s.now()
 	return s.store.UpdateAssignment(ctx, item)
+}
+
+func (s *Service) ListArtifacts(ctx context.Context, projectID, workItemID string) ([]Artifact, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	if projectID == "" {
+		return nil, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return nil, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	return s.store.ListArtifacts(ctx, projectID, workItemID)
+}
+
+func (s *Service) GetArtifact(ctx context.Context, projectID, workItemID, id string) (Artifact, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("artifact_id is required"))
+	}
+	return s.store.GetArtifact(ctx, projectID, workItemID, id)
+}
+
+func (s *Service) CreateArtifact(ctx context.Context, input Artifact) (Artifact, error) {
+	projectID := strings.TrimSpace(input.ProjectID)
+	workItemID := strings.TrimSpace(input.WorkItemID)
+	kind := strings.TrimSpace(input.Kind)
+	body := strings.TrimSpace(input.Body)
+	if projectID == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if kind == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("artifact kind is required"))
+	}
+	if body == "" {
+		return Artifact{}, errors.Join(ErrInvalid, errors.New("artifact body is required"))
+	}
+	assignmentID := strings.TrimSpace(input.AssignmentID)
+	if assignmentID != "" {
+		assignment, err := s.store.GetAssignment(ctx, projectID, assignmentID)
+		if err != nil {
+			return Artifact{}, err
+		}
+		if assignment.WorkItemID != workItemID {
+			return Artifact{}, errors.Join(ErrNotFound, errors.New("assignment_id was not found in work item"))
+		}
+	}
+	authorRoleID := strings.TrimSpace(input.AuthorRoleID)
+	if authorRoleID != "" {
+		if _, err := s.store.GetRole(ctx, projectID, authorRoleID); err != nil {
+			return Artifact{}, err
+		}
+	}
+	now := s.now()
+	item := Artifact{
+		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("art")),
+		ProjectID:      projectID,
+		WorkItemID:     workItemID,
+		AssignmentID:   assignmentID,
+		Kind:           kind,
+		Title:          strings.TrimSpace(input.Title),
+		Body:           body,
+		AuthorRoleID:   authorRoleID,
+		ProvenanceKind: strings.TrimSpace(input.ProvenanceKind),
+		TrustLabel:     strings.TrimSpace(input.TrustLabel),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	return s.store.CreateArtifact(ctx, item)
 }
 
 func (s *Service) ListEvidence(ctx context.Context, projectID, workItemID string) ([]Evidence, error) {

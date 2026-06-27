@@ -893,6 +893,27 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		t.Fatalf("assignment context = %+v, want project/work/role metadata", packet)
 	}
 
+	artifact, err := service.CreateArtifact(ctx, Artifact{
+		ProjectID:      project.ID,
+		WorkItemID:     work.ID,
+		AssignmentID:   assignment.ID,
+		Kind:           "decision_note",
+		Title:          "Decision",
+		Body:           "Keep the portable artifact in the launch packet.",
+		AuthorRoleID:   role.ID,
+		ProvenanceKind: "operator",
+		TrustLabel:     "operator_reviewed",
+	})
+	if err != nil {
+		t.Fatalf("CreateArtifact() error = %v", err)
+	}
+	gotArtifact, err := service.GetArtifact(ctx, project.ID, work.ID, artifact.ID)
+	if err != nil {
+		t.Fatalf("GetArtifact() error = %v", err)
+	}
+	if gotArtifact.Kind != "decision_note" || gotArtifact.AssignmentID != assignment.ID || gotArtifact.AuthorRoleID != role.ID {
+		t.Fatalf("GetArtifact() = %+v, want recorded generic artifact", gotArtifact)
+	}
 	evidence, err := service.CreateEvidence(ctx, Evidence{
 		ProjectID:    project.ID,
 		WorkItemID:   work.ID,
@@ -1031,8 +1052,11 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
 		t.Fatalf("launch packet memory = %+v, want accepted project memory", launchPacket.Memory)
 	}
-	if len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
-		t.Fatalf("launch packet artifact counts evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	if len(launchPacket.Artifacts) != 1 || len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
+		t.Fatalf("launch packet artifact counts artifacts=%d evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Artifacts), len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	}
+	if launchPacket.Artifacts[0].ID != artifact.ID || launchPacket.Artifacts[0].Kind != "decision_note" {
+		t.Fatalf("launch packet artifacts = %+v, want generic artifact", launchPacket.Artifacts)
 	}
 	if launchPacket.Evidence[0].AssignmentID != assignment.ID {
 		t.Fatalf("launch packet evidence = %+v, want assignment-scoped evidence", launchPacket.Evidence[0])

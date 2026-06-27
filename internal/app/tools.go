@@ -3102,7 +3102,7 @@ func formatLaunchPacketSummary(packet core.AssignmentLaunchPacket) string {
 		fmt.Fprintf(&b, "Role: %s (%s)\n", packet.Role.Name, packet.Role.ID)
 	}
 	fmt.Fprintf(&b, "Assignment: %s [%s] mode=%s\n", packet.Assignment.ID, packet.Assignment.Status, packet.Assignment.ExecutionMode)
-	fmt.Fprintf(&b, "Skills: %d; evidence: %d; reviews: %d; handoffs: %d; memory: %d; memory candidates: %d\n", len(packet.Skills), len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.Memory), len(packet.MemoryCandidates))
+	fmt.Fprintf(&b, "Skills: %d; artifacts: %d; evidence: %d; reviews: %d; handoffs: %d; memory: %d; memory candidates: %d\n", len(packet.Skills), len(packet.Artifacts), len(packet.Evidence), len(packet.Reviews), len(packet.Handoffs), len(packet.Memory), len(packet.MemoryCandidates))
 	for _, warning := range packet.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n", warning)
 	}

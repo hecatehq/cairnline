@@ -123,6 +123,20 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
 		t.Fatalf("ClaimAssignment() error = %v", err)
 	}
+	artifactRecord, err := service.CreateArtifact(ctx, core.Artifact{
+		ProjectID:      project.ID,
+		WorkItemID:     work.ID,
+		AssignmentID:   assignment.ID,
+		Kind:           "decision_note",
+		Title:          "Decision note",
+		Body:           "Persist generic collaboration artifacts.",
+		AuthorRoleID:   role.ID,
+		ProvenanceKind: "operator",
+		TrustLabel:     "operator_reviewed",
+	})
+	if err != nil {
+		t.Fatalf("CreateArtifact() error = %v", err)
+	}
 	evidenceRecord, err := service.CreateEvidence(ctx, core.Evidence{
 		ProjectID:    project.ID,
 		WorkItemID:   work.ID,
@@ -262,6 +276,20 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if packet.WorkItem.RootID != "root_main" || packet.Assignment.RootID != "root_main" {
 		t.Fatalf("packet roots work=%q assignment=%q, want root_main", packet.WorkItem.RootID, packet.Assignment.RootID)
+	}
+	artifacts, err := reopenedService.ListArtifacts(ctx, project.ID, work.ID)
+	if err != nil {
+		t.Fatalf("ListArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].ID != artifactRecord.ID || artifacts[0].Kind != "decision_note" || artifacts[0].AuthorRoleID != role.ID {
+		t.Fatalf("artifacts = %+v, want persisted generic artifact", artifacts)
+	}
+	gotArtifact, err := reopenedService.GetArtifact(ctx, project.ID, work.ID, artifactRecord.ID)
+	if err != nil {
+		t.Fatalf("GetArtifact() error = %v", err)
+	}
+	if gotArtifact.ID != artifactRecord.ID || gotArtifact.Body != artifactRecord.Body {
+		t.Fatalf("GetArtifact() = %+v, want persisted artifact", gotArtifact)
 	}
 	evidenceItems, err := reopenedService.ListEvidence(ctx, project.ID, work.ID)
 	if err != nil {

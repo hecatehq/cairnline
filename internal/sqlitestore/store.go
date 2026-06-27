@@ -147,6 +147,23 @@ func (s *Store) migrate(ctx context.Context) error {
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, role_id) REFERENCES roles(project_id, id) ON DELETE RESTRICT
 		)`,
+		`CREATE TABLE IF NOT EXISTS artifacts (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			work_item_id TEXT NOT NULL,
+			assignment_id TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			body TEXT NOT NULL,
+			author_role_id TEXT NOT NULL DEFAULT '',
+			provenance_kind TEXT NOT NULL DEFAULT '',
+			trust_label TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS evidence (
 			project_id TEXT NOT NULL,
 			id TEXT NOT NULL,
@@ -403,6 +420,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		_ = tx.Rollback()
 	}
 	for _, table := range []string{
+		"artifacts",
 		"evidence",
 		"reviews",
 		"handoffs",
@@ -658,7 +676,7 @@ func (s *Store) DeleteWorkItem(ctx context.Context, projectID, id string) error 
 	rollback := func() {
 		_ = tx.Rollback()
 	}
-	for _, table := range []string{"evidence", "reviews", "assignments"} {
+	for _, table := range []string{"artifacts", "evidence", "reviews", "assignments"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_id = ? AND work_item_id = ?`, projectID, id); err != nil {
 			rollback()
 			return mapSQLiteWriteError(err)
@@ -827,6 +845,10 @@ func (s *Store) DeleteAssignment(ctx context.Context, projectID, id string) erro
 	rollback := func() {
 		_ = tx.Rollback()
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM artifacts WHERE project_id = ? AND assignment_id = ?`, projectID, id); err != nil {
+		rollback()
+		return mapSQLiteWriteError(err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM reviews WHERE project_id = ? AND assignment_id = ?`, projectID, id); err != nil {
 		rollback()
 		return mapSQLiteWriteError(err)
@@ -844,6 +866,61 @@ func (s *Store) DeleteAssignment(ctx context.Context, projectID, id string) erro
 		return err
 	}
 	return nil
+}
+
+func (s *Store) ListArtifacts(ctx context.Context, projectID, workItemID string) ([]core.Artifact, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, kind, title, body, author_role_id, provenance_kind, trust_label, created_at, updated_at FROM artifacts WHERE project_id = ? AND work_item_id = ? ORDER BY created_at ASC, id ASC`, projectID, workItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Artifact
+	for rows.Next() {
+		item, err := scanArtifact(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetArtifact(ctx context.Context, projectID, workItemID, id string) (core.Artifact, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return core.Artifact{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, kind, title, body, author_role_id, provenance_kind, trust_label, created_at, updated_at FROM artifacts WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	return scanArtifact(row)
+}
+
+func (s *Store) CreateArtifact(ctx context.Context, artifact core.Artifact) (core.Artifact, error) {
+	if err := s.requireWorkItem(ctx, artifact.ProjectID, artifact.WorkItemID); err != nil {
+		return core.Artifact{}, err
+	}
+	if artifact.AssignmentID != "" {
+		assignment, err := s.GetAssignment(ctx, artifact.ProjectID, artifact.AssignmentID)
+		if err != nil {
+			return core.Artifact{}, err
+		}
+		if assignment.WorkItemID != artifact.WorkItemID {
+			return core.Artifact{}, core.ErrNotFound
+		}
+	}
+	if artifact.AuthorRoleID != "" {
+		if _, err := s.GetRole(ctx, artifact.ProjectID, artifact.AuthorRoleID); err != nil {
+			return core.Artifact{}, err
+		}
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO artifacts (project_id, id, work_item_id, assignment_id, kind, title, body, author_role_id, provenance_kind, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		artifact.ProjectID, artifact.ID, artifact.WorkItemID, artifact.AssignmentID, artifact.Kind, artifact.Title, artifact.Body, artifact.AuthorRoleID, artifact.ProvenanceKind, artifact.TrustLabel, encodeTime(artifact.CreatedAt), encodeTime(artifact.UpdatedAt))
+	if err != nil {
+		return core.Artifact{}, mapSQLiteWriteError(err)
+	}
+	return artifact, nil
 }
 
 func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) ([]core.Evidence, error) {
@@ -1479,6 +1556,22 @@ func scanAssignment(row scanner) (core.Assignment, error) {
 	}
 	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
 		return core.Assignment{}, err
+	}
+	return item, nil
+}
+
+func scanArtifact(row scanner) (core.Artifact, error) {
+	var item core.Artifact
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.AssignmentID, &item.Kind, &item.Title, &item.Body, &item.AuthorRoleID, &item.ProvenanceKind, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
+		return core.Artifact{}, mapSQLiteReadError(err)
+	}
+	var err error
+	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
+		return core.Artifact{}, err
+	}
+	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Artifact{}, err
 	}
 	return item, nil
 }
