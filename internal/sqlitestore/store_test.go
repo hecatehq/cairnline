@@ -269,12 +269,26 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(evidenceItems) != 1 || evidenceItems[0].Title != "Output link" || evidenceItems[0].AssignmentID != assignment.ID || evidenceItems[0].TrustLabel != core.EvidenceTrustOperator {
 		t.Fatalf("evidence = %+v, want persisted evidence", evidenceItems)
 	}
+	gotEvidence, err := reopenedService.GetEvidence(ctx, project.ID, work.ID, evidenceRecord.ID)
+	if err != nil {
+		t.Fatalf("GetEvidence() error = %v", err)
+	}
+	if gotEvidence.ID != evidenceRecord.ID || gotEvidence.Locator != evidenceRecord.Locator {
+		t.Fatalf("GetEvidence() = %+v, want persisted evidence", gotEvidence)
+	}
 	reviews, err := reopenedService.ListReviews(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListReviews() error = %v", err)
 	}
 	if len(reviews) != 1 || reviews[0].AssignmentID != assignment.ID || reviews[0].Verdict != core.ReviewVerdictPass {
 		t.Fatalf("reviews = %+v, want persisted review", reviews)
+	}
+	gotReview, err := reopenedService.GetReview(ctx, project.ID, work.ID, reviewRecord.ID)
+	if err != nil {
+		t.Fatalf("GetReview() error = %v", err)
+	}
+	if gotReview.ID != reviewRecord.ID || gotReview.ReviewerRoleID != role.ID || gotReview.Risk != core.ReviewRiskLow {
+		t.Fatalf("GetReview() = %+v, want persisted review", gotReview)
 	}
 	handoffs, err := reopenedService.ListHandoffs(ctx, project.ID, work.ID)
 	if err != nil {

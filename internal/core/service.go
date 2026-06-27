@@ -924,6 +924,22 @@ func (s *Service) ListEvidence(ctx context.Context, projectID, workItemID string
 	return s.store.ListEvidence(ctx, projectID, workItemID)
 }
 
+func (s *Service) GetEvidence(ctx context.Context, projectID, workItemID, id string) (Evidence, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Evidence{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Evidence{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Evidence{}, errors.Join(ErrInvalid, errors.New("evidence_id is required"))
+	}
+	return s.store.GetEvidence(ctx, projectID, workItemID, id)
+}
+
 func (s *Service) CreateEvidence(ctx context.Context, input Evidence) (Evidence, error) {
 	projectID := strings.TrimSpace(input.ProjectID)
 	workItemID := strings.TrimSpace(input.WorkItemID)
@@ -982,6 +998,22 @@ func (s *Service) ListReviews(ctx context.Context, projectID, workItemID string)
 		return nil, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
 	}
 	return s.store.ListReviews(ctx, projectID, workItemID)
+}
+
+func (s *Service) GetReview(ctx context.Context, projectID, workItemID, id string) (Review, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
+	if projectID == "" {
+		return Review{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if workItemID == "" {
+		return Review{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if id == "" {
+		return Review{}, errors.Join(ErrInvalid, errors.New("review_id is required"))
+	}
+	return s.store.GetReview(ctx, projectID, workItemID, id)
 }
 
 func (s *Service) CreateReview(ctx context.Context, input Review) (Review, error) {

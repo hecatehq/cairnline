@@ -79,7 +79,11 @@ Implemented now:
   - `assignments.launch_packet`
   - `assignments.complete`
   - `assignments.delete`
+  - `evidence.list`
+  - `evidence.get`
   - `evidence.record`
+  - `reviews.list`
+  - `reviews.get`
   - `reviews.record`
   - `handoffs.create`
   - `handoffs.list`

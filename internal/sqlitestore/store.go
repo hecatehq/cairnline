@@ -849,6 +849,14 @@ func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) 
 	return out, rows.Err()
 }
 
+func (s *Store) GetEvidence(ctx context.Context, projectID, workItemID, id string) (core.Evidence, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return core.Evidence{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	return scanEvidence(row)
+}
+
 func (s *Store) CreateEvidence(ctx context.Context, evidence core.Evidence) (core.Evidence, error) {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.AssignmentID, evidence.Title, evidence.Body, evidence.Locator, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
@@ -877,6 +885,14 @@ func (s *Store) ListReviews(ctx context.Context, projectID, workItemID string) (
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetReview(ctx context.Context, projectID, workItemID, id string) (core.Review, error) {
+	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
+		return core.Review{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, reviewer_role_id, title, body, verdict, risk, status, created_at, updated_at FROM reviews WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	return scanReview(row)
 }
 
 func (s *Store) CreateReview(ctx context.Context, review core.Review) (core.Review, error) {

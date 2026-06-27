@@ -795,6 +795,13 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if evidence.TrustLabel != EvidenceTrustOperator {
 		t.Fatalf("evidence = %+v, want default trust label", evidence)
 	}
+	gotEvidence, err := service.GetEvidence(ctx, project.ID, work.ID, evidence.ID)
+	if err != nil {
+		t.Fatalf("GetEvidence() error = %v", err)
+	}
+	if gotEvidence.ID != evidence.ID || gotEvidence.AssignmentID != assignment.ID || gotEvidence.Locator != "file://report.md" {
+		t.Fatalf("GetEvidence() = %+v, want recorded evidence", gotEvidence)
+	}
 	review, err := service.CreateReview(ctx, Review{
 		ProjectID:      project.ID,
 		WorkItemID:     work.ID,
@@ -809,6 +816,13 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if review.Title != "Review" || review.Status != ReviewStatusRecorded {
 		t.Fatalf("review = %+v, want default title and recorded status", review)
+	}
+	gotReview, err := service.GetReview(ctx, project.ID, work.ID, review.ID)
+	if err != nil {
+		t.Fatalf("GetReview() error = %v", err)
+	}
+	if gotReview.ID != review.ID || gotReview.AssignmentID != assignment.ID || gotReview.ReviewerRoleID != role.ID {
+		t.Fatalf("GetReview() = %+v, want recorded review", gotReview)
 	}
 	handoff, err := service.CreateHandoff(ctx, Handoff{
 		ProjectID:             project.ID,

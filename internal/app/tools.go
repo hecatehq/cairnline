@@ -615,6 +615,37 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, deleteAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "evidence.list",
+		Title:       "List evidence",
+		Description: "List proof, output, or external locators recorded for a work item.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id"]
+		}`),
+		Annotations: readOnly,
+	}, listEvidence(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "evidence.get",
+		Title:       "Get evidence",
+		Description: "Get one evidence record by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"evidence_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id","evidence_id"]
+		}`),
+		Annotations: readOnly,
+	}, getEvidence(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "evidence.record",
 		Title:       "Record evidence",
 		Description: "Record proof, output, or an external locator for a work item.",
@@ -632,6 +663,37 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","work_item_id","title"]
 		}`),
 	}, recordEvidence(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "reviews.list",
+		Title:       "List reviews",
+		Description: "List structured review records for a work item.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id"]
+		}`),
+		Annotations: readOnly,
+	}, listReviews(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "reviews.get",
+		Title:       "Get review",
+		Description: "Get one structured review record by id.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"review_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","work_item_id","review_id"]
+		}`),
+		Annotations: readOnly,
+	}, getReview(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "reviews.record",
@@ -2063,6 +2125,49 @@ func deleteAssignment(service *core.Service) mcp.ToolHandler {
 	}
 }
 
+func listEvidence(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListEvidence(ctx, input.ProjectID, input.WorkItemID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatEvidence("Evidence", items)),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func getEvidence(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+		EvidenceID string `json:"evidence_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetEvidence(ctx, input.ProjectID, input.WorkItemID, input.EvidenceID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatEvidence("Evidence", []core.Evidence{item})),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
 func recordEvidence(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID    string `json:"project_id"`
@@ -2092,6 +2197,49 @@ func recordEvidence(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Recorded evidence %s: %s", item.ID, item.Title)),
+		}, nil
+	}
+}
+
+func listReviews(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListReviews(ctx, input.ProjectID, input.WorkItemID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatReviews("Reviews", items)),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func getReview(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID  string `json:"project_id"`
+		WorkItemID string `json:"work_item_id"`
+		ReviewID   string `json:"review_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetReview(ctx, input.ProjectID, input.WorkItemID, input.ReviewID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatReviews("Review", []core.Review{item})),
+			StructuredContent: item,
 		}, nil
 	}
 }
@@ -2871,6 +3019,50 @@ func formatAssignments(title string, items []core.Assignment) string {
 		}
 		if len(item.DesiredAgent.SkillIDs) > 0 {
 			fmt.Fprintf(&b, " skills=%s", strings.Join(item.DesiredAgent.SkillIDs, ","))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatEvidence(title string, items []core.Evidence) string {
+	if len(items) == 0 {
+		return "No evidence."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s: %s", item.ID, item.Title)
+		if item.AssignmentID != "" {
+			fmt.Fprintf(&b, " assignment=%s", item.AssignmentID)
+		}
+		if item.Locator != "" {
+			fmt.Fprintf(&b, " locator=%s", item.Locator)
+		}
+		if item.TrustLabel != "" {
+			fmt.Fprintf(&b, " trust=%s", item.TrustLabel)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func formatReviews(title string, items []core.Review) string {
+	if len(items) == 0 {
+		return "No reviews."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (%d):\n", title, len(items))
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s: [%s] %s", item.ID, item.Verdict, item.Title)
+		if item.Risk != "" {
+			fmt.Fprintf(&b, " risk=%s", item.Risk)
+		}
+		if item.AssignmentID != "" {
+			fmt.Fprintf(&b, " assignment=%s", item.AssignmentID)
+		}
+		if item.ReviewerRoleID != "" {
+			fmt.Fprintf(&b, " reviewer=%s", item.ReviewerRoleID)
 		}
 		b.WriteByte('\n')
 	}
