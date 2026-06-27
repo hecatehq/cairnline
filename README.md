@@ -29,7 +29,8 @@ Implemented now:
   metadata, assignment-scoped evidence, reviews, handoffs with source/target
   refs, accepted memory, and memory candidates
 - in-memory service for projects, profiles, roles, work items, assignments,
-  assistant proposal records, and collaboration artifacts
+  assistant proposal records including project-root/default-root actions, and
+  collaboration artifacts
 - SQLite store for durable projects, profiles, roles, work items, assignments,
   skill metadata, assistant proposal records, and collaboration artifacts
 - embeddable Go API for applications that want to use the coordination core

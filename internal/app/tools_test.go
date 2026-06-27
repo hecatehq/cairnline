@@ -176,6 +176,11 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 		Warnings:  []string{"review before apply"},
 		Actions: []core.AssistantAction{
 			{
+				Kind:   core.AssistantActionAttachProjectRoot,
+				Target: core.AssistantTarget{ProjectID: project.ID},
+				Root:   &core.Root{ID: "root_mcp", Path: "/workspace/mcp", Kind: "local", Active: true},
+			},
+			{
 				Kind: core.AssistantActionCreateRole,
 				Role: &core.Role{ID: "role_mcp", ProjectID: project.ID, Name: "Operator"},
 			},
@@ -292,7 +297,7 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 	if err := server.Serve(ctx, bytes.NewReader(append(applyPayload, '\n')), &output); err != nil {
 		t.Fatalf("Serve(apply) error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Assistant apply prop_mcp: applied") || !strings.Contains(output.String(), "actions=3/3") {
+	if !strings.Contains(output.String(), "Assistant apply prop_mcp: applied") || !strings.Contains(output.String(), "actions=4/4") || !strings.Contains(output.String(), "root=root_mcp") {
 		t.Fatalf("apply response = %s", output.String())
 	}
 	var applyResponse struct {
@@ -303,7 +308,7 @@ func TestMCPTools_AssistantProposalApply(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &applyResponse); err != nil {
 		t.Fatalf("decode apply response: %v\n%s", err, output.String())
 	}
-	if !applyResponse.Result.StructuredContent.Applied || applyResponse.Result.StructuredContent.AppliedActionCount != 3 {
+	if !applyResponse.Result.StructuredContent.Applied || applyResponse.Result.StructuredContent.AppliedActionCount != 4 || applyResponse.Result.StructuredContent.Actions[0].RootID != "root_mcp" {
 		t.Fatalf("apply result = %+v, want full confirmed apply", applyResponse.Result.StructuredContent)
 	}
 	assignment, err := service.GetAssignment(ctx, project.ID, "asgn_mcp")
