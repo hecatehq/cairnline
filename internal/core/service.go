@@ -114,6 +114,120 @@ func (s *Service) DeleteProject(ctx context.Context, id string) error {
 	return s.store.DeleteProject(ctx, id)
 }
 
+func (s *Service) ListContextSources(ctx context.Context, projectID string) ([]Source, error) {
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]Source(nil), project.ContextSources...), nil
+}
+
+func (s *Service) GetContextSource(ctx context.Context, projectID, id string) (Source, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Source{}, errors.Join(ErrInvalid, errors.New("context source id is required"))
+	}
+	sources, err := s.ListContextSources(ctx, projectID)
+	if err != nil {
+		return Source{}, err
+	}
+	for _, source := range sources {
+		if strings.TrimSpace(source.ID) == id {
+			return source, nil
+		}
+	}
+	return Source{}, ErrNotFound
+}
+
+func (s *Service) CreateContextSource(ctx context.Context, projectID string, input Source) (Project, Source, error) {
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	item, err := s.normalizeContextSource(input, Source{}, true)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	for _, source := range project.ContextSources {
+		if strings.TrimSpace(source.ID) == item.ID {
+			return Project{}, Source{}, errors.Join(ErrDuplicate, errors.New("context source id already exists"))
+		}
+	}
+	project.ContextSources = append(append([]Source(nil), project.ContextSources...), item)
+	updated, err := s.UpdateProject(ctx, project)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	created, err := findContextSource(updated.ContextSources, item.ID)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	return updated, created, nil
+}
+
+func (s *Service) UpdateContextSource(ctx context.Context, projectID, id string, input Source) (Project, Source, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Project{}, Source{}, errors.Join(ErrInvalid, errors.New("context source id is required"))
+	}
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	existing, err := findContextSource(project.ContextSources, id)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	input.ID = id
+	item, err := s.normalizeContextSource(input, existing, false)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	for idx := range project.ContextSources {
+		if strings.TrimSpace(project.ContextSources[idx].ID) == id {
+			project.ContextSources[idx] = item
+			break
+		}
+	}
+	updated, err := s.UpdateProject(ctx, project)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	next, err := findContextSource(updated.ContextSources, id)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	return updated, next, nil
+}
+
+func (s *Service) DeleteContextSource(ctx context.Context, projectID, id string) (Project, Source, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Project{}, Source{}, errors.Join(ErrInvalid, errors.New("context source id is required"))
+	}
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	deleted, err := findContextSource(project.ContextSources, id)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	next := make([]Source, 0, len(project.ContextSources)-1)
+	for _, source := range project.ContextSources {
+		if strings.TrimSpace(source.ID) == id {
+			continue
+		}
+		next = append(next, source)
+	}
+	project.ContextSources = next
+	updated, err := s.UpdateProject(ctx, project)
+	if err != nil {
+		return Project{}, Source{}, err
+	}
+	return updated, deleted, nil
+}
+
 func (s *Service) ListProjectSkills(ctx context.Context, projectID string) ([]ProjectSkill, error) {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
@@ -1890,6 +2004,64 @@ func normalizeSources(values []Source, existing map[string]Source, now time.Time
 		})
 	}
 	return out
+}
+
+func (s *Service) normalizeContextSource(input, existing Source, creating bool) (Source, error) {
+	id := strings.TrimSpace(input.ID)
+	if id == "" && creating {
+		id = newID("src")
+	}
+	if id == "" {
+		return Source{}, errors.Join(ErrInvalid, errors.New("context source id is required"))
+	}
+	locator := strings.TrimSpace(input.Locator)
+	if locator == "" {
+		return Source{}, errors.Join(ErrInvalid, errors.New("context source locator is required"))
+	}
+	kind := strings.TrimSpace(input.Kind)
+	if kind == "" {
+		kind = "doc"
+	}
+	now := s.now()
+	createdAt := input.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = existing.CreatedAt
+	}
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	updatedAt := input.UpdatedAt
+	if updatedAt.IsZero() {
+		if creating {
+			updatedAt = createdAt
+		} else {
+			updatedAt = now
+		}
+	}
+	return Source{
+		ID:             id,
+		Kind:           kind,
+		Title:          strings.TrimSpace(input.Title),
+		Locator:        locator,
+		Enabled:        input.Enabled,
+		Format:         strings.TrimSpace(input.Format),
+		Scope:          strings.TrimSpace(input.Scope),
+		TrustLabel:     strings.TrimSpace(input.TrustLabel),
+		SourceCategory: strings.TrimSpace(input.SourceCategory),
+		Metadata:       normalizeStringMap(input.Metadata),
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
+	}, nil
+}
+
+func findContextSource(sources []Source, id string) (Source, error) {
+	id = strings.TrimSpace(id)
+	for _, source := range sources {
+		if strings.TrimSpace(source.ID) == id {
+			return source, nil
+		}
+	}
+	return Source{}, ErrNotFound
 }
 
 func existingSourcesByID(values []Source) map[string]Source {

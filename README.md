@@ -68,7 +68,8 @@ Implemented now:
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP, including assignment metadata updates that
   preserve created time and claim ownership while validating work-item, role,
-  root, profile, and execution-profile references
+  root, profile, and execution-profile references, plus source-level context
+  metadata create/update/delete helpers that avoid whole-project replacement
 - stdio MCP server with JSON-RPC framing
 - MCP resources:
   - `cairnline://projects/{project_id}`
@@ -87,6 +88,10 @@ Implemented now:
   - `projects.health`
   - `projects.operations_brief`
   - `projects.setup_readiness`
+  - `context_sources.list`
+  - `context_sources.create`
+  - `context_sources.update`
+  - `context_sources.delete`
   - `assistant.propose`
   - `assistant.proposals.list`
   - `assistant.proposals.get`
