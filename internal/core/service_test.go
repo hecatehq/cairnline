@@ -168,7 +168,7 @@ func TestService_DeleteProjectCascadesProjectScopedState(t *testing.T) {
 	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
 	}
-	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: ReviewVerdictPass}); err != nil {
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: ReviewVerdictApproved}); err != nil {
 		t.Fatalf("CreateReview() error = %v", err)
 	}
 	if _, err := service.CreateHandoff(ctx, Handoff{ProjectID: project.ID, WorkItemID: work.ID, SourceAssignmentID: assignment.ID, Title: "Handoff", Body: "Follow up"}); err != nil {
@@ -259,10 +259,10 @@ func TestService_DeleteWorkItemAndAssignmentScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(keep) error = %v", err)
 	}
-	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: deletedAssignment.ID, Body: "Delete with assignment.", Verdict: ReviewVerdictPass}); err != nil {
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: deletedAssignment.ID, Body: "Delete with assignment.", Verdict: ReviewVerdictApproved}); err != nil {
 		t.Fatalf("CreateReview(deleted assignment) error = %v", err)
 	}
-	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: keepWork.ID, AssignmentID: keptAssignment.ID, Body: "Keep.", Verdict: ReviewVerdictPass}); err != nil {
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: keepWork.ID, AssignmentID: keptAssignment.ID, Body: "Keep.", Verdict: ReviewVerdictApproved}); err != nil {
 		t.Fatalf("CreateReview(kept assignment) error = %v", err)
 	}
 	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, Title: "Evidence", Locator: "file://evidence.md"}); err != nil {
@@ -593,6 +593,14 @@ func TestService_ProjectSkillsDiscoveryAndLaunchResolution(t *testing.T) {
 	writeSkill(t, root, SkillPathAgents, "backend", `---
 name: Backend implementer
 description: Work on backend code with tests.
+hecate:
+  suggested_tools:
+    - git.diff
+    - file.read
+  required_permissions:
+    tools: true
+    writes: false
+    network: false
 ---
 # Backend skill
 
@@ -626,6 +634,12 @@ Body should not be stored in the skill registry.
 	}
 	if skill.ID != "backend" || skill.Title != "Backend implementer" || skill.Description != "Work on backend code with tests." || skill.Path != ".agents/skills/backend/SKILL.md" {
 		t.Fatalf("skill = %+v, want parsed metadata and relative path", skill)
+	}
+	if strings.Join(skill.SuggestedTools, ",") != "file.read,git.diff" {
+		t.Fatalf("suggested tools = %+v, want sorted parsed capability hints", skill.SuggestedTools)
+	}
+	if skill.RequiredPermissions.Tools == nil || !*skill.RequiredPermissions.Tools || skill.RequiredPermissions.Writes == nil || *skill.RequiredPermissions.Writes || skill.RequiredPermissions.Network == nil || *skill.RequiredPermissions.Network {
+		t.Fatalf("required permissions = %+v, want parsed nullable booleans", skill.RequiredPermissions)
 	}
 	if strings.Contains(skill.Description, "Body should not be stored") {
 		t.Fatalf("skill description includes body content: %+v", skill)
@@ -822,6 +836,60 @@ func TestService_ProjectSkillsDiscoveryUsesGuidanceLinkedRoots(t *testing.T) {
 	}
 }
 
+func TestService_ProjectSkillsDiscoveryUsesCommonAgentGuidanceSources(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	root := t.TempDir()
+	writeSkill(t, root, "skills/gemini", "research", "# Research\n")
+	writeSkill(t, root, ".cursor/rules/project-skills", "frontend", "# Frontend\n")
+	writeSkill(t, root, ".github/instructions/local-skills", "review", "# Review\n")
+	writeSkill(t, root, ".devin/rules/local-skills", "ops", "# Ops\n")
+	writeSkill(t, root, ".windsurf/rules/local-skills", "design", "# Design\n")
+	writeProjectTestFile(t, root, "GEMINI.md", "Use skills/gemini/research/SKILL.md.\n")
+	writeProjectTestFile(t, root, ".cursor/rules/project.mdc", "Use project-skills/frontend/SKILL.md.\n")
+	writeProjectTestFile(t, root, ".github/instructions/project.instructions.md", "Use local-skills/review/SKILL.md.\n")
+	writeProjectTestFile(t, root, ".devin/rules/project.md", "Use local-skills/ops/SKILL.md.\n")
+	writeProjectTestFile(t, root, ".windsurf/rules/project.md", "Use local-skills/design/SKILL.md.\n")
+
+	project, err := service.CreateProject(ctx, Project{
+		Name: "Common agent guidance",
+		Roots: []Root{{
+			ID:     "root_main",
+			Path:   root,
+			Active: true,
+		}},
+		ContextSources: []Source{
+			{ID: "src_gemini", Title: "GEMINI.md", Locator: "GEMINI.md", Enabled: true, Format: "gemini_md", Metadata: map[string]string{"root_id": "root_main"}},
+			{ID: "src_cursor", Title: "Cursor rule", Locator: ".cursor/rules/project.mdc", Enabled: true},
+			{ID: "src_github", Title: "GitHub instruction", Locator: ".github/instructions/project.instructions.md", Enabled: true},
+			{ID: "src_devin", Title: "Devin rule", Locator: ".devin/rules/project.md", Enabled: true},
+			{ID: "src_windsurf", Title: "Windsurf rule", Locator: ".windsurf/rules/project.md", Enabled: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	skills, err := service.DiscoverProjectSkills(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("DiscoverProjectSkills() error = %v", err)
+	}
+	assertSkillSource := func(id, sourceRef string) {
+		t.Helper()
+		skill := findProjectSkillForTest(skills, id)
+		if skill == nil {
+			t.Fatalf("skills = %+v, missing %s", skills, id)
+		}
+		if !containsString(skill.SourceRefs, sourceRef) {
+			t.Fatalf("%s source refs = %+v, want %s", id, skill.SourceRefs, sourceRef)
+		}
+	}
+	assertSkillSource("research", "src_gemini")
+	assertSkillSource("frontend", "src_cursor")
+	assertSkillSource("review", "src_github")
+	assertSkillSource("ops", "src_devin")
+	assertSkillSource("design", "src_windsurf")
+}
+
 func TestService_ProjectSkillsDiscoveryRejectsUnsafeGuidancePaths(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
@@ -934,6 +1002,10 @@ func TestService_ProjectSkillsRediscoveryPreservesOperatorOverridesAndRefreshesS
 	writeSkill(t, root, "docs-ai/skills", "backend", `---
 name: Backend implementer
 description: Original description.
+hecate:
+  suggested_tools: [git.diff]
+  required_permissions:
+    writes: false
 ---
 # Backend
 `)
@@ -996,6 +1068,16 @@ description: Original description.
 	if _, err := service.UpdateProject(ctx, project); err != nil {
 		t.Fatalf("UpdateProject() error = %v", err)
 	}
+	writeSkill(t, root, "docs-ai/skills", "backend", `---
+name: Backend implementer
+description: Refreshed description.
+cairnline:
+  suggested_tools: [file.read, git.diff]
+  required_permissions:
+    writes: true
+---
+# Backend
+`)
 	skills, err = service.DiscoverProjectSkills(ctx, project.ID)
 	if err != nil {
 		t.Fatalf("DiscoverProjectSkills() rediscover error = %v", err)
@@ -1009,6 +1091,9 @@ description: Original description.
 	}
 	if !containsString(backend.SourceRefs, "src_claude") || containsString(backend.SourceRefs, "src_agents") {
 		t.Fatalf("backend source refs = %+v, want refreshed CLAUDE.md provenance only", backend.SourceRefs)
+	}
+	if strings.Join(backend.SuggestedTools, ",") != "file.read,git.diff" || backend.RequiredPermissions.Writes == nil || !*backend.RequiredPermissions.Writes {
+		t.Fatalf("backend capability hints = %+v / %+v, want refreshed source-derived metadata", backend.SuggestedTools, backend.RequiredPermissions)
 	}
 }
 
@@ -1035,6 +1120,50 @@ func TestService_ProjectSkillsDiscoveryMarksConflicts(t *testing.T) {
 	}
 	if len(skills) != 1 || skills[0].Status != SkillStatusConflict || len(skills[0].Warnings) == 0 {
 		t.Fatalf("skills = %+v, want one conflict record with warning", skills)
+	}
+}
+
+func TestService_ProjectSkillsMemoryStoreDoesNotAliasCapabilityMetadata(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Skill metadata"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	toolsAllowed := true
+	created, err := service.CreateProjectSkill(ctx, ProjectSkill{
+		ProjectID:      project.ID,
+		ID:             "backend",
+		Title:          "Backend",
+		Format:         SkillFormatMarkdown,
+		SuggestedTools: []string{"git.diff"},
+		RequiredPermissions: RequiredPermissions{
+			Tools: &toolsAllowed,
+		},
+		Status: SkillStatusAvailable,
+	})
+	if err != nil {
+		t.Fatalf("CreateProjectSkill() error = %v", err)
+	}
+
+	created.SuggestedTools[0] = "shell.exec"
+	*created.RequiredPermissions.Tools = false
+	got, err := service.GetProjectSkill(ctx, project.ID, "backend")
+	if err != nil {
+		t.Fatalf("GetProjectSkill() error = %v", err)
+	}
+	if strings.Join(got.SuggestedTools, ",") != "git.diff" || got.RequiredPermissions.Tools == nil || !*got.RequiredPermissions.Tools {
+		t.Fatalf("stored skill after mutating create response = %+v / %+v, want original capability metadata", got.SuggestedTools, got.RequiredPermissions)
+	}
+
+	got.SuggestedTools[0] = "file.write"
+	*got.RequiredPermissions.Tools = false
+	listed, err := service.ListProjectSkills(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListProjectSkills() error = %v", err)
+	}
+	if len(listed) != 1 || strings.Join(listed[0].SuggestedTools, ",") != "git.diff" || listed[0].RequiredPermissions.Tools == nil || !*listed[0].RequiredPermissions.Tools {
+		t.Fatalf("listed skill after mutating get response = %+v, want original capability metadata", listed)
 	}
 }
 
@@ -1505,6 +1634,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if running.Status != AssignmentRunning || running.ExecutionRef != "run-123" {
 		t.Fatalf("running assignment = %+v, want running with execution ref", running)
 	}
+	if running.StartedAt.IsZero() || !running.CompletedAt.IsZero() {
+		t.Fatalf("running assignment timestamps = started:%s completed:%s, want started only", running.StartedAt, running.CompletedAt)
+	}
 	runningUpdated, err := service.UpdateAssignment(ctx, Assignment{
 		ProjectID:         project.ID,
 		ID:                assignment.ID,
@@ -1521,6 +1653,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if runningUpdated.Status != AssignmentRunning || runningUpdated.ClaimedBy != "agent-a" || runningUpdated.ExecutionMode != ExecutionOrchestrated || runningUpdated.ExecutionRef != "run-456" || runningUpdated.ContextSnapshotID != "ctx-running" {
 		t.Fatalf("running updated assignment = %+v, want metadata update preserving claim", runningUpdated)
+	}
+	if !runningUpdated.StartedAt.Equal(running.StartedAt) || !runningUpdated.CompletedAt.IsZero() {
+		t.Fatalf("running updated timestamps = started:%s completed:%s, want preserved started timestamp", runningUpdated.StartedAt, runningUpdated.CompletedAt)
 	}
 
 	packet, err := service.AssignmentContext(ctx, project.ID, assignment.ID)
@@ -1558,6 +1693,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		AssignmentID: assignment.ID,
 		Title:        "Test output",
 		Locator:      "file://report.md",
+		SourceKind:   "pull_request",
+		ExternalID:   "PR 42",
+		Provider:     "github",
 	})
 	if err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
@@ -1569,7 +1707,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetEvidence() error = %v", err)
 	}
-	if gotEvidence.ID != evidence.ID || gotEvidence.AssignmentID != assignment.ID || gotEvidence.Locator != "file://report.md" {
+	if gotEvidence.ID != evidence.ID || gotEvidence.AssignmentID != assignment.ID || gotEvidence.Locator != "file://report.md" || gotEvidence.SourceKind != "pull_request" || gotEvidence.ExternalID != "PR 42" || gotEvidence.Provider != "github" {
 		t.Fatalf("GetEvidence() = %+v, want recorded evidence", gotEvidence)
 	}
 	review, err := service.CreateReview(ctx, Review{
@@ -1578,7 +1716,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		AssignmentID:   assignment.ID,
 		ReviewerRoleID: role.ID,
 		Body:           "Looks good with one note.",
-		Verdict:        ReviewVerdictPass,
+		Verdict:        ReviewVerdictApproved,
 		Risk:           ReviewRiskLow,
 	})
 	if err != nil {
@@ -1593,6 +1731,23 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if gotReview.ID != review.ID || gotReview.AssignmentID != assignment.ID || gotReview.ReviewerRoleID != role.ID {
 		t.Fatalf("GetReview() = %+v, want recorded review", gotReview)
+	}
+	riskReview, err := service.CreateReview(ctx, Review{
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Body:         "Risk accepted by operator.",
+		Verdict:      ReviewVerdictRisk,
+		Risk:         ReviewRiskUnknown,
+	})
+	if err != nil {
+		t.Fatalf("CreateReview(risk/unknown) error = %v", err)
+	}
+	if riskReview.Verdict != ReviewVerdictRisk || riskReview.Risk != ReviewRiskUnknown {
+		t.Fatalf("risk review = %+v, want Hecate-compatible risk/unknown values", riskReview)
+	}
+	if _, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, Body: "Legacy verdict.", Verdict: "pass"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CreateReview(legacy pass) error = %v, want ErrInvalid", err)
 	}
 	handoff, err := service.CreateHandoff(ctx, Handoff{
 		ProjectID:             project.ID,
@@ -1690,14 +1845,20 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
 		t.Fatalf("launch packet memory = %+v, want accepted project memory", launchPacket.Memory)
 	}
-	if len(launchPacket.Artifacts) != 1 || len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 1 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
-		t.Fatalf("launch packet artifact counts artifacts=%d evidence=%d reviews=%d handoffs=%d memory=%d, want all one", len(launchPacket.Artifacts), len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
+	if len(launchPacket.Artifacts) != 1 || len(launchPacket.Evidence) != 1 || len(launchPacket.Reviews) != 2 || len(launchPacket.Handoffs) != 1 || len(launchPacket.MemoryCandidates) != 1 {
+		t.Fatalf("launch packet artifact counts artifacts=%d evidence=%d reviews=%d handoffs=%d memory=%d, want one artifact/evidence/handoff/memory candidate and two reviews", len(launchPacket.Artifacts), len(launchPacket.Evidence), len(launchPacket.Reviews), len(launchPacket.Handoffs), len(launchPacket.MemoryCandidates))
 	}
 	if launchPacket.Artifacts[0].ID != artifact.ID || launchPacket.Artifacts[0].Kind != "decision_note" {
 		t.Fatalf("launch packet artifacts = %+v, want generic artifact", launchPacket.Artifacts)
 	}
 	if launchPacket.Evidence[0].AssignmentID != assignment.ID {
 		t.Fatalf("launch packet evidence = %+v, want assignment-scoped evidence", launchPacket.Evidence[0])
+	}
+	if launchPacket.Evidence[0].SourceKind != "pull_request" || launchPacket.Evidence[0].ExternalID != "PR 42" || launchPacket.Evidence[0].Provider != "github" {
+		t.Fatalf("launch packet evidence = %+v, want source/provider/external metadata", launchPacket.Evidence[0])
+	}
+	if !reviewIDExistsForTest(launchPacket.Reviews, review.ID) || !reviewIDExistsForTest(launchPacket.Reviews, riskReview.ID) {
+		t.Fatalf("launch packet reviews = %+v, want approved and risk reviews", launchPacket.Reviews)
 	}
 
 	completed, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-123")
@@ -1706,6 +1867,9 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	}
 	if completed.Status != AssignmentCompleted || completed.ExecutionRef != "run-123" {
 		t.Fatalf("completed assignment = %+v, want completed with execution ref", completed)
+	}
+	if !completed.StartedAt.Equal(running.StartedAt) || completed.CompletedAt.IsZero() {
+		t.Fatalf("completed timestamps = started:%s completed:%s, want preserved start and completed timestamp", completed.StartedAt, completed.CompletedAt)
 	}
 }
 
@@ -1794,7 +1958,7 @@ func TestService_CollaborationImportPreservesTimestamps(t *testing.T) {
 		ReviewerRoleID: role.ID,
 		Title:          "Imported review",
 		Body:           "Review timestamp should survive import.",
-		Verdict:        ReviewVerdictPass,
+		Verdict:        ReviewVerdictApproved,
 		Risk:           ReviewRiskLow,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
@@ -2040,7 +2204,7 @@ func TestService_WorkItemCloseoutReadinessReviewFollowUp(t *testing.T) {
 		AssignmentID: assignment.ID,
 		Title:        "Architecture review",
 		Body:         "Needs follow-up.",
-		Verdict:      ReviewVerdictConcerns,
+		Verdict:      ReviewVerdictChangesRequested,
 		Risk:         ReviewRiskMedium,
 	})
 	if err != nil {
@@ -2151,7 +2315,7 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 		AssignmentID: reviewAssignment.ID,
 		Title:        "Risk review",
 		Body:         "Needs a follow-up path.",
-		Verdict:      ReviewVerdictConcerns,
+		Verdict:      ReviewVerdictChangesRequested,
 		Risk:         ReviewRiskMedium,
 	})
 	if err != nil {
@@ -2332,7 +2496,7 @@ func TestService_ProjectHealth(t *testing.T) {
 	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, "run-complete"); err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
-	review, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: completed.ID, Title: "Needs follow-up", Body: "Please follow up.", Verdict: ReviewVerdictConcerns})
+	review, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: completed.ID, Title: "Needs follow-up", Body: "Please follow up.", Verdict: ReviewVerdictChangesRequested})
 	if err != nil {
 		t.Fatalf("CreateReview() error = %v", err)
 	}
@@ -3354,6 +3518,15 @@ func findProjectSkillForTest(skills []ProjectSkill, id string) *ProjectSkill {
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func reviewIDExistsForTest(values []Review, want string) bool {
+	for _, value := range values {
+		if value.ID == want {
 			return true
 		}
 	}

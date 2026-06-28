@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ import (
 const (
 	maxGuidanceMetadataBytes = 64 * 1024
 	maxSkillMetadataBytes    = 64 * 1024
+	suggestedToolsMaxItems   = 16
 )
 
 type skillDiscoveryBase struct {
@@ -438,20 +441,22 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 				}
 				title := firstNonEmpty(metadata.name, metadata.title, entry.Name())
 				item := ProjectSkill{
-					ID:           id,
-					ProjectID:    projectID,
-					Title:        title,
-					Description:  metadata.description,
-					Path:         filepath.ToSlash(relPath),
-					RootID:       root.ID,
-					Format:       SkillFormatMarkdown,
-					Enabled:      true,
-					Status:       SkillStatusAvailable,
-					TrustLabel:   SkillTrustWorkspace,
-					SourceRefs:   compactStrings(base.sourceRefs),
-					DiscoveredAt: now,
-					CreatedAt:    now,
-					UpdatedAt:    now,
+					ID:                  id,
+					ProjectID:           projectID,
+					Title:               title,
+					Description:         metadata.description,
+					Path:                filepath.ToSlash(relPath),
+					RootID:              root.ID,
+					Format:              SkillFormatMarkdown,
+					SuggestedTools:      metadata.suggestedTools,
+					RequiredPermissions: metadata.requiredPermissions,
+					Enabled:             true,
+					Status:              SkillStatusAvailable,
+					TrustLabel:          SkillTrustWorkspace,
+					SourceRefs:          compactStrings(base.sourceRefs),
+					DiscoveredAt:        now,
+					CreatedAt:           now,
+					UpdatedAt:           now,
 				}
 				if prior, ok := discovered[id]; ok {
 					prior.Status = SkillStatusConflict
@@ -948,6 +953,14 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	}
 	desiredAgent := normalizeDesiredAgent(input.DesiredAgent)
 	now := s.now()
+	createdAt := input.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	updatedAt := input.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
 	item := Assignment{
 		ID:                 firstNonEmpty(strings.TrimSpace(input.ID), newID("asgn")),
 		ProjectID:          projectID,
@@ -961,8 +974,10 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 		DesiredAgent:       desiredAgent,
 		ExecutionRef:       strings.TrimSpace(input.ExecutionRef),
 		ContextSnapshotID:  strings.TrimSpace(input.ContextSnapshotID),
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
+		StartedAt:          input.StartedAt,
+		CompletedAt:        input.CompletedAt,
 	}
 	return s.store.CreateAssignment(ctx, item)
 }
@@ -1025,6 +1040,14 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 	if claimedBy == "" {
 		claimedBy = existing.ClaimedBy
 	}
+	startedAt := input.StartedAt
+	if startedAt.IsZero() {
+		startedAt = existing.StartedAt
+	}
+	completedAt := input.CompletedAt
+	if completedAt.IsZero() {
+		completedAt = existing.CompletedAt
+	}
 	item := Assignment{
 		ID:                 id,
 		ProjectID:          projectID,
@@ -1041,6 +1064,8 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 		ContextSnapshotID:  strings.TrimSpace(input.ContextSnapshotID),
 		CreatedAt:          existing.CreatedAt,
 		UpdatedAt:          s.now(),
+		StartedAt:          startedAt,
+		CompletedAt:        completedAt,
 	}
 	return s.store.UpdateAssignment(ctx, item)
 }
@@ -1109,10 +1134,14 @@ func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, sta
 		return Assignment{}, ErrConflict
 	}
 	item.Status = status
+	now := s.now()
+	if item.StartedAt.IsZero() {
+		item.StartedAt = now
+	}
 	if trimmed := strings.TrimSpace(executionRef); trimmed != "" {
 		item.ExecutionRef = trimmed
 	}
-	item.UpdatedAt = s.now()
+	item.UpdatedAt = now
 	return s.store.UpdateAssignment(ctx, item)
 }
 
@@ -1269,10 +1298,17 @@ func (s *Service) CompleteAssignment(ctx context.Context, projectID, id, status,
 		return Assignment{}, ErrConflict
 	}
 	item.Status = status
+	now := s.now()
+	if item.StartedAt.IsZero() {
+		item.StartedAt = now
+	}
+	if isTerminalAssignmentStatus(status) && item.CompletedAt.IsZero() {
+		item.CompletedAt = now
+	}
 	if trimmed := strings.TrimSpace(executionRef); trimmed != "" {
 		item.ExecutionRef = trimmed
 	}
-	item.UpdatedAt = s.now()
+	item.UpdatedAt = now
 	return s.store.UpdateAssignment(ctx, item)
 }
 
@@ -1389,6 +1425,9 @@ func (s *Service) CreateEvidence(ctx context.Context, input Evidence) (Evidence,
 	title := strings.TrimSpace(input.Title)
 	body := strings.TrimSpace(input.Body)
 	locator := strings.TrimSpace(input.Locator)
+	sourceKind := strings.TrimSpace(input.SourceKind)
+	externalID := strings.TrimSpace(input.ExternalID)
+	provider := strings.TrimSpace(input.Provider)
 	if projectID == "" {
 		return Evidence{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -1424,6 +1463,9 @@ func (s *Service) CreateEvidence(ctx context.Context, input Evidence) (Evidence,
 		Title:        title,
 		Body:         body,
 		Locator:      locator,
+		SourceKind:   sourceKind,
+		ExternalID:   externalID,
+		Provider:     provider,
 		TrustLabel:   trustLabel,
 		CreatedAt:    createdAt,
 		UpdatedAt:    updatedAt,
@@ -2291,6 +2333,11 @@ func (s *Service) normalizeProjectSkill(input ProjectSkill, creating bool) (Proj
 	if path != "" {
 		path = filepath.ToSlash(filepath.Clean(path))
 	}
+	suggestedTools, omittedSuggestedTools := normalizeSuggestedTools(input.SuggestedTools)
+	warnings := compactStrings(input.Warnings)
+	if omittedSuggestedTools > 0 {
+		warnings = appendUnique(warnings, fmt.Sprintf("Suggested tools list was capped at %d entries (+%d more omitted).", suggestedToolsMaxItems, omittedSuggestedTools))
+	}
 	now := s.now()
 	createdAt := input.CreatedAt
 	if createdAt.IsZero() {
@@ -2313,21 +2360,23 @@ func (s *Service) normalizeProjectSkill(input ProjectSkill, creating bool) (Proj
 		enabled = true
 	}
 	return ProjectSkill{
-		ID:           id,
-		ProjectID:    projectID,
-		Title:        title,
-		Description:  strings.TrimSpace(input.Description),
-		Path:         path,
-		RootID:       strings.TrimSpace(input.RootID),
-		Format:       format,
-		Enabled:      enabled,
-		Status:       status,
-		TrustLabel:   trustLabel,
-		SourceRefs:   compactStrings(input.SourceRefs),
-		Warnings:     compactStrings(input.Warnings),
-		DiscoveredAt: discoveredAt,
-		CreatedAt:    createdAt,
-		UpdatedAt:    updatedAt,
+		ID:                  id,
+		ProjectID:           projectID,
+		Title:               title,
+		Description:         strings.TrimSpace(input.Description),
+		Path:                path,
+		RootID:              strings.TrimSpace(input.RootID),
+		Format:              format,
+		SuggestedTools:      suggestedTools,
+		RequiredPermissions: cloneRequiredPermissions(input.RequiredPermissions),
+		Enabled:             enabled,
+		Status:              status,
+		TrustLabel:          trustLabel,
+		SourceRefs:          compactStrings(input.SourceRefs),
+		Warnings:            warnings,
+		DiscoveredAt:        discoveredAt,
+		CreatedAt:           createdAt,
+		UpdatedAt:           updatedAt,
 	}, nil
 }
 
@@ -2355,6 +2404,40 @@ func compactStrings(values []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func normalizeStringSlice(values []string) []string {
+	out := compactStrings(values)
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizeSuggestedTools(values []string) ([]string, int) {
+	values = normalizeStringSlice(values)
+	if len(values) <= suggestedToolsMaxItems {
+		return values, 0
+	}
+	omitted := len(values) - suggestedToolsMaxItems
+	return append([]string(nil), values[:suggestedToolsMaxItems]...), omitted
+}
+
+func cloneRequiredPermissions(permissions RequiredPermissions) RequiredPermissions {
+	return RequiredPermissions{
+		Tools:   cloneBoolPointer(permissions.Tools),
+		Writes:  cloneBoolPointer(permissions.Writes),
+		Network: cloneBoolPointer(permissions.Network),
+	}
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
 }
 
 func appendUnique(values []string, value string) []string {
@@ -2480,15 +2563,41 @@ func skillGuidanceSourceForRoot(source Source, rootID string) bool {
 			return false
 		}
 	}
-	if source.Kind == "workspace_instruction" || source.Format == "agents_md" || source.Format == "claude_md" {
+	if source.Kind == "workspace_instruction" || skillGuidanceSourceFormat(source.Format) {
 		return true
 	}
-	switch strings.ToLower(path.Base(locator)) {
-	case "agents.md", "claude.md", "claude.local.md":
+	return skillGuidanceSourceLocator(locator)
+}
+
+func skillGuidanceSourceFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "agents_md",
+		"claude_md",
+		"gemini_md",
+		"cursor_rule",
+		"cursor_rules",
+		"github_instruction",
+		"github_instructions",
+		"devin_rule",
+		"devin_rules",
+		"windsurf_rule",
+		"windsurf_rules":
 		return true
 	default:
 		return false
 	}
+}
+
+func skillGuidanceSourceLocator(locator string) bool {
+	lower := strings.ToLower(path.Clean(filepath.ToSlash(strings.TrimSpace(locator))))
+	switch path.Base(lower) {
+	case "agents.md", "claude.md", "claude.local.md", "gemini.md", "gemini.local.md", "copilot-instructions.md":
+		return true
+	}
+	return strings.HasPrefix(lower, ".cursor/rules/") ||
+		strings.HasPrefix(lower, ".github/instructions/") ||
+		strings.HasPrefix(lower, ".devin/rules/") ||
+		strings.HasPrefix(lower, ".windsurf/rules/")
 }
 
 func readGuidanceSource(rootPath string, source Source) (string, bool) {
@@ -2631,9 +2740,11 @@ func shouldSkipSkillDiscoveryPath(rel string) bool {
 }
 
 type skillFileMetadata struct {
-	name        string
-	title       string
-	description string
+	name                string
+	title               string
+	description         string
+	suggestedTools      []string
+	requiredPermissions RequiredPermissions
 }
 
 func readSkillMetadata(path string) (skillFileMetadata, error) {
@@ -2650,15 +2761,34 @@ func readSkillMetadata(path string) (skillFileMetadata, error) {
 }
 
 func parseSkillMetadata(body string) skillFileMetadata {
+	body = strings.TrimPrefix(body, "\ufeff")
 	var metadata skillFileMetadata
-	lines := strings.Split(body, "\n")
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
 	start := 0
 	if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+		activeList := ""
+		activeMap := ""
+		inCapabilityBlock := false
+		capabilityIndent := -1
 		for i := 1; i < len(lines); i++ {
-			line := strings.TrimSpace(lines[i])
+			rawLine := lines[i]
+			line := strings.TrimSpace(rawLine)
 			if line == "---" {
 				start = i + 1
 				break
+			}
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			indent := frontmatterIndent(rawLine)
+			if inCapabilityBlock && indent <= capabilityIndent {
+				inCapabilityBlock = false
+				activeList = ""
+				activeMap = ""
+			}
+			if inCapabilityBlock && activeList == "suggested_tools" && strings.HasPrefix(line, "- ") {
+				metadata.suggestedTools = append(metadata.suggestedTools, strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`))
+				continue
 			}
 			key, value, ok := strings.Cut(line, ":")
 			if !ok {
@@ -2667,11 +2797,50 @@ func parseSkillMetadata(body string) skillFileMetadata {
 			value = strings.Trim(strings.TrimSpace(value), `"'`)
 			switch strings.ToLower(strings.TrimSpace(key)) {
 			case "name":
-				metadata.name = value
+				if indent == 0 {
+					metadata.name = value
+				}
 			case "title":
-				metadata.title = value
+				if indent == 0 {
+					metadata.title = value
+				}
 			case "description":
-				metadata.description = value
+				if indent == 0 {
+					metadata.description = value
+				}
+			case "hecate", "cairnline":
+				inCapabilityBlock = value == ""
+				capabilityIndent = indent
+				activeList = ""
+				activeMap = ""
+			case "suggested_tools":
+				if !inCapabilityBlock || indent <= capabilityIndent {
+					activeList = ""
+					activeMap = ""
+					continue
+				}
+				activeMap = ""
+				if value == "" {
+					activeList = "suggested_tools"
+				} else {
+					activeList = ""
+					metadata.suggestedTools = append(metadata.suggestedTools, parseFrontmatterListValue(value)...)
+				}
+			case "required_permissions":
+				if !inCapabilityBlock || indent <= capabilityIndent {
+					activeList = ""
+					activeMap = ""
+					continue
+				}
+				activeList = ""
+				activeMap = "required_permissions"
+			case "tools", "writes", "network":
+				if inCapabilityBlock && activeMap == "required_permissions" && indent > capabilityIndent {
+					setRequiredPermission(&metadata.requiredPermissions, strings.ToLower(strings.TrimSpace(key)), value)
+				}
+			default:
+				activeList = ""
+				activeMap = ""
 			}
 		}
 	}
@@ -2682,7 +2851,69 @@ func parseSkillMetadata(body string) skillFileMetadata {
 			break
 		}
 	}
+	metadata.suggestedTools = normalizeStringSlice(metadata.suggestedTools)
 	return metadata
+}
+
+func frontmatterIndent(line string) int {
+	indent := 0
+	for _, char := range line {
+		switch char {
+		case ' ':
+			indent++
+		case '\t':
+			indent += 2
+		default:
+			return indent
+		}
+	}
+	return indent
+}
+
+func parseFrontmatterListValue(value string) []string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "[")
+	value = strings.TrimSuffix(value, "]")
+	if value == "" {
+		return nil
+	}
+	if !strings.Contains(value, ",") {
+		return []string{strings.Trim(value, `"'`)}
+	}
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.Trim(strings.TrimSpace(item), `"'`)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func setRequiredPermission(permissions *RequiredPermissions, key, value string) {
+	parsed, ok := parseFrontmatterBool(value)
+	if !ok {
+		return
+	}
+	switch key {
+	case "tools":
+		permissions.Tools = &parsed
+	case "writes":
+		permissions.Writes = &parsed
+	case "network":
+		permissions.Network = &parsed
+	}
+}
+
+func parseFrontmatterBool(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "on", "1":
+		return true, true
+	case "false", "no", "off", "0":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func normalizeExecutionMode(value string, allowEmpty bool) (string, error) {
@@ -2750,7 +2981,7 @@ func normalizeDesiredAgent(input DesiredAgent) DesiredAgent {
 func normalizeReviewVerdict(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	switch value {
-	case ReviewVerdictPass, ReviewVerdictConcerns, ReviewVerdictBlocked:
+	case ReviewVerdictApproved, ReviewVerdictChangesRequested, ReviewVerdictBlocked, ReviewVerdictRisk:
 		return value, nil
 	case "":
 		return "", errors.Join(ErrInvalid, errors.New("review verdict is required"))
@@ -2762,7 +2993,7 @@ func normalizeReviewVerdict(value string) (string, error) {
 func normalizeReviewRisk(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	switch value {
-	case "", ReviewRiskLow, ReviewRiskMedium, ReviewRiskHigh:
+	case "", ReviewRiskLow, ReviewRiskMedium, ReviewRiskHigh, ReviewRiskUnknown:
 		return value, nil
 	default:
 		return "", errors.Join(ErrInvalid, errors.New("unsupported review risk"))

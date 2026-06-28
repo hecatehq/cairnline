@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -74,14 +75,19 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 	skill, err := service.CreateProjectSkill(ctx, core.ProjectSkill{
-		ProjectID:   project.ID,
-		ID:          "review",
-		Title:       "Review skill",
-		Description: "Review work with evidence.",
-		Format:      core.SkillFormatMarkdown,
-		Status:      core.SkillStatusAvailable,
-		TrustLabel:  core.SkillTrustWorkspace,
-		SourceRefs:  []string{"src_agents"},
+		ProjectID:      project.ID,
+		ID:             "review",
+		Title:          "Review skill",
+		Description:    "Review work with evidence.",
+		Format:         core.SkillFormatMarkdown,
+		SuggestedTools: []string{"git.diff", "file.read"},
+		RequiredPermissions: core.RequiredPermissions{
+			Tools:  boolPointerForStoreTest(true),
+			Writes: boolPointerForStoreTest(false),
+		},
+		Status:     core.SkillStatusAvailable,
+		TrustLabel: core.SkillTrustWorkspace,
+		SourceRefs: []string{"src_agents"},
 	})
 	if err != nil {
 		t.Fatalf("CreateProjectSkill() error = %v", err)
@@ -165,6 +171,9 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		AssignmentID: assignment.ID,
 		Title:        "Output link",
 		Locator:      "https://example.test/report",
+		SourceKind:   "pull_request",
+		ExternalID:   "PR 42",
+		Provider:     "github",
 	})
 	if err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
@@ -176,7 +185,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		ReviewerRoleID: role.ID,
 		Title:          "Review pass",
 		Body:           "The persistence flow works.",
-		Verdict:        core.ReviewVerdictPass,
+		Verdict:        core.ReviewVerdictApproved,
 		Risk:           core.ReviewRiskLow,
 	})
 	if err != nil {
@@ -282,12 +291,18 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if len(skills) != 1 || skills[0].ID != skill.ID || len(skills[0].SourceRefs) != 1 || !skills[0].Enabled {
 		t.Fatalf("skills = %+v, want persisted enabled project skill", skills)
 	}
+	if strings.Join(skills[0].SuggestedTools, ",") != "file.read,git.diff" || skills[0].RequiredPermissions.Tools == nil || !*skills[0].RequiredPermissions.Tools || skills[0].RequiredPermissions.Writes == nil || *skills[0].RequiredPermissions.Writes {
+		t.Fatalf("skill capability metadata = %+v / %+v, want persisted tools and permissions", skills[0].SuggestedTools, skills[0].RequiredPermissions)
+	}
 	assignments, err := reopenedService.ListAssignments(ctx, project.ID)
 	if err != nil {
 		t.Fatalf("ListAssignments() error = %v", err)
 	}
 	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].Status != core.AssignmentCompleted || assignments[0].ExecutionRef != "run-1" {
 		t.Fatalf("assignments = %+v, want completed assignment", assignments)
+	}
+	if assignments[0].StartedAt.IsZero() || assignments[0].CompletedAt.IsZero() {
+		t.Fatalf("assignment timestamps = started:%s completed:%s, want persisted lifecycle timestamps", assignments[0].StartedAt, assignments[0].CompletedAt)
 	}
 	if assignments[0].RootID != "root_main" || assignments[0].ProfileID != profile.ID || assignments[0].ContextSnapshotID != "ctx-prep" || len(assignments[0].DesiredAgent.SkillIDs) != 2 {
 		t.Fatalf("assignment metadata = %+v, want persisted root/profile/context/desired-agent update", assignments[0])
@@ -320,21 +335,21 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvidence() error = %v", err)
 	}
-	if len(evidenceItems) != 1 || evidenceItems[0].Title != "Output link" || evidenceItems[0].AssignmentID != assignment.ID || evidenceItems[0].TrustLabel != core.EvidenceTrustOperator {
+	if len(evidenceItems) != 1 || evidenceItems[0].Title != "Output link" || evidenceItems[0].AssignmentID != assignment.ID || evidenceItems[0].TrustLabel != core.EvidenceTrustOperator || evidenceItems[0].SourceKind != "pull_request" || evidenceItems[0].ExternalID != "PR 42" || evidenceItems[0].Provider != "github" {
 		t.Fatalf("evidence = %+v, want persisted evidence", evidenceItems)
 	}
 	gotEvidence, err := reopenedService.GetEvidence(ctx, project.ID, work.ID, evidenceRecord.ID)
 	if err != nil {
 		t.Fatalf("GetEvidence() error = %v", err)
 	}
-	if gotEvidence.ID != evidenceRecord.ID || gotEvidence.Locator != evidenceRecord.Locator {
+	if gotEvidence.ID != evidenceRecord.ID || gotEvidence.Locator != evidenceRecord.Locator || gotEvidence.SourceKind != "pull_request" || gotEvidence.ExternalID != "PR 42" || gotEvidence.Provider != "github" {
 		t.Fatalf("GetEvidence() = %+v, want persisted evidence", gotEvidence)
 	}
 	reviews, err := reopenedService.ListReviews(ctx, project.ID, work.ID)
 	if err != nil {
 		t.Fatalf("ListReviews() error = %v", err)
 	}
-	if len(reviews) != 1 || reviews[0].AssignmentID != assignment.ID || reviews[0].Verdict != core.ReviewVerdictPass {
+	if len(reviews) != 1 || reviews[0].AssignmentID != assignment.ID || reviews[0].Verdict != core.ReviewVerdictApproved {
 		t.Fatalf("reviews = %+v, want persisted review", reviews)
 	}
 	gotReview, err := reopenedService.GetReview(ctx, project.ID, work.ID, reviewRecord.ID)
@@ -394,6 +409,9 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if len(launchPacket.Skills) != 1 || launchPacket.Skills[0].ID != skill.ID {
 		t.Fatalf("launch packet skills = %+v, want persisted resolved skill", launchPacket.Skills)
+	}
+	if strings.Join(launchPacket.Skills[0].SuggestedTools, ",") != "file.read,git.diff" {
+		t.Fatalf("launch packet skill = %+v, want capability metadata", launchPacket.Skills[0])
 	}
 	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
 		t.Fatalf("launch packet memory = %+v, want persisted accepted memory", launchPacket.Memory)
@@ -572,7 +590,7 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	if _, err := service.CreateEvidence(ctx, core.Evidence{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Evidence", Locator: "https://example.test/evidence"}); err != nil {
 		t.Fatalf("CreateEvidence() error = %v", err)
 	}
-	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: core.ReviewVerdictPass}); err != nil {
+	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: core.ReviewVerdictApproved}); err != nil {
 		t.Fatalf("CreateReview() error = %v", err)
 	}
 	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, SourceAssignmentID: assignment.ID, Title: "Handoff", Body: "Follow up"}); err != nil {
@@ -725,7 +743,7 @@ func TestStore_DeleteWorkItemAndAssignmentScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(keep) error = %v", err)
 	}
-	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: deletedAssignment.ID, Body: "Delete with assignment.", Verdict: core.ReviewVerdictPass}); err != nil {
+	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: deletedAssignment.ID, Body: "Delete with assignment.", Verdict: core.ReviewVerdictApproved}); err != nil {
 		t.Fatalf("CreateReview(deleted assignment) error = %v", err)
 	}
 	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, TargetWorkItemID: keepWork.ID, Title: "Handoff", Body: "Continue elsewhere"}); err != nil {
@@ -1397,4 +1415,8 @@ func TestStore_CreateReviewValidatesAssignmentWorkItem(t *testing.T) {
 	if !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("CreateReview() error = %v, want ErrNotFound", err)
 	}
+}
+
+func boolPointerForStoreTest(value bool) *bool {
+	return &value
 }

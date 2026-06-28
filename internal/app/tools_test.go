@@ -693,7 +693,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","title":"Test output","locator":"file://report.md"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","title":"Test output","locator":"file://report.md","source_kind":"pull_request","external_id":"PR 42","provider":"github"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -709,6 +709,9 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if len(evidence) != 1 {
 		t.Fatalf("evidence after record = %+v, want one evidence record", evidence)
 	}
+	if evidence[0].SourceKind != "pull_request" || evidence[0].ExternalID != "PR 42" || evidence[0].Provider != "github" {
+		t.Fatalf("evidence after record = %+v, want source/provider/external metadata", evidence[0])
+	}
 
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":"evidence.list","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `"}}}` + "\n",
@@ -717,7 +720,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err := server.Serve(ctx, input, &output); err != nil {
 		t.Fatalf("Serve() list evidence error = %v", err)
 	}
-	if got := output.String(); !strings.Contains(got, "Evidence (1):") || !strings.Contains(got, evidence[0].ID) || !strings.Contains(got, `"structuredContent"`) {
+	if got := output.String(); !strings.Contains(got, "Evidence (1):") || !strings.Contains(got, evidence[0].ID) || !strings.Contains(got, "provider=github") || !strings.Contains(got, `"structuredContent"`) {
 		t.Fatalf("list evidence response = %s", got)
 	}
 
@@ -733,13 +736,13 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"reviews.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","reviewer_role_id":"` + role.ID + `","body":"Looks good.","verdict":"pass","risk":"low"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"reviews.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","reviewer_role_id":"` + role.ID + `","body":"Looks good.","verdict":"approved","risk":"low"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
 		t.Fatalf("Serve() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Recorded review rev_") || !strings.Contains(output.String(), "verdict=pass") {
+	if !strings.Contains(output.String(), "Recorded review rev_") || !strings.Contains(output.String(), "verdict=approved") {
 		t.Fatalf("record review response = %s", output.String())
 	}
 	reviews, err := service.ListReviews(ctx, project.ID, work.ID)
@@ -1122,7 +1125,7 @@ func TestMCPTools_GetAndDeleteAssignment(t *testing.T) {
 		WorkItemID:   work.ID,
 		AssignmentID: assignment.ID,
 		Body:         "Delete with assignment.",
-		Verdict:      core.ReviewVerdictPass,
+		Verdict:      core.ReviewVerdictApproved,
 	}); err != nil {
 		t.Fatalf("CreateReview() error = %v", err)
 	}
@@ -1776,7 +1779,16 @@ func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: Backend\n---\n# Backend body\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: Backend
+hecate:
+  suggested_tools: [git.diff, file.read]
+  required_permissions:
+    tools: true
+    writes: false
+---
+# Backend body
+`), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -1820,6 +1832,10 @@ func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	if len(discoverResponse.Result.StructuredContent) != 1 || discoverResponse.Result.StructuredContent[0].ID != "backend" {
 		t.Fatalf("structured discovered skills = %+v, want backend", discoverResponse.Result.StructuredContent)
 	}
+	discovered := discoverResponse.Result.StructuredContent[0]
+	if strings.Join(discovered.SuggestedTools, ",") != "file.read,git.diff" || discovered.RequiredPermissions.Tools == nil || !*discovered.RequiredPermissions.Tools || discovered.RequiredPermissions.Writes == nil || *discovered.RequiredPermissions.Writes {
+		t.Fatalf("structured discovered skill = %+v, want capability metadata", discovered)
+	}
 
 	input = toolRequest(t, 3, "skills.update", map[string]any{
 		"project_id": projectID,
@@ -1827,6 +1843,12 @@ func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 		"title":      "Backend disabled",
 		"enabled":    false,
 		"status":     core.SkillStatusAvailable,
+		"suggested_tools": []string{
+			"shell.exec",
+		},
+		"required_permissions": map[string]any{
+			"network": false,
+		},
 	})
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -1836,7 +1858,7 @@ func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListProjectSkills() error = %v", err)
 	}
-	if len(skills) != 1 || skills[0].Enabled || skills[0].Title != "Backend disabled" || skills[0].Path != ".agents/skills/backend/SKILL.md" {
+	if len(skills) != 1 || skills[0].Enabled || skills[0].Title != "Backend disabled" || skills[0].Path != ".agents/skills/backend/SKILL.md" || strings.Join(skills[0].SuggestedTools, ",") != "shell.exec" || skills[0].RequiredPermissions.Network == nil || *skills[0].RequiredPermissions.Network {
 		t.Fatalf("skills after update = %+v, want disabled patch preserving discovered path", skills)
 	}
 
@@ -1845,7 +1867,7 @@ func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	if err := server.Serve(ctx, input, &output); err != nil {
 		t.Fatalf("Serve() list skills error = %v", err)
 	}
-	if got := output.String(); !strings.Contains(got, "Project skills") || !strings.Contains(got, "disabled") {
+	if got := output.String(); !strings.Contains(got, "Project skills") || !strings.Contains(got, "disabled") || !strings.Contains(got, "tools=shell.exec") || !strings.Contains(got, "permissions=network:false") {
 		t.Fatalf("list skills response = %s", got)
 	}
 }

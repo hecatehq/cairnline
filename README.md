@@ -30,9 +30,10 @@ Project roots are optional metadata until a feature explicitly needs local
 files. Current skill discovery is the main local-read path: it reads bounded
 guidance files from active roots, discovers local `SKILL.md` metadata, and skips
 absolute paths, parent traversal, remote URLs, and hidden worktree folders. It
-does not store, inject, execute, install, or fetch skill bodies. Skill metadata
-is not permission to enable tools, writes, network access, approvals, or
-sandbox escapes.
+stores names, descriptions, provenance, suggested tool names, and nullable
+permission hints without storing, injecting, executing, installing, or fetching
+skill bodies. Skill metadata is not permission to enable tools, writes, network
+access, approvals, or sandbox escapes.
 
 Source locators, evidence locators, and evidence URLs are operator-provided
 metadata. Cairnline stores them as-is and does not fetch or render them.
@@ -52,9 +53,11 @@ Implemented now:
 - portable core types for projects with roots/default root and
   profile/execution-profile default references, context source provenance
   metadata, roles with agent/execution-profile defaults,
-  profiles, work items, assignments, skill metadata, generic collaboration
-  artifacts, assignment-scoped evidence, reviews, handoffs with source/target
-  refs, accepted memory, and memory candidates
+  profiles, work items, assignments with lifecycle timestamps, skill metadata,
+  generic collaboration artifacts, assignment-scoped evidence with
+  source/provider/external-id metadata, Hecate-compatible structured review
+  verdict/risk metadata, handoffs with source/target refs, accepted memory, and
+  memory candidates
 - in-memory service for projects, profiles, roles, work items, assignments,
   assistant proposal records including project-root/default-root actions, and
   collaboration artifacts
@@ -62,9 +65,12 @@ Implemented now:
   skill metadata, assistant proposal records, and collaboration artifacts
 - project skill discovery from `.agents/skills`, Hecate-compatible
   `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
-  guidance-linked local skill roots; rediscovery refreshes discovered status
-  and provenance while preserving operator-edited enabled/title/description
-  and trust-label fields
+  guidance-linked local skill roots; recognized guidance locators include
+  `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules`,
+  `.github/instructions`, `.devin/rules`, and `.windsurf/rules`; rediscovery
+  refreshes discovered status, provenance, suggested tools, and permission
+  hints while preserving operator-edited enabled/title/description and
+  trust-label fields
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP, including assignment metadata updates that
   preserve created time and claim ownership while validating work-item, role,
@@ -295,6 +301,12 @@ coordination substrate, not a drop-in replacement yet.
 Cairnline now has a public embeddable Go API, so Hecate can start integration
 experiments without going through MCP. MCP remains the interoperability surface
 for external agents and other hosts.
+
+Hecate is one integration client, not the defining host. Hecate may provide a
+native operator UI/UX and may embed Cairnline while the contracts settle, but
+the stable distribution target remains a standalone `cairnline` binary/MCP
+server that can be installed as an additional local tool by any compatible
+agent host.
 
 Before Hecate can replace its current Projects backend with Cairnline, the
 following gates should be closed:
