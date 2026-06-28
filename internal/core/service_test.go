@@ -1263,6 +1263,92 @@ func TestService_ContextSourceMutations(t *testing.T) {
 	}
 }
 
+func TestService_RootMutations(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Roots"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	project, created, err := service.CreateRoot(ctx, project.ID, Root{
+		ID:        " root_main ",
+		Path:      " /workspace/main/../main ",
+		Kind:      " git ",
+		GitRemote: " https://github.com/hecatehq/hecate ",
+		GitBranch: " main ",
+		Active:    true,
+	})
+	if err != nil {
+		t.Fatalf("CreateRoot() error = %v", err)
+	}
+	if created.ID != "root_main" || created.Path != "/workspace/main" || created.Kind != "git" || created.GitRemote != "https://github.com/hecatehq/hecate" || created.GitBranch != "main" || !created.Active {
+		t.Fatalf("created root = %+v, want normalized root metadata", created)
+	}
+	if len(project.Roots) != 1 || project.DefaultRootID != "root_main" {
+		t.Fatalf("project roots/default after create = %+v default=%q, want created root as default", project.Roots, project.DefaultRootID)
+	}
+
+	if _, _, err := service.CreateRoot(ctx, project.ID, Root{ID: "root_main", Path: "/workspace/other"}); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("CreateRoot(duplicate) error = %v, want ErrDuplicate", err)
+	}
+	if _, _, err := service.CreateRoot(ctx, project.ID, Root{ID: "root_empty"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CreateRoot(empty path) error = %v, want ErrInvalid", err)
+	}
+
+	project, updated, err := service.UpdateRoot(ctx, project.ID, "root_main", Root{
+		Path:      "/workspace/.worktrees/feature",
+		Kind:      "git_worktree",
+		GitBranch: "feature/root-api",
+		Active:    false,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRoot() error = %v", err)
+	}
+	if updated.ID != "root_main" || updated.Path != "/workspace/.worktrees/feature" || updated.Kind != "git_worktree" || updated.GitBranch != "feature/root-api" || updated.Active {
+		t.Fatalf("updated root = %+v, want replacement metadata with stable id", updated)
+	}
+	if len(project.Roots) != 1 || project.DefaultRootID != "root_main" {
+		t.Fatalf("project roots/default after update = %+v default=%q, want stable default root", project.Roots, project.DefaultRootID)
+	}
+
+	got, err := service.GetRoot(ctx, project.ID, "root_main")
+	if err != nil {
+		t.Fatalf("GetRoot() error = %v", err)
+	}
+	if got.Path != "/workspace/.worktrees/feature" {
+		t.Fatalf("GetRoot() = %+v, want updated root", got)
+	}
+	roots, err := service.ListRoots(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoots() error = %v", err)
+	}
+	if len(roots) != 1 || roots[0].ID != "root_main" {
+		t.Fatalf("ListRoots() = %+v, want updated root", roots)
+	}
+	if _, _, err := service.UpdateRoot(ctx, project.ID, "root_missing", Root{Path: "/workspace/new"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateRoot(missing) error = %v, want ErrNotFound", err)
+	}
+
+	project, _, err = service.CreateRoot(ctx, project.ID, Root{ID: "root_other", Path: "/workspace/other", Active: true})
+	if err != nil {
+		t.Fatalf("CreateRoot(other) error = %v", err)
+	}
+	project, deleted, err := service.DeleteRoot(ctx, project.ID, "root_main")
+	if err != nil {
+		t.Fatalf("DeleteRoot() error = %v", err)
+	}
+	if deleted.ID != "root_main" || len(project.Roots) != 1 || project.Roots[0].ID != "root_other" || project.DefaultRootID != "root_other" {
+		t.Fatalf("deleted root=%+v project roots=%+v default=%q, want deleted root removed and remaining root defaulted", deleted, project.Roots, project.DefaultRootID)
+	}
+	if _, err := service.GetRoot(ctx, project.ID, "root_main"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetRoot(deleted) error = %v, want ErrNotFound", err)
+	}
+	if _, _, err := service.DeleteRoot(ctx, project.ID, "root_main"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteRoot(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestService_AssignmentLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
