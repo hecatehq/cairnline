@@ -88,6 +88,10 @@ Implemented now:
   - `projects.health`
   - `projects.operations_brief`
   - `projects.setup_readiness`
+  - `roots.list`
+  - `roots.create`
+  - `roots.update`
+  - `roots.delete`
   - `context_sources.list`
   - `context_sources.create`
   - `context_sources.update`

@@ -120,6 +120,70 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, deleteProject(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "roots.list",
+		Title:       "List project roots",
+		Description: "List project root metadata. Cairnline does not create, delete, or inspect local directories through this tool.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string","minLength":1}},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, listRoots(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "roots.create",
+		Title:       "Create project root",
+		Description: "Attach project root metadata without creating folders, worktrees, or Git state.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string"},
+				"path":{"type":"string","minLength":1},
+				"kind":{"type":"string"},
+				"git_remote":{"type":"string"},
+				"git_branch":{"type":"string"},
+				"active":{"type":"boolean"}
+			},
+			"required":["project_id","path"]
+		}`),
+	}, createRoot(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "roots.update",
+		Title:       "Update project root",
+		Description: "Patch project root metadata without touching the local filesystem.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"root_id":{"type":"string","minLength":1},
+				"path":{"type":"string"},
+				"kind":{"type":"string"},
+				"git_remote":{"type":"string"},
+				"git_branch":{"type":"string"},
+				"active":{"type":"boolean"}
+			},
+			"required":["project_id","root_id"]
+		}`),
+	}, updateRoot(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "roots.delete",
+		Title:       "Delete project root",
+		Description: "Remove one project root metadata record without deleting local files or Git worktrees.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"root_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","root_id"]
+		}`),
+	}, deleteRoot(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "context_sources.list",
 		Title:       "List context sources",
 		Description: "List metadata-only project context sources such as guidance files, notes, URLs, or operator-provided references.",
@@ -1518,6 +1582,148 @@ func deleteProject(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Deleted project %s", strings.TrimSpace(input.ID))),
+		}, nil
+	}
+}
+
+func listRoots(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListRoots(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if len(items) == 0 {
+			return mcp.CallToolResult{
+				Content:           mcp.TextContent("No roots for project " + strings.TrimSpace(input.ProjectID) + "."),
+				StructuredContent: items,
+			}, nil
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "Roots for %s (%d):\n", strings.TrimSpace(input.ProjectID), len(items))
+		for _, item := range items {
+			fmt.Fprintf(&b, "- %s: %s", item.ID, item.Path)
+			if item.Kind != "" {
+				fmt.Fprintf(&b, " [%s]", item.Kind)
+			}
+			if item.GitBranch != "" {
+				fmt.Fprintf(&b, " branch=%s", item.GitBranch)
+			}
+			if !item.Active {
+				b.WriteString(" inactive")
+			}
+			b.WriteByte('\n')
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(b.String()),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func createRoot(service *core.Service) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input struct {
+			ProjectID string `json:"project_id"`
+			ID        string `json:"id"`
+			Path      string `json:"path"`
+			Kind      string `json:"kind"`
+			GitRemote string `json:"git_remote"`
+			GitBranch string `json:"git_branch"`
+			Active    *bool  `json:"active"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		active := true
+		if input.Active != nil {
+			active = *input.Active
+		}
+		_, item, err := service.CreateRoot(ctx, input.ProjectID, core.Root{
+			ID:        input.ID,
+			Path:      input.Path,
+			Kind:      input.Kind,
+			GitRemote: input.GitRemote,
+			GitBranch: input.GitBranch,
+			Active:    active,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Created root %s for project %s", item.ID, strings.TrimSpace(input.ProjectID))),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func updateRoot(service *core.Service) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input struct {
+			ProjectID string  `json:"project_id"`
+			RootID    string  `json:"root_id"`
+			Path      *string `json:"path"`
+			Kind      *string `json:"kind"`
+			GitRemote *string `json:"git_remote"`
+			GitBranch *string `json:"git_branch"`
+			Active    *bool   `json:"active"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetRoot(ctx, input.ProjectID, input.RootID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if input.Path != nil {
+			item.Path = *input.Path
+		}
+		if input.Kind != nil {
+			item.Kind = *input.Kind
+		}
+		if input.GitRemote != nil {
+			item.GitRemote = *input.GitRemote
+		}
+		if input.GitBranch != nil {
+			item.GitBranch = *input.GitBranch
+		}
+		if input.Active != nil {
+			item.Active = *input.Active
+		}
+		_, item, err = service.UpdateRoot(ctx, input.ProjectID, input.RootID, item)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Updated root %s for project %s", item.ID, strings.TrimSpace(input.ProjectID))),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func deleteRoot(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		RootID    string `json:"root_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		_, deleted, err := service.DeleteRoot(ctx, input.ProjectID, input.RootID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Deleted root %s for project %s", deleted.ID, strings.TrimSpace(input.ProjectID))),
+			StructuredContent: deleted,
 		}, nil
 	}
 }

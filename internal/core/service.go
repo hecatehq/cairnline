@@ -114,6 +114,117 @@ func (s *Service) DeleteProject(ctx context.Context, id string) error {
 	return s.store.DeleteProject(ctx, id)
 }
 
+func (s *Service) ListRoots(ctx context.Context, projectID string) ([]Root, error) {
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]Root(nil), project.Roots...), nil
+}
+
+func (s *Service) GetRoot(ctx context.Context, projectID, id string) (Root, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Root{}, errors.Join(ErrInvalid, errors.New("root id is required"))
+	}
+	roots, err := s.ListRoots(ctx, projectID)
+	if err != nil {
+		return Root{}, err
+	}
+	return findProjectRoot(roots, id)
+}
+
+func (s *Service) CreateRoot(ctx context.Context, projectID string, input Root) (Project, Root, error) {
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	item, err := normalizeProjectRoot(input, true)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	for _, root := range project.Roots {
+		if strings.TrimSpace(root.ID) == item.ID {
+			return Project{}, Root{}, errors.Join(ErrDuplicate, errors.New("root id already exists"))
+		}
+	}
+	project.Roots = append(append([]Root(nil), project.Roots...), item)
+	updated, err := s.UpdateProject(ctx, project)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	created, err := findProjectRoot(updated.Roots, item.ID)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	return updated, created, nil
+}
+
+func (s *Service) UpdateRoot(ctx context.Context, projectID, id string, input Root) (Project, Root, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Project{}, Root{}, errors.Join(ErrInvalid, errors.New("root id is required"))
+	}
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	if _, err := findProjectRoot(project.Roots, id); err != nil {
+		return Project{}, Root{}, err
+	}
+	input.ID = id
+	item, err := normalizeProjectRoot(input, false)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	for idx := range project.Roots {
+		if strings.TrimSpace(project.Roots[idx].ID) == id {
+			project.Roots[idx] = item
+			break
+		}
+	}
+	updated, err := s.UpdateProject(ctx, project)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	next, err := findProjectRoot(updated.Roots, id)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	return updated, next, nil
+}
+
+func (s *Service) DeleteRoot(ctx context.Context, projectID, id string) (Project, Root, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Project{}, Root{}, errors.Join(ErrInvalid, errors.New("root id is required"))
+	}
+	project, err := s.GetProject(ctx, projectID)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	deleted, err := findProjectRoot(project.Roots, id)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	next := make([]Root, 0, len(project.Roots)-1)
+	for _, root := range project.Roots {
+		if strings.TrimSpace(root.ID) == id {
+			continue
+		}
+		next = append(next, root)
+	}
+	project.Roots = next
+	if strings.TrimSpace(project.DefaultRootID) == id {
+		project.DefaultRootID = ""
+	}
+	updated, err := s.UpdateProject(ctx, project)
+	if err != nil {
+		return Project{}, Root{}, err
+	}
+	return updated, deleted, nil
+}
+
 func (s *Service) ListContextSources(ctx context.Context, projectID string) ([]Source, error) {
 	project, err := s.GetProject(ctx, projectID)
 	if err != nil {
@@ -1957,6 +2068,38 @@ func normalizeRoots(values []Root) []Root {
 		})
 	}
 	return out
+}
+
+func normalizeProjectRoot(input Root, creating bool) (Root, error) {
+	id := strings.TrimSpace(input.ID)
+	if id == "" && creating {
+		id = newID("root")
+	}
+	if id == "" {
+		return Root{}, errors.Join(ErrInvalid, errors.New("root id is required"))
+	}
+	rootPath := strings.TrimSpace(input.Path)
+	if rootPath == "" {
+		return Root{}, errors.Join(ErrInvalid, errors.New("root path is required"))
+	}
+	return Root{
+		ID:        id,
+		Path:      filepath.Clean(rootPath),
+		Kind:      strings.TrimSpace(input.Kind),
+		GitRemote: strings.TrimSpace(input.GitRemote),
+		GitBranch: strings.TrimSpace(input.GitBranch),
+		Active:    input.Active,
+	}, nil
+}
+
+func findProjectRoot(roots []Root, id string) (Root, error) {
+	id = strings.TrimSpace(id)
+	for _, root := range roots {
+		if strings.TrimSpace(root.ID) == id {
+			return root, nil
+		}
+	}
+	return Root{}, ErrNotFound
 }
 
 func normalizeSources(values []Source, existing map[string]Source, now time.Time) []Source {

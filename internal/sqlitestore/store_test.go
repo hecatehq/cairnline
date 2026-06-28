@@ -468,6 +468,71 @@ func TestStore_ContextSourceMutationsPersist(t *testing.T) {
 	}
 }
 
+func TestStore_RootMutationsPersist(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "roots.db")
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Roots"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, _, err := service.CreateRoot(ctx, project.ID, core.Root{
+		ID:        "root_main",
+		Path:      "/workspace/main",
+		Kind:      "git",
+		GitRemote: "https://github.com/hecatehq/hecate",
+		GitBranch: "main",
+		Active:    true,
+	}); err != nil {
+		t.Fatalf("CreateRoot(main) error = %v", err)
+	}
+	if _, _, err := service.CreateRoot(ctx, project.ID, core.Root{
+		ID:     "root_other",
+		Path:   "/workspace/other",
+		Kind:   "folder",
+		Active: true,
+	}); err != nil {
+		t.Fatalf("CreateRoot(other) error = %v", err)
+	}
+	if _, _, err := service.UpdateRoot(ctx, project.ID, "root_main", core.Root{
+		Path:      "/workspace/.worktrees/root-api",
+		Kind:      "git_worktree",
+		GitBranch: "feature/root-api",
+		Active:    false,
+	}); err != nil {
+		t.Fatalf("UpdateRoot() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer reopened.Close()
+	reopenedService := core.NewService(reopened)
+	root, err := reopenedService.GetRoot(ctx, project.ID, "root_main")
+	if err != nil {
+		t.Fatalf("GetRoot() after reopen error = %v", err)
+	}
+	if root.Path != "/workspace/.worktrees/root-api" || root.Kind != "git_worktree" || root.GitBranch != "feature/root-api" || root.Active {
+		t.Fatalf("root after reopen = %+v, want updated inactive worktree metadata", root)
+	}
+	project, deleted, err := reopenedService.DeleteRoot(ctx, project.ID, "root_main")
+	if err != nil {
+		t.Fatalf("DeleteRoot() error = %v", err)
+	}
+	if deleted.ID != "root_main" || len(project.Roots) != 1 || project.Roots[0].ID != "root_other" || project.DefaultRootID != "root_other" {
+		t.Fatalf("deleted root=%+v project roots=%+v default=%q, want remaining root defaulted", deleted, project.Roots, project.DefaultRootID)
+	}
+}
+
 func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "project-delete.db"))

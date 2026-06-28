@@ -1673,6 +1673,100 @@ func TestMCPTools_ContextSources(t *testing.T) {
 	}
 }
 
+func TestMCPTools_Roots(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Root MCP"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "roots.create", map[string]any{
+		"project_id": project.ID,
+		"id":         "root_main",
+		"path":       "/workspace/main",
+		"kind":       "git",
+		"git_remote": "https://github.com/hecatehq/hecate",
+		"git_branch": "main",
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create root error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created root root_main") || !strings.Contains(output.String(), `"structuredContent"`) {
+		t.Fatalf("create root response = %s", output.String())
+	}
+	var createResponse struct {
+		Result struct {
+			StructuredContent core.Root `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode create root response: %v\n%s", err, output.String())
+	}
+	if createResponse.Result.StructuredContent.ID != "root_main" || createResponse.Result.StructuredContent.Path != "/workspace/main" || !createResponse.Result.StructuredContent.Active {
+		t.Fatalf("created root = %+v, want active root metadata", createResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 2, "roots.update", map[string]any{
+		"project_id": project.ID,
+		"root_id":    "root_main",
+		"path":       "/workspace/.worktrees/root-api",
+		"kind":       "git_worktree",
+		"git_branch": "feature/root-api",
+		"active":     false,
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update root error = %v", err)
+	}
+	var updateResponse struct {
+		Result struct {
+			StructuredContent core.Root `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &updateResponse); err != nil {
+		t.Fatalf("decode update root response: %v\n%s", err, output.String())
+	}
+	if updateResponse.Result.StructuredContent.Path != "/workspace/.worktrees/root-api" || updateResponse.Result.StructuredContent.Kind != "git_worktree" || updateResponse.Result.StructuredContent.GitBranch != "feature/root-api" || updateResponse.Result.StructuredContent.Active {
+		t.Fatalf("updated root = %+v, want inactive worktree root metadata", updateResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 3, "roots.list", map[string]any{"project_id": project.ID})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list roots error = %v", err)
+	}
+	var listResponse struct {
+		Result struct {
+			StructuredContent []core.Root `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &listResponse); err != nil {
+		t.Fatalf("decode list roots response: %v\n%s", err, output.String())
+	}
+	if len(listResponse.Result.StructuredContent) != 1 || listResponse.Result.StructuredContent[0].ID != "root_main" || !strings.Contains(output.String(), "inactive") {
+		t.Fatalf("listed roots = %+v response=%s, want inactive root_main", listResponse.Result.StructuredContent, output.String())
+	}
+
+	input = toolRequest(t, 4, "roots.delete", map[string]any{"project_id": project.ID, "root_id": "root_main"})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete root error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted root root_main") {
+		t.Fatalf("delete root response = %s", output.String())
+	}
+	roots, err := service.ListRoots(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListRoots() error = %v", err)
+	}
+	if len(roots) != 0 {
+		t.Fatalf("roots after delete = %+v, want none", roots)
+	}
+}
+
 func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
