@@ -70,8 +70,11 @@ type MemoryCandidate = core.MemoryCandidate
 type MemoryCandidateSourceRef = core.MemoryCandidateSourceRef
 type MemoryCandidateFilter = core.MemoryCandidateFilter
 type MemoryCandidatePromotion = core.MemoryCandidatePromotion
+type Snapshot = core.Snapshot
 
 const (
+	SnapshotVersion = core.SnapshotVersion
+
 	WorkStatusReady = core.WorkStatusReady
 	WorkStatusDone  = core.WorkStatusDone
 	PriorityNormal  = core.PriorityNormal

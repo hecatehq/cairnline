@@ -116,6 +116,35 @@ func TestPublicAPIOpensSQLiteStore(t *testing.T) {
 	}
 }
 
+func TestPublicAPIExposesSnapshotMigrationContract(t *testing.T) {
+	ctx := context.Background()
+	source := cairnline.NewMemoryService()
+	project, err := source.CreateProject(ctx, cairnline.Project{Name: "Snapshot public API"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := source.CreateWorkItem(ctx, cairnline.WorkItem{ProjectID: project.ID, Title: "Snapshot work"}); err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	snapshot, err := source.ExportSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("ExportSnapshot() error = %v", err)
+	}
+	var typedSnapshot cairnline.Snapshot = snapshot
+	if typedSnapshot.Version != cairnline.SnapshotVersion || len(typedSnapshot.Projects) != 1 || len(typedSnapshot.WorkItems) != 1 {
+		t.Fatalf("snapshot = %+v, want public snapshot with project and work item", typedSnapshot)
+	}
+
+	target := cairnline.NewMemoryService()
+	imported, err := target.ImportSnapshot(ctx, typedSnapshot)
+	if err != nil {
+		t.Fatalf("ImportSnapshot() error = %v", err)
+	}
+	if imported.Version != cairnline.SnapshotVersion || len(imported.Projects) != 1 || imported.Projects[0].ID != project.ID {
+		t.Fatalf("imported snapshot = %+v, want public snapshot import", imported)
+	}
+}
+
 func TestPublicAPIExposesAssistantProposalLedger(t *testing.T) {
 	ctx := context.Background()
 	service := cairnline.NewMemoryService()

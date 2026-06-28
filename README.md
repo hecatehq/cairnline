@@ -76,6 +76,10 @@ Implemented now:
   preserve created time and claim ownership while validating work-item, role,
   root, profile, and execution-profile references, plus source-level context
   metadata create/update/delete helpers that avoid whole-project replacement
+- embeddable snapshot export/import for migration rehearsals and bridge seeding;
+  snapshots cover profiles, execution profiles, projects, skills, roles, work,
+  assignments, artifacts, evidence, reviews, handoffs, memory entries,
+  memory candidates, and assistant proposal records
 - stdio MCP server with JSON-RPC framing
 - MCP resources:
   - `cairnline://projects/{project_id}`
@@ -183,8 +187,8 @@ Implemented now:
   protection for confirmed project-state mutations; applying a proposal can
   create queued assignment coordination records, but it does not launch or
   supervise agents
-- embeddable proposal-record import for migration and bridge seeding; import
-  preserves ledger state without replaying proposal actions
+- snapshot and proposal-record imports preserve assistant ledger state without
+  replaying proposal actions
 
 Planned next:
 
@@ -259,6 +263,24 @@ For tests or short-lived tools, use the in-memory service:
 service := cairnline.NewMemoryService()
 ```
 
+Embedded hosts can rehearse migration through snapshots:
+
+```go
+snapshot, err := source.ExportSnapshot(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+
+_, err = target.ImportSnapshot(ctx, snapshot)
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+Snapshot import is additive/upsert. It does not delete records that are absent
+from the snapshot, does not replay assistant proposal actions, and is not
+exposed as an MCP bulk mutation tool.
+
 ## MCP Client Config
 
 Use a durable SQLite database for normal local use:
@@ -313,7 +335,8 @@ following gates should be closed:
 
 - stable API/resource contracts for the coordination model
 - Hecate Projects API parity for current operator workflows
-- migration/import-export from Hecate's current local store
+- Hecate-specific migration mapping from its current local store into
+  Cairnline's portable snapshot format, plus rehearsal/rollback evidence
 - permission and path-boundary review for workspace-backed projects
 - adapter between Hecate task/external-agent execution records and Cairnline
   assignment coordination records
