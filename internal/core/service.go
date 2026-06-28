@@ -1673,7 +1673,15 @@ func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		statusChangedAt = existing.CreatedAt
 	}
 	if status != existing.Status {
-		statusChangedAt = updatedAt
+		existingStatusChangedAt := existing.StatusChangedAt
+		if existingStatusChangedAt.IsZero() {
+			existingStatusChangedAt = existing.CreatedAt
+		}
+		if input.StatusChangedAt.IsZero() || input.StatusChangedAt.Equal(existingStatusChangedAt) {
+			statusChangedAt = updatedAt
+		} else {
+			statusChangedAt = input.StatusChangedAt
+		}
 	}
 	item := Handoff{
 		ID:                    id,
