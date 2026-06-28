@@ -349,14 +349,19 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	if handoff.Status != HandoffStatusOpen {
 		t.Fatalf("handoff status = %q, want open", handoff.Status)
 	}
+	if !handoff.StatusChangedAt.Equal(handoff.CreatedAt) {
+		t.Fatalf("handoff status_changed_at = %s, want created_at %s", handoff.StatusChangedAt, handoff.CreatedAt)
+	}
 	got, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
 	if err != nil {
 		t.Fatalf("GetHandoff() error = %v", err)
 	}
+	acceptedAt := time.Date(2026, 6, 3, 12, 30, 0, 0, time.UTC)
 	got.Title = "Accepted for review"
 	got.Body = "Reviewer accepted the handoff."
 	got.Status = HandoffStatusAccepted
 	got.LinkedMemoryIDs = []string{"mem_1"}
+	got.UpdatedAt = acceptedAt
 	updated, err := service.UpdateHandoff(ctx, got)
 	if err != nil {
 		t.Fatalf("UpdateHandoff() error = %v", err)
@@ -364,12 +369,28 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	if updated.Status != HandoffStatusAccepted || updated.Title != "Accepted for review" || len(updated.LinkedMemoryIDs) != 1 {
 		t.Fatalf("updated handoff = %+v, want accepted replacement metadata", updated)
 	}
+	if !updated.StatusChangedAt.Equal(acceptedAt) {
+		t.Fatalf("updated status_changed_at = %s, want status update time %s", updated.StatusChangedAt, acceptedAt)
+	}
+	contentEditAt := time.Date(2026, 6, 3, 12, 35, 0, 0, time.UTC)
+	updated.Body = "Review context clarified."
+	updated.UpdatedAt = contentEditAt
+	contentUpdated, err := service.UpdateHandoff(ctx, updated)
+	if err != nil {
+		t.Fatalf("UpdateHandoff(content only) error = %v", err)
+	}
+	if !contentUpdated.StatusChangedAt.Equal(acceptedAt) {
+		t.Fatalf("content-only status_changed_at = %s, want preserved %s", contentUpdated.StatusChangedAt, acceptedAt)
+	}
 	superseded, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, HandoffStatusSuperseded)
 	if err != nil {
 		t.Fatalf("UpdateHandoffStatus() error = %v", err)
 	}
 	if superseded.Status != HandoffStatusSuperseded || superseded.Title != "Accepted for review" {
 		t.Fatalf("status-updated handoff = %+v, want superseded with text preserved", superseded)
+	}
+	if !superseded.StatusChangedAt.After(acceptedAt) {
+		t.Fatalf("superseded status_changed_at = %s, want after %s", superseded.StatusChangedAt, acceptedAt)
 	}
 	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
@@ -396,21 +417,26 @@ func TestService_HandoffImportPreservesTimestamps(t *testing.T) {
 	}
 	createdAt := time.Date(2026, 6, 3, 12, 6, 0, 0, time.UTC)
 	updatedAt := time.Date(2026, 6, 3, 12, 7, 0, 0, time.UTC)
+	statusChangedAt := time.Date(2026, 6, 3, 12, 6, 30, 0, time.UTC)
 	handoff, err := service.CreateHandoff(ctx, Handoff{
-		ID:         "handoff_imported",
-		ProjectID:  project.ID,
-		WorkItemID: work.ID,
-		Title:      "Imported handoff",
-		Body:       "Keep source timestamps.",
-		Status:     HandoffStatusOpen,
-		CreatedAt:  createdAt,
-		UpdatedAt:  updatedAt,
+		ID:              "handoff_imported",
+		ProjectID:       project.ID,
+		WorkItemID:      work.ID,
+		Title:           "Imported handoff",
+		Body:            "Keep source timestamps.",
+		Status:          HandoffStatusOpen,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+		StatusChangedAt: statusChangedAt,
 	})
 	if err != nil {
 		t.Fatalf("CreateHandoff() error = %v", err)
 	}
 	if !handoff.CreatedAt.Equal(createdAt) || !handoff.UpdatedAt.Equal(updatedAt) {
 		t.Fatalf("handoff timestamps = %s/%s, want %s/%s", handoff.CreatedAt, handoff.UpdatedAt, createdAt, updatedAt)
+	}
+	if !handoff.StatusChangedAt.Equal(statusChangedAt) {
+		t.Fatalf("handoff status_changed_at = %s, want %s", handoff.StatusChangedAt, statusChangedAt)
 	}
 
 	nextUpdatedAt := time.Date(2026, 6, 3, 12, 8, 0, 0, time.UTC)
@@ -422,6 +448,9 @@ func TestService_HandoffImportPreservesTimestamps(t *testing.T) {
 	}
 	if !updated.CreatedAt.Equal(createdAt) || !updated.UpdatedAt.Equal(nextUpdatedAt) {
 		t.Fatalf("updated handoff timestamps = %s/%s, want %s/%s", updated.CreatedAt, updated.UpdatedAt, createdAt, nextUpdatedAt)
+	}
+	if !updated.StatusChangedAt.Equal(statusChangedAt) {
+		t.Fatalf("updated handoff status_changed_at = %s, want preserved %s", updated.StatusChangedAt, statusChangedAt)
 	}
 }
 

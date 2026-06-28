@@ -823,19 +823,34 @@ func TestStore_HandoffLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateHandoff() error = %v", err)
 	}
+	if !handoff.StatusChangedAt.Equal(handoff.CreatedAt) {
+		t.Fatalf("handoff status_changed_at = %s, want created_at %s", handoff.StatusChangedAt, handoff.CreatedAt)
+	}
 	got, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
 	if err != nil {
 		t.Fatalf("GetHandoff() error = %v", err)
 	}
+	acceptedAt := time.Date(2026, 6, 3, 13, 30, 0, 0, time.UTC)
 	got.Status = core.HandoffStatusAccepted
 	got.Title = "Accepted for review"
 	got.LinkedMemoryIDs = []string{"mem_1"}
+	got.UpdatedAt = acceptedAt
 	updated, err := service.UpdateHandoff(ctx, got)
 	if err != nil {
 		t.Fatalf("UpdateHandoff() error = %v", err)
 	}
 	if updated.Status != core.HandoffStatusAccepted || updated.Title != "Accepted for review" || len(updated.LinkedMemoryIDs) != 1 {
 		t.Fatalf("updated handoff = %+v, want accepted replacement metadata", updated)
+	}
+	if !updated.StatusChangedAt.Equal(acceptedAt) {
+		t.Fatalf("updated status_changed_at = %s, want status update time %s", updated.StatusChangedAt, acceptedAt)
+	}
+	reloaded, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff(updated) error = %v", err)
+	}
+	if !reloaded.StatusChangedAt.Equal(acceptedAt) {
+		t.Fatalf("reloaded status_changed_at = %s, want %s", reloaded.StatusChangedAt, acceptedAt)
 	}
 	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, core.ErrInvalid) {
 		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)

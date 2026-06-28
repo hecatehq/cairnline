@@ -166,6 +166,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			trust_label TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
+			status_changed_at TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (project_id, id),
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
@@ -334,10 +335,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		{"context_refs_json", "TEXT NOT NULL DEFAULT '[]'"},
 		{"provenance_kind", "TEXT NOT NULL DEFAULT ''"},
 		{"trust_label", "TEXT NOT NULL DEFAULT ''"},
+		{"status_changed_at", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := s.ensureColumn(ctx, "handoffs", column.name, column.definition); err != nil {
 			return fmt.Errorf("migrate sqlite: %w", err)
 		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE handoffs SET status_changed_at = created_at WHERE status_changed_at = ''`); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	for _, column := range []struct {
 		name       string
@@ -1099,7 +1104,7 @@ func (s *Store) ListHandoffs(ctx context.Context, projectID, workItemID string) 
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at FROM handoffs WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at FROM handoffs WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
 	if err != nil {
 		return nil, err
 	}
@@ -1120,7 +1125,7 @@ func (s *Store) GetHandoff(ctx context.Context, projectID, workItemID, id string
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return core.Handoff{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
 	return scanHandoff(row)
 }
 
@@ -1170,8 +1175,8 @@ func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 	if err != nil {
 		return core.Handoff{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO handoffs (project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		handoff.ProjectID, handoff.ID, handoff.WorkItemID, handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID, handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID, handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs, handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO handoffs (project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		handoff.ProjectID, handoff.ID, handoff.WorkItemID, handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID, handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID, handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs, handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt), encodeTime(handoff.StatusChangedAt))
 	if err != nil {
 		return core.Handoff{}, mapSQLiteWriteError(err)
 	}
@@ -1224,8 +1229,8 @@ func (s *Store) UpdateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 	if err != nil {
 		return core.Handoff{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE handoffs SET source_assignment_id = ?, source_run_id = ?, source_chat_session_id = ?, source_message_id = ?, from_role_id = ?, to_role_id = ?, target_assignment_id = ?, target_work_item_id = ?, title = ?, body = ?, recommended_next_action = ?, linked_artifact_ids_json = ?, linked_memory_ids_json = ?, context_refs_json = ?, status = ?, provenance_kind = ?, trust_label = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND work_item_id = ? AND id = ?`,
-		handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID, handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID, handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs, handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt), handoff.ProjectID, handoff.WorkItemID, handoff.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE handoffs SET source_assignment_id = ?, source_run_id = ?, source_chat_session_id = ?, source_message_id = ?, from_role_id = ?, to_role_id = ?, target_assignment_id = ?, target_work_item_id = ?, title = ?, body = ?, recommended_next_action = ?, linked_artifact_ids_json = ?, linked_memory_ids_json = ?, context_refs_json = ?, status = ?, provenance_kind = ?, trust_label = ?, created_at = ?, updated_at = ?, status_changed_at = ? WHERE project_id = ? AND work_item_id = ? AND id = ?`,
+		handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID, handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID, handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs, handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt), encodeTime(handoff.StatusChangedAt), handoff.ProjectID, handoff.WorkItemID, handoff.ID)
 	if err != nil {
 		return core.Handoff{}, mapSQLiteWriteError(err)
 	}
@@ -1704,8 +1709,8 @@ func scanReview(row scanner) (core.Review, error) {
 
 func scanHandoff(row scanner) (core.Handoff, error) {
 	var item core.Handoff
-	var linkedArtifactIDsJSON, linkedMemoryIDsJSON, contextRefsJSON, createdAt, updatedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.SourceAssignmentID, &item.SourceRunID, &item.SourceChatSessionID, &item.SourceMessageID, &item.FromRoleID, &item.ToRoleID, &item.TargetAssignmentID, &item.TargetWorkItemID, &item.Title, &item.Body, &item.RecommendedNextAction, &linkedArtifactIDsJSON, &linkedMemoryIDsJSON, &contextRefsJSON, &item.Status, &item.ProvenanceKind, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
+	var linkedArtifactIDsJSON, linkedMemoryIDsJSON, contextRefsJSON, createdAt, updatedAt, statusChangedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.SourceAssignmentID, &item.SourceRunID, &item.SourceChatSessionID, &item.SourceMessageID, &item.FromRoleID, &item.ToRoleID, &item.TargetAssignmentID, &item.TargetWorkItemID, &item.Title, &item.Body, &item.RecommendedNextAction, &linkedArtifactIDsJSON, &linkedMemoryIDsJSON, &contextRefsJSON, &item.Status, &item.ProvenanceKind, &item.TrustLabel, &createdAt, &updatedAt, &statusChangedAt); err != nil {
 		return core.Handoff{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(linkedArtifactIDsJSON, &item.LinkedArtifactIDs); err != nil {
@@ -1723,6 +1728,12 @@ func scanHandoff(row scanner) (core.Handoff, error) {
 	}
 	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
 		return core.Handoff{}, err
+	}
+	if item.StatusChangedAt, err = decodeOptionalTime(statusChangedAt); err != nil {
+		return core.Handoff{}, err
+	}
+	if item.StatusChangedAt.IsZero() {
+		item.StatusChangedAt = item.CreatedAt
 	}
 	return item, nil
 }
