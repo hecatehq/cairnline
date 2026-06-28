@@ -1597,6 +1597,10 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff status is invalid"))
 	}
 	createdAt, updatedAt := importedTimestamps(input.CreatedAt, input.UpdatedAt, s.now())
+	statusChangedAt := input.StatusChangedAt
+	if statusChangedAt.IsZero() {
+		statusChangedAt = createdAt
+	}
 	item := Handoff{
 		ID:                    firstNonEmpty(strings.TrimSpace(input.ID), newID("handoff")),
 		ProjectID:             projectID,
@@ -1620,6 +1624,7 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		TrustLabel:            strings.TrimSpace(input.TrustLabel),
 		CreatedAt:             createdAt,
 		UpdatedAt:             updatedAt,
+		StatusChangedAt:       statusChangedAt,
 	}
 	return s.store.CreateHandoff(ctx, item)
 }
@@ -1660,6 +1665,16 @@ func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, er
 	if updatedAt.IsZero() {
 		updatedAt = s.now()
 	}
+	statusChangedAt := input.StatusChangedAt
+	if statusChangedAt.IsZero() {
+		statusChangedAt = existing.StatusChangedAt
+	}
+	if statusChangedAt.IsZero() {
+		statusChangedAt = existing.CreatedAt
+	}
+	if status != existing.Status {
+		statusChangedAt = updatedAt
+	}
 	item := Handoff{
 		ID:                    id,
 		ProjectID:             projectID,
@@ -1683,6 +1698,7 @@ func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, er
 		TrustLabel:            strings.TrimSpace(input.TrustLabel),
 		CreatedAt:             existing.CreatedAt,
 		UpdatedAt:             updatedAt,
+		StatusChangedAt:       statusChangedAt,
 	}
 	return s.store.UpdateHandoff(ctx, item)
 }

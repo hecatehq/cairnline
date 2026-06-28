@@ -549,6 +549,7 @@ type Handoff struct {
 	TrustLabel            string    `json:"trust_label,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
+	StatusChangedAt       time.Time `json:"status_changed_at,omitempty"`
 }
 
 type MemoryEntry struct {

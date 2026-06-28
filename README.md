@@ -56,8 +56,8 @@ Implemented now:
   profiles, work items, assignments with lifecycle timestamps, skill metadata,
   generic collaboration artifacts, assignment-scoped evidence with
   source/provider/external-id metadata, Hecate-compatible structured review
-  verdict/risk metadata, handoffs with source/target refs, accepted memory, and
-  memory candidates
+  verdict/risk metadata, handoffs with source/target refs and status-transition
+  timestamps, accepted memory, and memory candidates
 - in-memory service for projects, profiles, roles, work items, assignments,
   assistant proposal records including project-root/default-root actions, and
   collaboration artifacts
