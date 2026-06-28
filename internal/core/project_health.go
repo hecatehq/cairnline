@@ -222,7 +222,7 @@ func projectHealthSummary(project Project, setup ProjectSetupReadiness, operatio
 		switch review.Verdict {
 		case ReviewVerdictBlocked:
 			summary.BlockedReviewCount++
-		case ReviewVerdictConcerns:
+		case ReviewVerdictChangesRequested:
 			summary.ChangesRequestedReviewCount++
 		}
 	}

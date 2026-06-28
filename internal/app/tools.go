@@ -520,6 +520,15 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"path":{"type":"string"},
 				"root_id":{"type":"string"},
 				"format":{"type":"string","enum":["skill_md"]},
+				"suggested_tools":{"type":"array","items":{"type":"string"}},
+				"required_permissions":{
+					"type":"object",
+					"properties":{
+						"tools":{"type":"boolean"},
+						"writes":{"type":"boolean"},
+						"network":{"type":"boolean"}
+					}
+				},
 				"enabled":{"type":"boolean"},
 				"status":{"type":"string","enum":["available","missing","invalid","conflict"]},
 				"trust_label":{"type":"string"},
@@ -544,6 +553,15 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"path":{"type":"string"},
 				"root_id":{"type":"string"},
 				"format":{"type":"string","enum":["skill_md"]},
+				"suggested_tools":{"type":"array","items":{"type":"string"}},
+				"required_permissions":{
+					"type":"object",
+					"properties":{
+						"tools":{"type":"boolean"},
+						"writes":{"type":"boolean"},
+						"network":{"type":"boolean"}
+					}
+				},
 				"enabled":{"type":"boolean"},
 				"status":{"type":"string","enum":["available","missing","invalid","conflict"]},
 				"trust_label":{"type":"string"},
@@ -994,6 +1012,9 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"title":{"type":"string","minLength":1},
 				"body":{"type":"string"},
 				"locator":{"type":"string"},
+				"source_kind":{"type":"string"},
+				"external_id":{"type":"string"},
+				"provider":{"type":"string"},
 				"trust_label":{"type":"string"}
 			},
 			"required":["project_id","work_item_id","title"]
@@ -1044,8 +1065,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"reviewer_role_id":{"type":"string"},
 				"title":{"type":"string"},
 				"body":{"type":"string","minLength":1},
-				"verdict":{"type":"string","enum":["pass","concerns","blocked"]},
-				"risk":{"type":"string","enum":["low","medium","high"]}
+				"verdict":{"type":"string","enum":["approved","changes_requested","blocked","risk"]},
+				"risk":{"type":"string","enum":["low","medium","high","unknown"]}
 			},
 			"required":["project_id","work_item_id","body","verdict"]
 		}`),
@@ -3162,6 +3183,9 @@ func recordEvidence(service *core.Service) mcp.ToolHandler {
 		Title        string `json:"title"`
 		Body         string `json:"body"`
 		Locator      string `json:"locator"`
+		SourceKind   string `json:"source_kind"`
+		ExternalID   string `json:"external_id"`
+		Provider     string `json:"provider"`
 		TrustLabel   string `json:"trust_label"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
@@ -3176,6 +3200,9 @@ func recordEvidence(service *core.Service) mcp.ToolHandler {
 			Title:        input.Title,
 			Body:         input.Body,
 			Locator:      input.Locator,
+			SourceKind:   input.SourceKind,
+			ExternalID:   input.ExternalID,
+			Provider:     input.Provider,
 			TrustLabel:   input.TrustLabel,
 		})
 		if err != nil {
@@ -3872,18 +3899,20 @@ func formatLaunchPacketSummary(packet core.AssignmentLaunchPacket) string {
 }
 
 type projectSkillArgs struct {
-	ProjectID   string    `json:"project_id"`
-	ID          string    `json:"id"`
-	Title       *string   `json:"title"`
-	Description *string   `json:"description"`
-	Path        *string   `json:"path"`
-	RootID      *string   `json:"root_id"`
-	Format      *string   `json:"format"`
-	Enabled     *bool     `json:"enabled"`
-	Status      *string   `json:"status"`
-	TrustLabel  *string   `json:"trust_label"`
-	SourceRefs  *[]string `json:"source_refs"`
-	Warnings    *[]string `json:"warnings"`
+	ProjectID           string                    `json:"project_id"`
+	ID                  string                    `json:"id"`
+	Title               *string                   `json:"title"`
+	Description         *string                   `json:"description"`
+	Path                *string                   `json:"path"`
+	RootID              *string                   `json:"root_id"`
+	Format              *string                   `json:"format"`
+	SuggestedTools      *[]string                 `json:"suggested_tools"`
+	RequiredPermissions *core.RequiredPermissions `json:"required_permissions"`
+	Enabled             *bool                     `json:"enabled"`
+	Status              *string                   `json:"status"`
+	TrustLabel          *string                   `json:"trust_label"`
+	SourceRefs          *[]string                 `json:"source_refs"`
+	Warnings            *[]string                 `json:"warnings"`
 }
 
 func decodeCreateProjectSkillArgs(raw json.RawMessage) (core.ProjectSkill, error) {
@@ -3896,18 +3925,20 @@ func decodeCreateProjectSkillArgs(raw json.RawMessage) (core.ProjectSkill, error
 		enabled = *input.Enabled
 	}
 	return core.ProjectSkill{
-		ProjectID:   input.ProjectID,
-		ID:          input.ID,
-		Title:       stringValue(input.Title),
-		Description: stringValue(input.Description),
-		Path:        stringValue(input.Path),
-		RootID:      stringValue(input.RootID),
-		Format:      stringValue(input.Format),
-		Enabled:     enabled,
-		Status:      stringValue(input.Status),
-		TrustLabel:  stringValue(input.TrustLabel),
-		SourceRefs:  stringSliceValue(input.SourceRefs),
-		Warnings:    stringSliceValue(input.Warnings),
+		ProjectID:           input.ProjectID,
+		ID:                  input.ID,
+		Title:               stringValue(input.Title),
+		Description:         stringValue(input.Description),
+		Path:                stringValue(input.Path),
+		RootID:              stringValue(input.RootID),
+		Format:              stringValue(input.Format),
+		SuggestedTools:      stringSliceValue(input.SuggestedTools),
+		RequiredPermissions: requiredPermissionsValue(input.RequiredPermissions),
+		Enabled:             enabled,
+		Status:              stringValue(input.Status),
+		TrustLabel:          stringValue(input.TrustLabel),
+		SourceRefs:          stringSliceValue(input.SourceRefs),
+		Warnings:            stringSliceValue(input.Warnings),
 	}, nil
 }
 
@@ -3934,6 +3965,12 @@ func decodeUpdateProjectSkillArgs(ctx context.Context, service *core.Service, ra
 	}
 	if input.Format != nil {
 		existing.Format = *input.Format
+	}
+	if input.SuggestedTools != nil {
+		existing.SuggestedTools = *input.SuggestedTools
+	}
+	if input.RequiredPermissions != nil {
+		existing.RequiredPermissions = *input.RequiredPermissions
 	}
 	if input.Enabled != nil {
 		existing.Enabled = *input.Enabled
@@ -3967,6 +4004,13 @@ func stringSliceValue(value *[]string) []string {
 	return *value
 }
 
+func requiredPermissionsValue(value *core.RequiredPermissions) core.RequiredPermissions {
+	if value == nil {
+		return core.RequiredPermissions{}
+	}
+	return *value
+}
+
 func formatProjectSkills(title string, items []core.ProjectSkill) string {
 	if len(items) == 0 {
 		return "No project skills yet."
@@ -3981,12 +4025,35 @@ func formatProjectSkills(title string, items []core.ProjectSkill) string {
 		if item.Path != "" {
 			fmt.Fprintf(&b, " path=%s", item.Path)
 		}
+		if len(item.SuggestedTools) > 0 {
+			fmt.Fprintf(&b, " tools=%s", strings.Join(item.SuggestedTools, ","))
+		}
+		if permissions := formatRequiredPermissions(item.RequiredPermissions); permissions != "" {
+			fmt.Fprintf(&b, " permissions=%s", permissions)
+		}
 		if len(item.Warnings) > 0 {
 			fmt.Fprintf(&b, " warnings=%s", strings.Join(item.Warnings, "; "))
 		}
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func formatRequiredPermissions(permissions core.RequiredPermissions) string {
+	if permissions.Empty() {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if permissions.Tools != nil {
+		parts = append(parts, fmt.Sprintf("tools:%t", *permissions.Tools))
+	}
+	if permissions.Writes != nil {
+		parts = append(parts, fmt.Sprintf("writes:%t", *permissions.Writes))
+	}
+	if permissions.Network != nil {
+		parts = append(parts, fmt.Sprintf("network:%t", *permissions.Network))
+	}
+	return strings.Join(parts, ",")
 }
 
 func formatAssignments(title string, items []core.Assignment) string {
@@ -4049,6 +4116,15 @@ func formatEvidence(title string, items []core.Evidence) string {
 		}
 		if item.Locator != "" {
 			fmt.Fprintf(&b, " locator=%s", item.Locator)
+		}
+		if item.SourceKind != "" {
+			fmt.Fprintf(&b, " source=%s", item.SourceKind)
+		}
+		if item.ExternalID != "" {
+			fmt.Fprintf(&b, " external_id=%s", item.ExternalID)
+		}
+		if item.Provider != "" {
+			fmt.Fprintf(&b, " provider=%s", item.Provider)
 		}
 		if item.TrustLabel != "" {
 			fmt.Fprintf(&b, " trust=%s", item.TrustLabel)

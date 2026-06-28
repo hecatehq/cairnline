@@ -89,6 +89,8 @@ func (s *Store) migrate(ctx context.Context) error {
 			path TEXT NOT NULL DEFAULT '',
 			root_id TEXT NOT NULL DEFAULT '',
 			format TEXT NOT NULL,
+			suggested_tools_json TEXT NOT NULL DEFAULT '[]',
+			required_permissions_json TEXT NOT NULL DEFAULT '{}',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			status TEXT NOT NULL,
 			trust_label TEXT NOT NULL DEFAULT '',
@@ -144,6 +146,8 @@ func (s *Store) migrate(ctx context.Context) error {
 			context_snapshot_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
+			started_at TEXT NOT NULL DEFAULT '',
+			completed_at TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (project_id, id),
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE,
@@ -174,6 +178,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			title TEXT NOT NULL,
 			body TEXT NOT NULL DEFAULT '',
 			locator TEXT NOT NULL DEFAULT '',
+			source_kind TEXT NOT NULL DEFAULT '',
+			external_id TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
 			trust_label TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
@@ -288,11 +295,28 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "assignments", "root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
+	if err := s.ensureColumn(ctx, "assignments", "started_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	if err := s.ensureColumn(ctx, "assignments", "completed_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
 	if err := s.ensureColumn(ctx, "roles", "default_execution_profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	if err := s.ensureColumn(ctx, "project_skills", "suggested_tools_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	if err := s.ensureColumn(ctx, "project_skills", "required_permissions_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "evidence", "assignment_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
+	}
+	for _, column := range []string{"source_kind", "external_id", "provider"} {
+		if err := s.ensureColumn(ctx, "evidence", column, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate sqlite: %w", err)
+		}
 	}
 	for _, column := range []struct {
 		name       string
@@ -578,7 +602,7 @@ func (s *Store) ListProjectSkills(ctx context.Context, projectID string) ([]core
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, title, description, path, root_id, format, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at FROM project_skills WHERE project_id = ? ORDER BY id ASC`, projectID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, title, description, path, root_id, format, suggested_tools_json, required_permissions_json, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at FROM project_skills WHERE project_id = ? ORDER BY id ASC`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -599,11 +623,19 @@ func (s *Store) GetProjectSkill(ctx context.Context, projectID, id string) (core
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return core.ProjectSkill{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, title, description, path, root_id, format, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at FROM project_skills WHERE project_id = ? AND id = ?`, projectID, id)
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, title, description, path, root_id, format, suggested_tools_json, required_permissions_json, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at FROM project_skills WHERE project_id = ? AND id = ?`, projectID, id)
 	return scanProjectSkill(row)
 }
 
 func (s *Store) CreateProjectSkill(ctx context.Context, skill core.ProjectSkill) (core.ProjectSkill, error) {
+	suggestedTools, err := encodeJSON(skill.SuggestedTools)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	requiredPermissions, err := encodeJSON(skill.RequiredPermissions)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
 	sourceRefs, err := encodeJSON(skill.SourceRefs)
 	if err != nil {
 		return core.ProjectSkill{}, err
@@ -612,8 +644,8 @@ func (s *Store) CreateProjectSkill(ctx context.Context, skill core.ProjectSkill)
 	if err != nil {
 		return core.ProjectSkill{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO project_skills (project_id, id, title, description, path, root_id, format, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		skill.ProjectID, skill.ID, skill.Title, skill.Description, skill.Path, skill.RootID, skill.Format, skill.Enabled, skill.Status, skill.TrustLabel, sourceRefs, warnings, encodeOptionalTime(skill.DiscoveredAt), encodeTime(skill.CreatedAt), encodeTime(skill.UpdatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO project_skills (project_id, id, title, description, path, root_id, format, suggested_tools_json, required_permissions_json, enabled, status, trust_label, source_refs_json, warnings_json, discovered_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		skill.ProjectID, skill.ID, skill.Title, skill.Description, skill.Path, skill.RootID, skill.Format, suggestedTools, requiredPermissions, skill.Enabled, skill.Status, skill.TrustLabel, sourceRefs, warnings, encodeOptionalTime(skill.DiscoveredAt), encodeTime(skill.CreatedAt), encodeTime(skill.UpdatedAt))
 	if err != nil {
 		return core.ProjectSkill{}, mapSQLiteWriteError(err)
 	}
@@ -621,6 +653,14 @@ func (s *Store) CreateProjectSkill(ctx context.Context, skill core.ProjectSkill)
 }
 
 func (s *Store) UpdateProjectSkill(ctx context.Context, skill core.ProjectSkill) (core.ProjectSkill, error) {
+	suggestedTools, err := encodeJSON(skill.SuggestedTools)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
+	requiredPermissions, err := encodeJSON(skill.RequiredPermissions)
+	if err != nil {
+		return core.ProjectSkill{}, err
+	}
 	sourceRefs, err := encodeJSON(skill.SourceRefs)
 	if err != nil {
 		return core.ProjectSkill{}, err
@@ -629,8 +669,8 @@ func (s *Store) UpdateProjectSkill(ctx context.Context, skill core.ProjectSkill)
 	if err != nil {
 		return core.ProjectSkill{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE project_skills SET title = ?, description = ?, path = ?, root_id = ?, format = ?, enabled = ?, status = ?, trust_label = ?, source_refs_json = ?, warnings_json = ?, discovered_at = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
-		skill.Title, skill.Description, skill.Path, skill.RootID, skill.Format, skill.Enabled, skill.Status, skill.TrustLabel, sourceRefs, warnings, encodeOptionalTime(skill.DiscoveredAt), encodeTime(skill.CreatedAt), encodeTime(skill.UpdatedAt), skill.ProjectID, skill.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE project_skills SET title = ?, description = ?, path = ?, root_id = ?, format = ?, suggested_tools_json = ?, required_permissions_json = ?, enabled = ?, status = ?, trust_label = ?, source_refs_json = ?, warnings_json = ?, discovered_at = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
+		skill.Title, skill.Description, skill.Path, skill.RootID, skill.Format, suggestedTools, requiredPermissions, skill.Enabled, skill.Status, skill.TrustLabel, sourceRefs, warnings, encodeOptionalTime(skill.DiscoveredAt), encodeTime(skill.CreatedAt), encodeTime(skill.UpdatedAt), skill.ProjectID, skill.ID)
 	if err != nil {
 		return core.ProjectSkill{}, err
 	}
@@ -832,8 +872,8 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -845,8 +885,8 @@ func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, root_id = ?, profile_id = ?, execution_profile_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ? WHERE project_id = ? AND id = ?`,
-		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), assignment.ProjectID, assignment.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, root_id = ?, profile_id = ?, execution_profile_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ? WHERE project_id = ? AND id = ?`,
+		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -969,7 +1009,7 @@ func (s *Store) ListEvidence(ctx context.Context, projectID, workItemID string) 
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, title, body, locator, source_kind, external_id, provider, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
 	if err != nil {
 		return nil, err
 	}
@@ -990,13 +1030,13 @@ func (s *Store) GetEvidence(ctx context.Context, projectID, workItemID, id strin
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return core.Evidence{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, assignment_id, title, body, locator, source_kind, external_id, provider, trust_label, created_at, updated_at FROM evidence WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
 	return scanEvidence(row)
 }
 
 func (s *Store) CreateEvidence(ctx context.Context, evidence core.Evidence) (core.Evidence, error) {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, assignment_id, title, body, locator, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.AssignmentID, evidence.Title, evidence.Body, evidence.Locator, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, assignment_id, title, body, locator, source_kind, external_id, provider, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.AssignmentID, evidence.Title, evidence.Body, evidence.Locator, evidence.SourceKind, evidence.ExternalID, evidence.Provider, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
 	if err != nil {
 		return core.Evidence{}, mapSQLiteWriteError(err)
 	}
@@ -1457,7 +1497,7 @@ func (s *Store) UpdateAssistantProposal(ctx context.Context, record core.Assista
 	return record, nil
 }
 
-const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at FROM assignments`
+const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`
 
 const memoryCandidateSelectSQL = `SELECT project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at FROM memory_candidates`
 
@@ -1529,9 +1569,15 @@ func scanProject(row scanner) (core.Project, error) {
 
 func scanProjectSkill(row scanner) (core.ProjectSkill, error) {
 	var item core.ProjectSkill
-	var sourceRefsJSON, warningsJSON, discoveredAt, createdAt, updatedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Description, &item.Path, &item.RootID, &item.Format, &item.Enabled, &item.Status, &item.TrustLabel, &sourceRefsJSON, &warningsJSON, &discoveredAt, &createdAt, &updatedAt); err != nil {
+	var suggestedToolsJSON, requiredPermissionsJSON, sourceRefsJSON, warningsJSON, discoveredAt, createdAt, updatedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Title, &item.Description, &item.Path, &item.RootID, &item.Format, &suggestedToolsJSON, &requiredPermissionsJSON, &item.Enabled, &item.Status, &item.TrustLabel, &sourceRefsJSON, &warningsJSON, &discoveredAt, &createdAt, &updatedAt); err != nil {
 		return core.ProjectSkill{}, mapSQLiteReadError(err)
+	}
+	if err := decodeJSON(suggestedToolsJSON, &item.SuggestedTools); err != nil {
+		return core.ProjectSkill{}, err
+	}
+	if err := decodeJSON(requiredPermissionsJSON, &item.RequiredPermissions); err != nil {
+		return core.ProjectSkill{}, err
 	}
 	if err := decodeJSON(sourceRefsJSON, &item.SourceRefs); err != nil {
 		return core.ProjectSkill{}, err
@@ -1585,8 +1631,8 @@ func scanRole(row scanner) (core.Role, error) {
 
 func scanAssignment(row scanner) (core.Assignment, error) {
 	var item core.Assignment
-	var desiredAgentJSON, createdAt, updatedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ProfileID, &item.ExecutionProfileID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &item.ExecutionRef, &item.ContextSnapshotID, &createdAt, &updatedAt); err != nil {
+	var desiredAgentJSON, createdAt, updatedAt, startedAt, completedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ProfileID, &item.ExecutionProfileID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &item.ExecutionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
 		return core.Assignment{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(desiredAgentJSON, &item.DesiredAgent); err != nil {
@@ -1597,6 +1643,12 @@ func scanAssignment(row scanner) (core.Assignment, error) {
 		return core.Assignment{}, err
 	}
 	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
+		return core.Assignment{}, err
+	}
+	if item.StartedAt, err = decodeOptionalTime(startedAt); err != nil {
+		return core.Assignment{}, err
+	}
+	if item.CompletedAt, err = decodeOptionalTime(completedAt); err != nil {
 		return core.Assignment{}, err
 	}
 	return item, nil
@@ -1621,7 +1673,7 @@ func scanArtifact(row scanner) (core.Artifact, error) {
 func scanEvidence(row scanner) (core.Evidence, error) {
 	var item core.Evidence
 	var createdAt, updatedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.AssignmentID, &item.Title, &item.Body, &item.Locator, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.AssignmentID, &item.Title, &item.Body, &item.Locator, &item.SourceKind, &item.ExternalID, &item.Provider, &item.TrustLabel, &createdAt, &updatedAt); err != nil {
 		return core.Evidence{}, mapSQLiteReadError(err)
 	}
 	var err error

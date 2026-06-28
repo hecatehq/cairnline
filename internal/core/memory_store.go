@@ -243,7 +243,7 @@ func (s *MemoryStore) ListProjectSkills(ctx context.Context, projectID string) (
 	skillsByID := s.skills[projectID]
 	items := make([]ProjectSkill, 0, len(skillsByID))
 	for _, item := range skillsByID {
-		items = append(items, item)
+		items = append(items, cloneProjectSkill(item))
 	}
 	slices.SortFunc(items, func(a, b ProjectSkill) int {
 		return compareString(a.ID, b.ID)
@@ -262,7 +262,7 @@ func (s *MemoryStore) GetProjectSkill(ctx context.Context, projectID, id string)
 	if !ok {
 		return ProjectSkill{}, ErrNotFound
 	}
-	return item, nil
+	return cloneProjectSkill(item), nil
 }
 
 func (s *MemoryStore) CreateProjectSkill(ctx context.Context, skill ProjectSkill) (ProjectSkill, error) {
@@ -278,8 +278,8 @@ func (s *MemoryStore) CreateProjectSkill(ctx context.Context, skill ProjectSkill
 	if _, ok := s.skills[skill.ProjectID][skill.ID]; ok {
 		return ProjectSkill{}, ErrDuplicate
 	}
-	s.skills[skill.ProjectID][skill.ID] = skill
-	return skill, nil
+	s.skills[skill.ProjectID][skill.ID] = cloneProjectSkill(skill)
+	return cloneProjectSkill(skill), nil
 }
 
 func (s *MemoryStore) UpdateProjectSkill(ctx context.Context, skill ProjectSkill) (ProjectSkill, error) {
@@ -292,8 +292,8 @@ func (s *MemoryStore) UpdateProjectSkill(ctx context.Context, skill ProjectSkill
 	if _, ok := s.skills[skill.ProjectID][skill.ID]; !ok {
 		return ProjectSkill{}, ErrNotFound
 	}
-	s.skills[skill.ProjectID][skill.ID] = skill
-	return skill, nil
+	s.skills[skill.ProjectID][skill.ID] = cloneProjectSkill(skill)
+	return cloneProjectSkill(skill), nil
 }
 
 func (s *MemoryStore) ListWorkItems(ctx context.Context, projectID string) ([]WorkItem, error) {
@@ -1223,4 +1223,12 @@ func (s *MemoryStore) requireWorkItemLocked(projectID, workItemID string) error 
 		return ErrNotFound
 	}
 	return nil
+}
+
+func cloneProjectSkill(item ProjectSkill) ProjectSkill {
+	item.SuggestedTools = append([]string(nil), item.SuggestedTools...)
+	item.RequiredPermissions = cloneRequiredPermissions(item.RequiredPermissions)
+	item.SourceRefs = append([]string(nil), item.SourceRefs...)
+	item.Warnings = append([]string(nil), item.Warnings...)
+	return item
 }

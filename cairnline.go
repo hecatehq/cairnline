@@ -28,6 +28,7 @@ type Project = core.Project
 type Root = core.Root
 type Source = core.Source
 type ProjectSkill = core.ProjectSkill
+type RequiredPermissions = core.RequiredPermissions
 type Role = core.Role
 type AgentProfile = core.AgentProfile
 type ExecutionProfile = core.ExecutionProfile
@@ -97,17 +98,22 @@ const (
 	SkillStatusConflict  = core.SkillStatusConflict
 	SkillTrustWorkspace  = core.SkillTrustWorkspace
 	SkillPathAgents      = core.SkillPathAgents
+	SkillPathHecate      = core.SkillPathHecate
 	SkillPathCairnline   = core.SkillPathCairnline
 
 	EvidenceTrustOperator = core.EvidenceTrustOperator
 
-	ReviewVerdictPass     = core.ReviewVerdictPass
-	ReviewVerdictConcerns = core.ReviewVerdictConcerns
-	ReviewVerdictBlocked  = core.ReviewVerdictBlocked
-	ReviewRiskLow         = core.ReviewRiskLow
-	ReviewRiskMedium      = core.ReviewRiskMedium
-	ReviewRiskHigh        = core.ReviewRiskHigh
-	ReviewStatusRecorded  = core.ReviewStatusRecorded
+	ReviewVerdictApproved         = core.ReviewVerdictApproved
+	ReviewVerdictChangesRequested = core.ReviewVerdictChangesRequested
+	ReviewVerdictBlocked          = core.ReviewVerdictBlocked
+	ReviewVerdictRisk             = core.ReviewVerdictRisk
+	ReviewVerdictPass             = core.ReviewVerdictPass
+	ReviewVerdictConcerns         = core.ReviewVerdictConcerns
+	ReviewRiskLow                 = core.ReviewRiskLow
+	ReviewRiskMedium              = core.ReviewRiskMedium
+	ReviewRiskHigh                = core.ReviewRiskHigh
+	ReviewRiskUnknown             = core.ReviewRiskUnknown
+	ReviewStatusRecorded          = core.ReviewStatusRecorded
 
 	HandoffStatusOpen       = core.HandoffStatusOpen
 	HandoffStatusAccepted   = core.HandoffStatusAccepted

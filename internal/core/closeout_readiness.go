@@ -199,7 +199,7 @@ func workItemClosed(status string) bool {
 
 func reviewRequiresFollowUp(review Review) bool {
 	switch strings.TrimSpace(review.Verdict) {
-	case ReviewVerdictConcerns, ReviewVerdictBlocked:
+	case ReviewVerdictChangesRequested, ReviewVerdictBlocked:
 		return true
 	default:
 		return false

@@ -40,21 +40,33 @@ type Source struct {
 }
 
 type ProjectSkill struct {
-	ID           string    `json:"id"`
-	ProjectID    string    `json:"project_id"`
-	Title        string    `json:"title"`
-	Description  string    `json:"description,omitempty"`
-	Path         string    `json:"path"`
-	RootID       string    `json:"root_id,omitempty"`
-	Format       string    `json:"format"`
-	Enabled      bool      `json:"enabled"`
-	Status       string    `json:"status"`
-	TrustLabel   string    `json:"trust_label"`
-	SourceRefs   []string  `json:"source_refs,omitempty"`
-	Warnings     []string  `json:"warnings,omitempty"`
-	DiscoveredAt time.Time `json:"discovered_at,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                  string              `json:"id"`
+	ProjectID           string              `json:"project_id"`
+	Title               string              `json:"title"`
+	Description         string              `json:"description,omitempty"`
+	Path                string              `json:"path"`
+	RootID              string              `json:"root_id,omitempty"`
+	Format              string              `json:"format"`
+	SuggestedTools      []string            `json:"suggested_tools,omitempty"`
+	RequiredPermissions RequiredPermissions `json:"required_permissions,omitempty"`
+	Enabled             bool                `json:"enabled"`
+	Status              string              `json:"status"`
+	TrustLabel          string              `json:"trust_label"`
+	SourceRefs          []string            `json:"source_refs,omitempty"`
+	Warnings            []string            `json:"warnings,omitempty"`
+	DiscoveredAt        time.Time           `json:"discovered_at,omitempty"`
+	CreatedAt           time.Time           `json:"created_at"`
+	UpdatedAt           time.Time           `json:"updated_at"`
+}
+
+type RequiredPermissions struct {
+	Tools   *bool `json:"tools,omitempty"`
+	Writes  *bool `json:"writes,omitempty"`
+	Network *bool `json:"network,omitempty"`
+}
+
+func (permissions RequiredPermissions) Empty() bool {
+	return permissions.Tools == nil && permissions.Writes == nil && permissions.Network == nil
 }
 
 type Role struct {
@@ -425,6 +437,8 @@ type Assignment struct {
 	ContextSnapshotID  string       `json:"context_snapshot_id,omitempty"`
 	CreatedAt          time.Time    `json:"created_at"`
 	UpdatedAt          time.Time    `json:"updated_at"`
+	StartedAt          time.Time    `json:"started_at,omitempty"`
+	CompletedAt        time.Time    `json:"completed_at,omitempty"`
 }
 
 type AssignmentCompatibilityFilter struct {
@@ -489,6 +503,9 @@ type Evidence struct {
 	Title        string    `json:"title"`
 	Body         string    `json:"body,omitempty"`
 	Locator      string    `json:"locator,omitempty"`
+	SourceKind   string    `json:"source_kind,omitempty"`
+	ExternalID   string    `json:"external_id,omitempty"`
+	Provider     string    `json:"provider,omitempty"`
 	TrustLabel   string    `json:"trust_label,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -620,13 +637,18 @@ const (
 
 	EvidenceTrustOperator = "operator_provided"
 
-	ReviewVerdictPass     = "pass"
-	ReviewVerdictConcerns = "concerns"
-	ReviewVerdictBlocked  = "blocked"
-	ReviewRiskLow         = "low"
-	ReviewRiskMedium      = "medium"
-	ReviewRiskHigh        = "high"
-	ReviewStatusRecorded  = "recorded"
+	ReviewVerdictApproved         = "approved"
+	ReviewVerdictChangesRequested = "changes_requested"
+	ReviewVerdictBlocked          = "blocked"
+	ReviewVerdictRisk             = "risk"
+	ReviewRiskLow                 = "low"
+	ReviewRiskMedium              = "medium"
+	ReviewRiskHigh                = "high"
+	ReviewRiskUnknown             = "unknown"
+	ReviewStatusRecorded          = "recorded"
+
+	ReviewVerdictPass     = ReviewVerdictApproved
+	ReviewVerdictConcerns = ReviewVerdictChangesRequested
 
 	MemoryTrustOperator   = "operator_memory"
 	MemoryTrustGenerated  = "generated_summary"
