@@ -46,6 +46,12 @@ policy, credential handling, or logged-in session boundaries. Secrets, cookies,
 provider credentials, and external-agent private memory are outside Cairnline's
 core model.
 
+Role references are durable coordination metadata rather than hard ownership.
+Creating or updating an assignment validates the role at write time, but deleting
+a role does not delete or block historical assignments that still carry that
+role id. Context and launch-packet reads surface missing-role warnings so
+operators can repair or preserve the historical record deliberately.
+
 ## Current Slice
 
 Implemented now:
