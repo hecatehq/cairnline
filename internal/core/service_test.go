@@ -452,6 +452,18 @@ func TestService_HandoffImportPreservesTimestamps(t *testing.T) {
 	if !updated.StatusChangedAt.Equal(statusChangedAt) {
 		t.Fatalf("updated handoff status_changed_at = %s, want preserved %s", updated.StatusChangedAt, statusChangedAt)
 	}
+
+	importedStatusChangedAt := time.Date(2026, 6, 3, 12, 8, 30, 0, time.UTC)
+	updated.Status = HandoffStatusAccepted
+	updated.UpdatedAt = nextUpdatedAt.Add(time.Minute)
+	updated.StatusChangedAt = importedStatusChangedAt
+	statusUpdated, err := service.UpdateHandoff(ctx, updated)
+	if err != nil {
+		t.Fatalf("UpdateHandoff(imported status change) error = %v", err)
+	}
+	if !statusUpdated.StatusChangedAt.Equal(importedStatusChangedAt) {
+		t.Fatalf("imported status_changed_at = %s, want %s", statusUpdated.StatusChangedAt, importedStatusChangedAt)
+	}
 }
 
 func TestService_CreateWorkItemValidatesProject(t *testing.T) {

@@ -852,6 +852,24 @@ func TestStore_HandoffLifecycle(t *testing.T) {
 	if !reloaded.StatusChangedAt.Equal(acceptedAt) {
 		t.Fatalf("reloaded status_changed_at = %s, want %s", reloaded.StatusChangedAt, acceptedAt)
 	}
+	importedStatusChangedAt := time.Date(2026, 6, 3, 13, 40, 0, 0, time.UTC)
+	reloaded.Status = core.HandoffStatusSuperseded
+	reloaded.UpdatedAt = acceptedAt.Add(15 * time.Minute)
+	reloaded.StatusChangedAt = importedStatusChangedAt
+	importedUpdate, err := service.UpdateHandoff(ctx, reloaded)
+	if err != nil {
+		t.Fatalf("UpdateHandoff(imported status change) error = %v", err)
+	}
+	if !importedUpdate.StatusChangedAt.Equal(importedStatusChangedAt) {
+		t.Fatalf("imported status_changed_at = %s, want %s", importedUpdate.StatusChangedAt, importedStatusChangedAt)
+	}
+	reloaded, err = service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff(imported status change) error = %v", err)
+	}
+	if !reloaded.StatusChangedAt.Equal(importedStatusChangedAt) {
+		t.Fatalf("reloaded imported status_changed_at = %s, want %s", reloaded.StatusChangedAt, importedStatusChangedAt)
+	}
 	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, core.ErrInvalid) {
 		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
 	}
