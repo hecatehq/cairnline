@@ -822,6 +822,111 @@ func TestService_ProjectSkillsDiscoveryUsesGuidanceLinkedRoots(t *testing.T) {
 	}
 }
 
+func TestService_ProjectSkillsDiscoveryRejectsUnsafeGuidancePaths(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	root := t.TempDir()
+	writeSkill(t, root, "docs-ai/skills", "safe", "# Safe Skill\n")
+	writeSkill(t, root, ".worktrees/refactor/docs-ai/skills", "worktree", "# Worktree Skill\n")
+	writeSkill(t, root, ".claude/worktrees/refactor/docs-ai/skills", "claude-worktree", "# Claude Worktree Skill\n")
+	writeSkill(t, root, "absolute-source/skills", "absolute-source", "# Absolute Source Skill\n")
+	writeProjectTestFile(t, root, "AGENTS.md", strings.Join([]string{
+		"Use docs-ai/skills/safe/SKILL.md.",
+		"Ignore ../outside/skills/escape/SKILL.md.",
+		"Ignore /tmp/outside/skills/absolute/SKILL.md.",
+		"Ignore https://example.com/skills/cloud/SKILL.md.",
+		"Ignore .worktrees/refactor/docs-ai/skills/worktree/SKILL.md.",
+		"Ignore .claude/worktrees/refactor/docs-ai/skills/claude-worktree/SKILL.md.",
+	}, "\n"))
+	writeProjectTestFile(t, root, "ABSOLUTE.md", "Use absolute-source/skills/absolute-source/SKILL.md.\n")
+	writeProjectTestFile(t, root, ".worktrees/refactor/AGENTS.md", "Use docs-ai/skills/worktree-source/SKILL.md.\n")
+
+	project, err := service.CreateProject(ctx, Project{
+		Name: "Unsafe guidance paths",
+		Roots: []Root{{
+			ID:     "root_main",
+			Path:   root,
+			Kind:   "workspace",
+			Active: true,
+		}},
+		ContextSources: []Source{
+			{
+				ID:      "src_agents",
+				Kind:    "workspace_instruction",
+				Title:   "AGENTS.md",
+				Locator: "AGENTS.md",
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+			{
+				ID:      "src_absolute",
+				Kind:    "workspace_instruction",
+				Title:   "Absolute guidance",
+				Locator: filepath.Join(root, "ABSOLUTE.md"),
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+			{
+				ID:      "src_parent",
+				Kind:    "workspace_instruction",
+				Title:   "Parent guidance",
+				Locator: "../outside/AGENTS.md",
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+			{
+				ID:      "src_url",
+				Kind:    "workspace_instruction",
+				Title:   "Remote guidance",
+				Locator: "https://example.com/AGENTS.md",
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+			{
+				ID:      "src_worktree",
+				Kind:    "workspace_instruction",
+				Title:   "Worktree guidance",
+				Locator: ".worktrees/refactor/AGENTS.md",
+				Enabled: true,
+				Format:  "agents_md",
+				Metadata: map[string]string{
+					"root_id": "root_main",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	skills, err := service.DiscoverProjectSkills(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("DiscoverProjectSkills() error = %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("skills = %+v, want only the safe guidance-linked skill", skills)
+	}
+	if safe := findProjectSkillForTest(skills, "safe"); safe == nil || safe.Path != "docs-ai/skills/safe/SKILL.md" || !containsString(safe.SourceRefs, "src_agents") {
+		t.Fatalf("safe skill = %+v, want AGENTS.md-linked skill with source ref", safe)
+	}
+	for _, id := range []string{"worktree", "claude-worktree", "absolute-source"} {
+		if skill := findProjectSkillForTest(skills, id); skill != nil {
+			t.Fatalf("unsafe skill %q = %+v, want skipped", id, skill)
+		}
+	}
+}
+
 func TestService_ProjectSkillsRediscoveryPreservesOperatorOverridesAndRefreshesSourceRefs(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
