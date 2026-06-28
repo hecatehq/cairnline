@@ -20,6 +20,31 @@ local MCP server, but its contracts are not stable yet.
   orchestration.
 - Keep Hecate-specific runtime behavior out of the portable core.
 
+## Security Boundaries
+
+Cairnline is local-first and single-operator by default. It stores coordination
+state and exposes it over MCP, so clients should treat mutating tools as durable
+state changes that need the same care as editing a project database.
+
+Project roots are optional metadata until a feature explicitly needs local
+files. Current skill discovery is the main local-read path: it reads bounded
+guidance files from active roots, discovers local `SKILL.md` metadata, and skips
+absolute paths, parent traversal, remote URLs, and hidden worktree folders. It
+does not store, inject, execute, install, or fetch skill bodies. Skill metadata
+is not permission to enable tools, writes, network access, approvals, or
+sandbox escapes.
+
+Source locators, evidence locators, and evidence URLs are operator-provided
+metadata. Cairnline stores them as-is and does not fetch or render them.
+Clients must validate schemes before displaying a locator as a clickable link or
+before opening/fetching it.
+
+Assignments are coordination records. Claiming or reading an assignment does not
+authorize an agent host to bypass its own sandboxing, approval policy, network
+policy, credential handling, or logged-in session boundaries. Secrets, cookies,
+provider credentials, and external-agent private memory are outside Cairnline's
+core model.
+
 ## Current Slice
 
 Implemented now:
