@@ -681,7 +681,7 @@ func TestStore_DeleteProfilesAndRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRole(spare) error = %v", err)
 	}
-	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Keep referenced role"})
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Keep historical assignment"})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
@@ -692,14 +692,15 @@ func TestStore_DeleteProfilesAndRoles(t *testing.T) {
 	if err := service.DeleteRole(ctx, project.ID, spareRole.ID); err != nil {
 		t.Fatalf("DeleteRole(spare) error = %v", err)
 	}
-	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, core.ErrConflict) {
-		t.Fatalf("DeleteRole(referenced) error = %v, want ErrConflict", err)
-	}
-	if err := service.DeleteAssignment(ctx, project.ID, assignment.ID); err != nil {
-		t.Fatalf("DeleteAssignment() error = %v", err)
-	}
 	if err := service.DeleteRole(ctx, project.ID, role.ID); err != nil {
-		t.Fatalf("DeleteRole(unreferenced) error = %v", err)
+		t.Fatalf("DeleteRole(referenced) error = %v", err)
+	}
+	context, err := service.AssignmentContext(ctx, project.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("AssignmentContext() after role delete error = %v", err)
+	}
+	if context.Assignment.RoleID != role.ID || context.Role != nil || !containsString(context.Warnings, "assignment role was not found") {
+		t.Fatalf("assignment context after role delete = %+v, want durable assignment with missing-role warning", context)
 	}
 	roles, err := service.ListRoles(ctx, project.ID)
 	if err != nil {
@@ -707,6 +708,9 @@ func TestStore_DeleteProfilesAndRoles(t *testing.T) {
 	}
 	if len(roles) != 0 {
 		t.Fatalf("roles after deletes = %+v, want none", roles)
+	}
+	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("DeleteRole(deleted) error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1195,6 +1199,92 @@ func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
 	}
 }
 
+func TestStore_MigrateMakesAssignmentRoleSoftReference(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "role-fk.db")
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(seed) error = %v", err)
+	}
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Role FK migration"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Persist assignment"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close seed store error = %v", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatalf("disable foreign keys error = %v", err)
+	}
+	_, err = db.ExecContext(ctx, `DROP TABLE assignments`)
+	if err != nil {
+		t.Fatalf("drop assignments error = %v", err)
+	}
+	_, err = db.ExecContext(ctx, `CREATE TABLE assignments (
+		project_id TEXT NOT NULL,
+		id TEXT NOT NULL,
+		work_item_id TEXT NOT NULL,
+		role_id TEXT NOT NULL,
+		profile_id TEXT NOT NULL DEFAULT '',
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		execution_mode TEXT NOT NULL,
+		status TEXT NOT NULL,
+		desired_agent_json TEXT NOT NULL DEFAULT '{}',
+		claimed_by TEXT NOT NULL DEFAULT '',
+		execution_ref TEXT NOT NULL DEFAULT '',
+		context_snapshot_id TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (project_id, id),
+		FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+		FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE,
+		FOREIGN KEY (project_id, role_id) REFERENCES roles(project_id, id) ON DELETE RESTRICT
+	)`)
+	if err != nil {
+		t.Fatalf("create old assignments table error = %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, execution_mode, status, desired_agent_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		project.ID, "asgn_legacy", work.ID, role.ID, core.ExecutionMCPPull, core.AssignmentQueued, `{}`, now, now)
+	if err != nil {
+		t.Fatalf("insert legacy assignment error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old db error = %v", err)
+	}
+
+	store, err = Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(migrate) error = %v", err)
+	}
+	defer store.Close()
+	service = core.NewService(store)
+	if err := service.DeleteRole(ctx, project.ID, role.ID); err != nil {
+		t.Fatalf("DeleteRole(referenced after migration) error = %v", err)
+	}
+	context, err := service.AssignmentContext(ctx, project.ID, "asgn_legacy")
+	if err != nil {
+		t.Fatalf("AssignmentContext() after migrated role delete error = %v", err)
+	}
+	if context.Assignment.RoleID != role.ID || context.Role != nil || !containsString(context.Warnings, "assignment role was not found") {
+		t.Fatalf("assignment context after migrated role delete = %+v, want historical assignment with missing-role warning", context)
+	}
+}
+
 func TestStore_MigrateAddsProjectDefaultColumns(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "old-project.db")
@@ -1339,6 +1429,39 @@ func TestStore_CreateAssignmentValidatesReferences(t *testing.T) {
 	if !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("CreateAssignment() error = %v, want ErrNotFound", err)
 	}
+	if _, err := store.CreateAssignment(ctx, core.Assignment{
+		ID:         "asgn_direct_missing_role",
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     "role_missing",
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.CreateAssignment(missing role) error = %v, want ErrNotFound", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{
+		ProjectID: project.ID,
+		Name:      "Reviewer",
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(valid) error = %v", err)
+	}
+	missingRoleAssignment := assignment
+	missingRoleAssignment.RoleID = "role_missing"
+	if _, err := store.UpdateAssignment(ctx, missingRoleAssignment); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.UpdateAssignment(missing role) error = %v, want ErrNotFound", err)
+	}
+	missingWorkAssignment := assignment
+	missingWorkAssignment.WorkItemID = "work_missing"
+	if _, err := store.UpdateAssignment(ctx, missingWorkAssignment); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.UpdateAssignment(missing work item) error = %v, want ErrNotFound", err)
+	}
 }
 
 func TestStore_PersistsAssistantProposalLedger(t *testing.T) {
@@ -1452,4 +1575,13 @@ func TestStore_CreateReviewValidatesAssignmentWorkItem(t *testing.T) {
 
 func boolPointerForStoreTest(value bool) *bool {
 	return &value
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

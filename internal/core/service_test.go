@@ -562,7 +562,7 @@ func TestService_ProfileLifecycle(t *testing.T) {
 	}
 }
 
-func TestService_DeleteRoleRequiresNoAssignments(t *testing.T) {
+func TestService_DeleteRoleAllowsHistoricalAssignments(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 
@@ -578,7 +578,7 @@ func TestService_DeleteRoleRequiresNoAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRole(spare) error = %v", err)
 	}
-	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Keep referenced roles"})
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Keep historical assignments"})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
@@ -598,29 +598,22 @@ func TestService_DeleteRoleRequiresNoAssignments(t *testing.T) {
 		t.Fatalf("roles after spare delete = %+v, want referenced role only", roles)
 	}
 
-	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, ErrConflict) {
-		t.Fatalf("DeleteRole(referenced) error = %v, want ErrConflict", err)
-	}
-	roles, err = service.ListRoles(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("ListRoles() after conflict error = %v", err)
-	}
-	if len(roles) != 1 || roles[0].ID != role.ID {
-		t.Fatalf("roles after conflict = %+v, want referenced role preserved", roles)
-	}
-
-	if err := service.DeleteAssignment(ctx, project.ID, assignment.ID); err != nil {
-		t.Fatalf("DeleteAssignment() error = %v", err)
-	}
 	if err := service.DeleteRole(ctx, project.ID, role.ID); err != nil {
-		t.Fatalf("DeleteRole(unreferenced) error = %v", err)
+		t.Fatalf("DeleteRole(referenced) error = %v", err)
 	}
 	roles, err = service.ListRoles(ctx, project.ID)
 	if err != nil {
-		t.Fatalf("ListRoles() after role delete error = %v", err)
+		t.Fatalf("ListRoles() after referenced delete error = %v", err)
 	}
 	if len(roles) != 0 {
-		t.Fatalf("roles after role delete = %+v, want none", roles)
+		t.Fatalf("roles after referenced delete = %+v, want none", roles)
+	}
+	context, err := service.AssignmentContext(ctx, project.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("AssignmentContext() after role delete error = %v", err)
+	}
+	if context.Assignment.RoleID != role.ID || context.Role != nil || !containsString(context.Warnings, "assignment role was not found") {
+		t.Fatalf("assignment context after role delete = %+v, want durable assignment with missing-role warning", context)
 	}
 	if err := service.DeleteRole(ctx, project.ID, role.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("DeleteRole(deleted) error = %v, want ErrNotFound", err)

@@ -150,8 +150,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			completed_at TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (project_id, id),
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE,
-			FOREIGN KEY (project_id, role_id) REFERENCES roles(project_id, id) ON DELETE RESTRICT
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS artifacts (
 			project_id TEXT NOT NULL,
@@ -302,6 +301,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "assignments", "completed_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
+	if err := s.ensureAssignmentRoleSoftReference(ctx); err != nil {
+		return fmt.Errorf("migrate sqlite: %w", err)
+	}
 	if err := s.ensureColumn(ctx, "roles", "default_execution_profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
@@ -389,6 +391,90 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, definition stri
 	}
 	_, err = s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition)
 	return err
+}
+
+func (s *Store) ensureAssignmentRoleSoftReference(ctx context.Context) error {
+	hasRoleFK, err := s.assignmentRoleForeignKeyExists(ctx)
+	if err != nil {
+		return err
+	}
+	if !hasRoleFK {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = s.db.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`)
+	}()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	statements := []string{
+		`DROP TABLE IF EXISTS assignments_new`,
+		`CREATE TABLE assignments_new (
+			project_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			work_item_id TEXT NOT NULL,
+			role_id TEXT NOT NULL,
+			root_id TEXT NOT NULL DEFAULT '',
+			profile_id TEXT NOT NULL DEFAULT '',
+			execution_profile_id TEXT NOT NULL DEFAULT '',
+			execution_mode TEXT NOT NULL,
+			status TEXT NOT NULL,
+			desired_agent_json TEXT NOT NULL DEFAULT '{}',
+			claimed_by TEXT NOT NULL DEFAULT '',
+			execution_ref TEXT NOT NULL DEFAULT '',
+			context_snapshot_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			started_at TEXT NOT NULL DEFAULT '',
+			completed_at TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (project_id, id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO assignments_new (project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at)
+			SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`,
+		`DROP TABLE assignments`,
+		`ALTER TABLE assignments_new RENAME TO assignments`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (s *Store) assignmentRoleForeignKeyExists(ctx context.Context) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA foreign_key_list(assignments)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, seq int
+		var tableName, fromColumn, toColumn, onUpdate, onDelete, match string
+		if err := rows.Scan(&id, &seq, &tableName, &fromColumn, &toColumn, &onUpdate, &onDelete, &match); err != nil {
+			return false, err
+		}
+		if tableName == "roles" && fromColumn == "role_id" {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]core.Project, error) {
@@ -829,13 +915,6 @@ func (s *Store) DeleteRole(ctx context.Context, projectID, id string) error {
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return err
 	}
-	var assignmentCount int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM assignments WHERE project_id = ? AND role_id = ?`, projectID, id).Scan(&assignmentCount); err != nil {
-		return err
-	}
-	if assignmentCount > 0 {
-		return core.ErrConflict
-	}
 	result, err := s.db.ExecContext(ctx, `DELETE FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return mapSQLiteWriteError(err)
@@ -873,6 +952,12 @@ func (s *Store) GetAssignment(ctx context.Context, projectID, id string) (core.A
 }
 
 func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+	if err := s.requireWorkItem(ctx, assignment.ProjectID, assignment.WorkItemID); err != nil {
+		return core.Assignment{}, err
+	}
+	if err := s.requireRole(ctx, assignment.ProjectID, assignment.RoleID); err != nil {
+		return core.Assignment{}, err
+	}
 	desiredAgent, err := encodeJSON(assignment.DesiredAgent)
 	if err != nil {
 		return core.Assignment{}, err
@@ -886,6 +971,12 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 }
 
 func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+	if err := s.requireWorkItem(ctx, assignment.ProjectID, assignment.WorkItemID); err != nil {
+		return core.Assignment{}, err
+	}
+	if err := s.requireRole(ctx, assignment.ProjectID, assignment.RoleID); err != nil {
+		return core.Assignment{}, err
+	}
 	desiredAgent, err := encodeJSON(assignment.DesiredAgent)
 	if err != nil {
 		return core.Assignment{}, err
@@ -1818,6 +1909,15 @@ func (s *Store) requireProject(ctx context.Context, projectID string) error {
 func (s *Store) requireWorkItem(ctx context.Context, projectID, workItemID string) error {
 	var id string
 	err := s.db.QueryRowContext(ctx, `SELECT id FROM work_items WHERE project_id = ? AND id = ?`, projectID, workItemID).Scan(&id)
+	return mapSQLiteReadError(err)
+}
+
+func (s *Store) requireRole(ctx context.Context, projectID, roleID string) error {
+	if roleID == "" {
+		return nil
+	}
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM roles WHERE project_id = ? AND id = ?`, projectID, roleID).Scan(&id)
 	return mapSQLiteReadError(err)
 }
 

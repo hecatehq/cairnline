@@ -471,11 +471,6 @@ func (s *MemoryStore) DeleteRole(ctx context.Context, projectID, id string) erro
 	if _, ok := s.roles[projectID][id]; !ok {
 		return ErrNotFound
 	}
-	for _, assignment := range s.assignments[projectID] {
-		if assignment.RoleID == id {
-			return ErrConflict
-		}
-	}
 	delete(s.roles[projectID], id)
 	return nil
 }
@@ -543,6 +538,14 @@ func (s *MemoryStore) UpdateAssignment(ctx context.Context, assignment Assignmen
 
 	if _, ok := s.projects[assignment.ProjectID]; !ok {
 		return Assignment{}, ErrNotFound
+	}
+	if _, ok := s.workItems[assignment.ProjectID][assignment.WorkItemID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if assignment.RoleID != "" {
+		if _, ok := s.roles[assignment.ProjectID][assignment.RoleID]; !ok {
+			return Assignment{}, ErrNotFound
+		}
 	}
 	if _, ok := s.assignments[assignment.ProjectID][assignment.ID]; !ok {
 		return Assignment{}, ErrNotFound

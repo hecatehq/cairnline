@@ -935,6 +935,12 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
 		return Assignment{}, err
 	}
+	if _, err := s.store.GetWorkItem(ctx, projectID, workItemID); err != nil {
+		return Assignment{}, err
+	}
+	if _, err := s.store.GetRole(ctx, projectID, roleID); err != nil {
+		return Assignment{}, err
+	}
 	profileID := strings.TrimSpace(input.ProfileID)
 	if profileID != "" {
 		if _, err := s.store.GetAgentProfile(ctx, profileID); err != nil {
