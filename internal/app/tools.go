@@ -120,6 +120,78 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, deleteProject(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "context_sources.list",
+		Title:       "List context sources",
+		Description: "List metadata-only project context sources such as guidance files, notes, URLs, or operator-provided references.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{"project_id":{"type":"string","minLength":1}},
+			"required":["project_id"]
+		}`),
+		Annotations: readOnly,
+	}, listContextSources(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "context_sources.create",
+		Title:       "Create context source",
+		Description: "Create a metadata-only project context source. Cairnline stores the locator but does not fetch or inject source content.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"id":{"type":"string"},
+				"kind":{"type":"string"},
+				"title":{"type":"string"},
+				"locator":{"type":"string","minLength":1},
+				"enabled":{"type":"boolean"},
+				"format":{"type":"string"},
+				"scope":{"type":"string"},
+				"trust_label":{"type":"string"},
+				"source_category":{"type":"string"},
+				"metadata":{"type":"object","additionalProperties":{"type":"string"}}
+			},
+			"required":["project_id","locator"]
+		}`),
+	}, createContextSource(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "context_sources.update",
+		Title:       "Update context source",
+		Description: "Patch a metadata-only project context source without replacing the whole project record.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"source_id":{"type":"string","minLength":1},
+				"kind":{"type":"string"},
+				"title":{"type":"string"},
+				"locator":{"type":"string"},
+				"enabled":{"type":"boolean"},
+				"format":{"type":"string"},
+				"scope":{"type":"string"},
+				"trust_label":{"type":"string"},
+				"source_category":{"type":"string"},
+				"metadata":{"type":"object","additionalProperties":{"type":"string"}}
+			},
+			"required":["project_id","source_id"]
+		}`),
+	}, updateContextSource(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "context_sources.delete",
+		Title:       "Delete context source",
+		Description: "Delete one project context-source metadata record without touching local files or external URLs.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"source_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","source_id"]
+		}`),
+	}, deleteContextSource(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "projects.operations_brief",
 		Title:       "Project operations brief",
 		Description: "Return a read-only project operations summary for operator attention and next-action routing.",
@@ -1446,6 +1518,169 @@ func deleteProject(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Deleted project %s", strings.TrimSpace(input.ID))),
+		}, nil
+	}
+}
+
+func listContextSources(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		items, err := service.ListContextSources(ctx, input.ProjectID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if len(items) == 0 {
+			return mcp.CallToolResult{
+				Content:           mcp.TextContent("No context sources for project " + strings.TrimSpace(input.ProjectID) + "."),
+				StructuredContent: items,
+			}, nil
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "Context sources for %s (%d):\n", strings.TrimSpace(input.ProjectID), len(items))
+		for _, item := range items {
+			fmt.Fprintf(&b, "- %s: %s", item.ID, firstNonEmpty(item.Title, item.Locator))
+			if item.Kind != "" {
+				fmt.Fprintf(&b, " [%s]", item.Kind)
+			}
+			if !item.Enabled {
+				b.WriteString(" disabled")
+			}
+			b.WriteByte('\n')
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(b.String()),
+			StructuredContent: items,
+		}, nil
+	}
+}
+
+func createContextSource(service *core.Service) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input struct {
+			ProjectID      string            `json:"project_id"`
+			ID             string            `json:"id"`
+			Kind           string            `json:"kind"`
+			Title          string            `json:"title"`
+			Locator        string            `json:"locator"`
+			Enabled        *bool             `json:"enabled"`
+			Format         string            `json:"format"`
+			Scope          string            `json:"scope"`
+			TrustLabel     string            `json:"trust_label"`
+			SourceCategory string            `json:"source_category"`
+			Metadata       map[string]string `json:"metadata"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		enabled := true
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		_, item, err := service.CreateContextSource(ctx, input.ProjectID, core.Source{
+			ID:             input.ID,
+			Kind:           input.Kind,
+			Title:          input.Title,
+			Locator:        input.Locator,
+			Enabled:        enabled,
+			Format:         input.Format,
+			Scope:          input.Scope,
+			TrustLabel:     input.TrustLabel,
+			SourceCategory: input.SourceCategory,
+			Metadata:       input.Metadata,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Created context source %s for project %s", item.ID, strings.TrimSpace(input.ProjectID))),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func updateContextSource(service *core.Service) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input struct {
+			ProjectID      string            `json:"project_id"`
+			SourceID       string            `json:"source_id"`
+			Kind           *string           `json:"kind"`
+			Title          *string           `json:"title"`
+			Locator        *string           `json:"locator"`
+			Enabled        *bool             `json:"enabled"`
+			Format         *string           `json:"format"`
+			Scope          *string           `json:"scope"`
+			TrustLabel     *string           `json:"trust_label"`
+			SourceCategory *string           `json:"source_category"`
+			Metadata       map[string]string `json:"metadata"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.GetContextSource(ctx, input.ProjectID, input.SourceID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		if input.Kind != nil {
+			item.Kind = *input.Kind
+		}
+		if input.Title != nil {
+			item.Title = *input.Title
+		}
+		if input.Locator != nil {
+			item.Locator = *input.Locator
+		}
+		if input.Enabled != nil {
+			item.Enabled = *input.Enabled
+		}
+		if input.Format != nil {
+			item.Format = *input.Format
+		}
+		if input.Scope != nil {
+			item.Scope = *input.Scope
+		}
+		if input.TrustLabel != nil {
+			item.TrustLabel = *input.TrustLabel
+		}
+		if input.SourceCategory != nil {
+			item.SourceCategory = *input.SourceCategory
+		}
+		if input.Metadata != nil {
+			item.Metadata = input.Metadata
+		}
+		_, item, err = service.UpdateContextSource(ctx, input.ProjectID, input.SourceID, item)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Updated context source %s for project %s", item.ID, strings.TrimSpace(input.ProjectID))),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func deleteContextSource(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID string `json:"project_id"`
+		SourceID  string `json:"source_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		_, deleted, err := service.DeleteContextSource(ctx, input.ProjectID, input.SourceID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Deleted context source %s for project %s", deleted.ID, strings.TrimSpace(input.ProjectID))),
+			StructuredContent: deleted,
 		}, nil
 	}
 }

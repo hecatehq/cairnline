@@ -1170,6 +1170,99 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	}
 }
 
+func TestService_ContextSourceMutations(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Sources"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	project, created, err := service.CreateContextSource(ctx, project.ID, Source{
+		ID:             " src_agents ",
+		Kind:           " workspace_instruction ",
+		Title:          " AGENTS.md ",
+		Locator:        " AGENTS.md ",
+		Enabled:        true,
+		Format:         " agents_md ",
+		Scope:          " workspace ",
+		TrustLabel:     " workspace_guidance ",
+		SourceCategory: " instructions ",
+		Metadata:       map[string]string{" root_id ": " root_main "},
+	})
+	if err != nil {
+		t.Fatalf("CreateContextSource() error = %v", err)
+	}
+	if created.ID != "src_agents" || created.Kind != "workspace_instruction" || created.Locator != "AGENTS.md" || !created.Enabled || created.Metadata["root_id"] != "root_main" {
+		t.Fatalf("created source = %+v, want normalized source metadata", created)
+	}
+	if len(project.ContextSources) != 1 {
+		t.Fatalf("project sources after create = %+v, want one source", project.ContextSources)
+	}
+	createdAt := created.CreatedAt
+
+	if _, _, err := service.CreateContextSource(ctx, project.ID, Source{ID: "src_agents", Locator: "README.md"}); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("CreateContextSource(duplicate) error = %v, want ErrDuplicate", err)
+	}
+	if _, _, err := service.CreateContextSource(ctx, project.ID, Source{ID: "src_empty"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CreateContextSource(empty locator) error = %v, want ErrInvalid", err)
+	}
+
+	project, updated, err := service.UpdateContextSource(ctx, project.ID, "src_agents", Source{
+		Kind:           "url",
+		Title:          "Design brief",
+		Locator:        "https://example.invalid/design",
+		Enabled:        false,
+		Format:         "url",
+		TrustLabel:     "operator_source",
+		SourceCategory: "operator_source",
+	})
+	if err != nil {
+		t.Fatalf("UpdateContextSource() error = %v", err)
+	}
+	if updated.ID != "src_agents" || updated.Kind != "url" || updated.Enabled || updated.Locator != "https://example.invalid/design" {
+		t.Fatalf("updated source = %+v, want replacement metadata with stable id", updated)
+	}
+	if !updated.CreatedAt.Equal(createdAt) || !updated.UpdatedAt.After(createdAt) {
+		t.Fatalf("updated source timestamps = created %s updated %s, want original created and newer updated", updated.CreatedAt, updated.UpdatedAt)
+	}
+	if len(project.ContextSources) != 1 {
+		t.Fatalf("project sources after update = %+v, want one source", project.ContextSources)
+	}
+
+	got, err := service.GetContextSource(ctx, project.ID, "src_agents")
+	if err != nil {
+		t.Fatalf("GetContextSource() error = %v", err)
+	}
+	if got.Title != "Design brief" {
+		t.Fatalf("GetContextSource() = %+v, want updated source", got)
+	}
+	sources, err := service.ListContextSources(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListContextSources() error = %v", err)
+	}
+	if len(sources) != 1 || sources[0].ID != "src_agents" {
+		t.Fatalf("ListContextSources() = %+v, want updated source", sources)
+	}
+
+	if _, _, err := service.UpdateContextSource(ctx, project.ID, "src_missing", Source{Locator: "README.md"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateContextSource(missing) error = %v, want ErrNotFound", err)
+	}
+	project, deleted, err := service.DeleteContextSource(ctx, project.ID, "src_agents")
+	if err != nil {
+		t.Fatalf("DeleteContextSource() error = %v", err)
+	}
+	if deleted.ID != "src_agents" || len(project.ContextSources) != 0 {
+		t.Fatalf("deleted source=%+v project sources=%+v, want source removed", deleted, project.ContextSources)
+	}
+	if _, err := service.GetContextSource(ctx, project.ID, "src_agents"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetContextSource(deleted) error = %v, want ErrNotFound", err)
+	}
+	if _, _, err := service.DeleteContextSource(ctx, project.ID, "src_agents"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteContextSource(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestService_AssignmentLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

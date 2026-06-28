@@ -403,6 +403,71 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestStore_ContextSourceMutationsPersist(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "context-sources.db")
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Context sources"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	_, created, err := service.CreateContextSource(ctx, project.ID, core.Source{
+		ID:             "src_agents",
+		Kind:           "workspace_instruction",
+		Title:          "AGENTS.md",
+		Locator:        "AGENTS.md",
+		Enabled:        true,
+		Format:         "agents_md",
+		Scope:          "workspace",
+		TrustLabel:     "workspace_guidance",
+		SourceCategory: "instructions",
+		Metadata:       map[string]string{"root_id": "root_main"},
+	})
+	if err != nil {
+		t.Fatalf("CreateContextSource() error = %v", err)
+	}
+	createdAt := created.CreatedAt
+	if _, _, err := service.UpdateContextSource(ctx, project.ID, "src_agents", core.Source{
+		Kind:       "url",
+		Title:      "Design brief",
+		Locator:    "https://example.invalid/design",
+		Enabled:    false,
+		Format:     "url",
+		TrustLabel: "operator_source",
+	}); err != nil {
+		t.Fatalf("UpdateContextSource() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	defer reopened.Close()
+	reopenedService := core.NewService(reopened)
+	source, err := reopenedService.GetContextSource(ctx, project.ID, "src_agents")
+	if err != nil {
+		t.Fatalf("GetContextSource() after reopen error = %v", err)
+	}
+	if source.Title != "Design brief" || source.Enabled || source.Locator != "https://example.invalid/design" || !source.CreatedAt.Equal(createdAt) {
+		t.Fatalf("source after reopen = %+v, want updated metadata with original created time", source)
+	}
+	project, deleted, err := reopenedService.DeleteContextSource(ctx, project.ID, "src_agents")
+	if err != nil {
+		t.Fatalf("DeleteContextSource() error = %v", err)
+	}
+	if deleted.ID != "src_agents" || len(project.ContextSources) != 0 {
+		t.Fatalf("deleted source=%+v project=%+v, want source removed", deleted, project)
+	}
+}
+
 func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "project-delete.db"))

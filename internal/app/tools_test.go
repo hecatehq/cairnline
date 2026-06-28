@@ -1576,6 +1576,103 @@ func TestMCPTools_MemoryCandidateDecisionLifecycle(t *testing.T) {
 	}
 }
 
+func TestMCPTools_ContextSources(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Source MCP"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	var output bytes.Buffer
+	input := toolRequest(t, 1, "context_sources.create", map[string]any{
+		"project_id":      project.ID,
+		"id":              "src_agents",
+		"kind":            "workspace_instruction",
+		"title":           "AGENTS.md",
+		"locator":         "AGENTS.md",
+		"format":          "agents_md",
+		"scope":           "workspace",
+		"trust_label":     "workspace_guidance",
+		"source_category": "instructions",
+		"metadata":        map[string]string{"root_id": "root_main"},
+	})
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() create context source error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Created context source src_agents") || !strings.Contains(output.String(), `"structuredContent"`) {
+		t.Fatalf("create context source response = %s", output.String())
+	}
+	var createResponse struct {
+		Result struct {
+			StructuredContent core.Source `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &createResponse); err != nil {
+		t.Fatalf("decode create context source response: %v\n%s", err, output.String())
+	}
+	if createResponse.Result.StructuredContent.ID != "src_agents" || createResponse.Result.StructuredContent.Metadata["root_id"] != "root_main" {
+		t.Fatalf("created context source = %+v, want structured source metadata", createResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 2, "context_sources.update", map[string]any{
+		"project_id": project.ID,
+		"source_id":  "src_agents",
+		"title":      "Repository guidance",
+		"enabled":    false,
+		"metadata":   map[string]string{"root_id": "root_main", "source": "manual"},
+	})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() update context source error = %v", err)
+	}
+	var updateResponse struct {
+		Result struct {
+			StructuredContent core.Source `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &updateResponse); err != nil {
+		t.Fatalf("decode update context source response: %v\n%s", err, output.String())
+	}
+	if updateResponse.Result.StructuredContent.Title != "Repository guidance" || updateResponse.Result.StructuredContent.Enabled || updateResponse.Result.StructuredContent.Locator != "AGENTS.md" || updateResponse.Result.StructuredContent.Metadata["source"] != "manual" {
+		t.Fatalf("updated context source = %+v, want patch preserving locator and disabling source", updateResponse.Result.StructuredContent)
+	}
+
+	input = toolRequest(t, 3, "context_sources.list", map[string]any{"project_id": project.ID})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() list context sources error = %v", err)
+	}
+	var listResponse struct {
+		Result struct {
+			StructuredContent []core.Source `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &listResponse); err != nil {
+		t.Fatalf("decode list context sources response: %v\n%s", err, output.String())
+	}
+	if len(listResponse.Result.StructuredContent) != 1 || listResponse.Result.StructuredContent[0].ID != "src_agents" || !strings.Contains(output.String(), "disabled") {
+		t.Fatalf("listed context sources = %+v response=%s, want disabled src_agents", listResponse.Result.StructuredContent, output.String())
+	}
+
+	input = toolRequest(t, 4, "context_sources.delete", map[string]any{"project_id": project.ID, "source_id": "src_agents"})
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() delete context source error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Deleted context source src_agents") {
+		t.Fatalf("delete context source response = %s", output.String())
+	}
+	sources, err := service.ListContextSources(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListContextSources() error = %v", err)
+	}
+	if len(sources) != 0 {
+		t.Fatalf("sources after delete = %+v, want none", sources)
+	}
+}
+
 func TestMCPTools_ProjectSkillsRegistry(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
