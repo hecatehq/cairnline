@@ -649,11 +649,44 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":60,"method":"tools/call","params":{"name":"assignments.claim","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claimed_by":"agent-temp"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() temp claim error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Claimed assignment "+assignmentID+" by agent-temp") {
+		t.Fatalf("temp claim assignment response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"assignments.release","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claimed_by":"agent-temp"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() release claim error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Released assignment "+assignmentID) {
+		t.Fatalf("release assignment response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":62,"method":"tools/call","params":{"name":"assignments.next","arguments":{"project_id":"` + project.ID + `","agent_kind":"any","skill_ids":["review","backend"]}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() next after release error = %v", err)
+	}
+	if !strings.Contains(output.String(), assignmentID) {
+		t.Fatalf("next assignments after release response = %s, want assignment visible again", output.String())
+	}
+
+	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"assignments.claim","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claimed_by":"agent-a"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve() error = %v", err)
+		t.Fatalf("Serve() claim error = %v", err)
 	}
 	if !strings.Contains(output.String(), "Claimed assignment "+assignmentID+" by agent-a") {
 		t.Fatalf("claim assignment response = %s", output.String())

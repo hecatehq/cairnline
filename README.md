@@ -80,7 +80,8 @@ Implemented now:
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP, including assignment metadata updates that
   preserve created time and claim ownership while validating work-item, role,
-  root, profile, and execution-profile references, plus source-level context
+  root, profile, and execution-profile references, a narrow claimed-assignment
+  release path for pre-dispatch retry cleanup, plus source-level context
   metadata create/update/delete helpers that avoid whole-project replacement
 - embeddable snapshot export/import for migration rehearsals and bridge seeding;
   snapshots cover profiles, execution profiles, projects, skills, roles, work,
@@ -144,6 +145,7 @@ Implemented now:
   - `assignments.create`
   - `assignments.update`
   - `assignments.claim`
+  - `assignments.release`
   - `assignments.update_status`
   - `assignments.context`
   - `assignments.launch_packet`

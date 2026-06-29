@@ -1104,6 +1104,22 @@ func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy 
 	return s.store.ClaimAssignment(ctx, projectID, id, claimedBy, s.now)
 }
 
+func (s *Service) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	claimedBy = strings.TrimSpace(claimedBy)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if claimedBy == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claimed_by is required"))
+	}
+	return s.store.ReleaseAssignment(ctx, projectID, id, claimedBy, s.now)
+}
+
 func (s *Service) DeleteAssignment(ctx context.Context, projectID, id string) error {
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)

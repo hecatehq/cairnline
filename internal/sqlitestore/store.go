@@ -1015,6 +1015,32 @@ func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy st
 	return core.Assignment{}, core.ErrConflict
 }
 
+func (s *Store) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (core.Assignment, error) {
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now()
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET status = ?, claimed_by = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ? WHERE project_id = ? AND id = ? AND status = ? AND claimed_by = ?`,
+		core.AssignmentQueued, encodeTime(stamp), projectID, id, core.AssignmentClaimed, claimedBy)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 1 {
+		return s.GetAssignment(ctx, projectID, id)
+	}
+	if err := s.requireProject(ctx, projectID); err != nil {
+		return core.Assignment{}, err
+	}
+	item, err := s.GetAssignment(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if item.Status != core.AssignmentClaimed || item.ClaimedBy != claimedBy {
+		return core.Assignment{}, core.ErrConflict
+	}
+	return core.Assignment{}, core.ErrConflict
+}
+
 func (s *Store) DeleteAssignment(ctx context.Context, projectID, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

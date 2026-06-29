@@ -3667,6 +3667,80 @@ func TestService_ClaimAssignmentRaceHasOneWinner(t *testing.T) {
 	}
 }
 
+func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Release"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Retry start"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	claimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a")
+	if err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	startedAt := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(time.Minute)
+	claimed, err = service.UpdateAssignment(ctx, Assignment{
+		ProjectID:         project.ID,
+		ID:                assignment.ID,
+		WorkItemID:        work.ID,
+		RoleID:            role.ID,
+		ExecutionMode:     ExecutionMCPPull,
+		Status:            AssignmentClaimed,
+		ClaimedBy:         claimed.ClaimedBy,
+		ExecutionRef:      "run-pre-dispatch",
+		ContextSnapshotID: "ctx-pre-dispatch",
+		StartedAt:         startedAt,
+		CompletedAt:       completedAt,
+	})
+	if err != nil {
+		t.Fatalf("UpdateAssignment(claim metadata) error = %v", err)
+	}
+	if _, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-b"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ReleaseAssignment(wrong claimer) error = %v, want ErrConflict", err)
+	}
+	released, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-a")
+	if err != nil {
+		t.Fatalf("ReleaseAssignment() error = %v", err)
+	}
+	if released.Status != AssignmentQueued || released.ClaimedBy != "" || released.ExecutionRef != "" || released.ContextSnapshotID != "" || !released.StartedAt.IsZero() || !released.CompletedAt.IsZero() {
+		t.Fatalf("released assignment = %+v, want queued with claim/runtime refs cleared", released)
+	}
+	reclaimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-b")
+	if err != nil {
+		t.Fatalf("ClaimAssignment(after release) error = %v", err)
+	}
+	if reclaimed.Status != AssignmentClaimed || reclaimed.ClaimedBy != "agent-b" {
+		t.Fatalf("reclaimed assignment = %+v, want claimed by agent-b", reclaimed)
+	}
+	running, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, "run-started")
+	if err != nil {
+		t.Fatalf("UpdateAssignmentStatus(running) error = %v", err)
+	}
+	if _, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-b"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ReleaseAssignment(running) error = %v, want ErrConflict", err)
+	}
+	if running.Status != AssignmentRunning || running.ExecutionRef != "run-started" {
+		t.Fatalf("running assignment = %+v, want running state preserved", running)
+	}
+}
+
 func TestService_CreateAssignmentValidatesRole(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

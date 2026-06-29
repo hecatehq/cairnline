@@ -421,6 +421,74 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 }
 
+func TestStore_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "release-assignment.db")
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Release"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Retry start"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		RoleID:     role.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	startedAt := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	if _, err := service.UpdateAssignment(ctx, core.Assignment{
+		ProjectID:         project.ID,
+		ID:                assignment.ID,
+		WorkItemID:        work.ID,
+		RoleID:            role.ID,
+		ExecutionMode:     core.ExecutionMCPPull,
+		Status:            core.AssignmentClaimed,
+		ClaimedBy:         "agent-a",
+		ExecutionRef:      "run-pre-dispatch",
+		ContextSnapshotID: "ctx-pre-dispatch",
+		StartedAt:         startedAt,
+		CompletedAt:       startedAt.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("UpdateAssignment(claim metadata) error = %v", err)
+	}
+	if _, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-b"); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("ReleaseAssignment(wrong claimer) error = %v, want ErrConflict", err)
+	}
+	released, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-a")
+	if err != nil {
+		t.Fatalf("ReleaseAssignment() error = %v", err)
+	}
+	if released.Status != core.AssignmentQueued || released.ClaimedBy != "" || released.ExecutionRef != "" || released.ContextSnapshotID != "" || !released.StartedAt.IsZero() || !released.CompletedAt.IsZero() {
+		t.Fatalf("released assignment = %+v, want queued with claim/runtime refs cleared", released)
+	}
+	reclaimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-b")
+	if err != nil {
+		t.Fatalf("ClaimAssignment(after release) error = %v", err)
+	}
+	if reclaimed.Status != core.AssignmentClaimed || reclaimed.ClaimedBy != "agent-b" {
+		t.Fatalf("reclaimed assignment = %+v, want claimed by agent-b", reclaimed)
+	}
+}
+
 func TestStore_ContextSourceMutationsPersist(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "context-sources.db")
