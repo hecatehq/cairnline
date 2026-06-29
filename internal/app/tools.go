@@ -841,6 +841,21 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, claimAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.release",
+		Title:       "Release assignment claim",
+		Description: "Release a claimed assignment back to queued state before execution starts.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1},
+				"claimed_by":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id","claimed_by"]
+		}`),
+	}, releaseAssignment(service))
+
+	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.update_status",
 		Title:       "Update assignment progress status",
 		Description: "Mark a claimed assignment running or awaiting review.",
@@ -2945,6 +2960,27 @@ func claimAssignment(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Claimed assignment %s by %s", item.ID, item.ClaimedBy)),
+		}, nil
+	}
+}
+
+func releaseAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID    string `json:"project_id"`
+		AssignmentID string `json:"assignment_id"`
+		ClaimedBy    string `json:"claimed_by"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+		}
+		item, err := service.ReleaseAssignment(ctx, input.ProjectID, input.AssignmentID, input.ClaimedBy)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf("Released assignment %s", item.ID)),
 		}, nil
 	}
 }

@@ -579,6 +579,35 @@ func (s *MemoryStore) ClaimAssignment(ctx context.Context, projectID, id, claime
 	return item, nil
 }
 
+func (s *MemoryStore) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if item.Status != AssignmentClaimed || item.ClaimedBy != claimedBy {
+		return Assignment{}, ErrConflict
+	}
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now()
+	}
+	item.Status = AssignmentQueued
+	item.ClaimedBy = ""
+	item.ExecutionRef = ""
+	item.ContextSnapshotID = ""
+	item.StartedAt = time.Time{}
+	item.CompletedAt = time.Time{}
+	item.UpdatedAt = stamp
+	s.assignments[projectID][id] = item
+	return item, nil
+}
+
 func (s *MemoryStore) DeleteAssignment(ctx context.Context, projectID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
