@@ -209,6 +209,112 @@ func TestMCPTools_ProjectListStructuredContent(t *testing.T) {
 	}
 }
 
+func TestMCPTools_CoordinationListsStructuredContent(t *testing.T) {
+	ctx := context.Background()
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+	project, err := service.CreateProject(ctx, core.Project{Name: "Structured lists"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	type toolResponse struct {
+		Result struct {
+			StructuredContent json.RawMessage `json:"structuredContent"`
+		} `json:"result"`
+	}
+	call := func(id int, name string, arguments any) (json.RawMessage, string) {
+		t.Helper()
+		var output bytes.Buffer
+		if err := server.Serve(ctx, toolRequest(t, id, name, arguments), &output); err != nil {
+			t.Fatalf("Serve(%s) error = %v", name, err)
+		}
+		var response toolResponse
+		if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+			t.Fatalf("decode %s response: %v\n%s", name, err, output.String())
+		}
+		return response.Result.StructuredContent, output.String()
+	}
+	assertEmpty := func(id int, name string, arguments any) {
+		t.Helper()
+		raw, body := call(id, name, arguments)
+		if string(raw) != "[]" {
+			t.Fatalf("%s empty structuredContent = %s, want []\n%s", name, string(raw), body)
+		}
+		if !strings.Contains(body, `"structuredContent":[]`) {
+			t.Fatalf("%s empty response = %s, want structuredContent empty array", name, body)
+		}
+	}
+	decodeSlice := func(name string, raw json.RawMessage, target any) {
+		t.Helper()
+		if err := json.Unmarshal(raw, target); err != nil {
+			t.Fatalf("decode %s structuredContent: %v\n%s", name, err, string(raw))
+		}
+	}
+
+	assertEmpty(1, "profiles.list", map[string]any{})
+	assertEmpty(2, "execution_profiles.list", map[string]any{})
+	assertEmpty(3, "work_items.list", map[string]any{"project_id": project.ID})
+	assertEmpty(4, "roles.list", map[string]any{"project_id": project.ID})
+	assertEmpty(5, "assignments.list", map[string]any{"project_id": project.ID})
+
+	profile, err := service.CreateAgentProfile(ctx, core.AgentProfile{Name: "Planner"})
+	if err != nil {
+		t.Fatalf("CreateAgentProfile() error = %v", err)
+	}
+	executionProfile, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Local CLI", AgentKind: "any"})
+	if err != nil {
+		t.Fatalf("CreateExecutionProfile() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Map contract"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Architect"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+
+	raw, _ := call(6, "profiles.list", map[string]any{})
+	var profiles []core.AgentProfile
+	decodeSlice("profiles.list", raw, &profiles)
+	if len(profiles) != 1 || profiles[0].ID != profile.ID || profiles[0].Name != "Planner" {
+		t.Fatalf("profiles structuredContent = %+v, want created profile %s", profiles, profile.ID)
+	}
+
+	raw, _ = call(7, "execution_profiles.list", map[string]any{})
+	var executionProfiles []core.ExecutionProfile
+	decodeSlice("execution_profiles.list", raw, &executionProfiles)
+	if len(executionProfiles) != 1 || executionProfiles[0].ID != executionProfile.ID || executionProfiles[0].AgentKind != "any" {
+		t.Fatalf("execution profiles structuredContent = %+v, want created execution profile %s", executionProfiles, executionProfile.ID)
+	}
+
+	raw, _ = call(8, "work_items.list", map[string]any{"project_id": project.ID})
+	var workItems []core.WorkItem
+	decodeSlice("work_items.list", raw, &workItems)
+	if len(workItems) != 1 || workItems[0].ID != work.ID || workItems[0].Title != "Map contract" {
+		t.Fatalf("work items structuredContent = %+v, want created work item %s", workItems, work.ID)
+	}
+
+	raw, _ = call(9, "roles.list", map[string]any{"project_id": project.ID})
+	var roles []core.Role
+	decodeSlice("roles.list", raw, &roles)
+	if len(roles) != 1 || roles[0].ID != role.ID || roles[0].Name != "Architect" {
+		t.Fatalf("roles structuredContent = %+v, want created role %s", roles, role.ID)
+	}
+
+	raw, _ = call(10, "assignments.list", map[string]any{"project_id": project.ID})
+	var assignments []core.Assignment
+	decodeSlice("assignments.list", raw, &assignments)
+	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].WorkItemID != work.ID || assignments[0].RoleID != role.ID {
+		t.Fatalf("assignments structuredContent = %+v, want created assignment %s", assignments, assignment.ID)
+	}
+}
+
 func TestMCPTools_DeleteProfilesAndRoles(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
