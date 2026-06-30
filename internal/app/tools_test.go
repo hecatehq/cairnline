@@ -872,6 +872,17 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if got := output.String(); !strings.Contains(got, "Work item: Review MCP pull") || !strings.Contains(got, "Role: Senior reviewer") {
 		t.Fatalf("assignment context response = %s", got)
 	}
+	var contextResponse struct {
+		Result struct {
+			StructuredContent core.AssignmentContext `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &contextResponse); err != nil {
+		t.Fatalf("decode assignment context response: %v\n%s", err, output.String())
+	}
+	if contextResponse.Result.StructuredContent.Assignment.ID != assignmentID || contextResponse.Result.StructuredContent.WorkItem.ID != work.ID || contextResponse.Result.StructuredContent.Role.ID != role.ID {
+		t.Fatalf("structured assignment context = %+v, want assignment/work/role", contextResponse.Result.StructuredContent)
+	}
 
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","assignment_id":"` + assignmentID + `","title":"Test output","locator":"file://report.md","source_kind":"pull_request","external_id":"PR 42","provider":"github"}}}` + "\n",
