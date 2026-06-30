@@ -167,6 +167,48 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 }
 
+func TestMCPTools_ProjectListStructuredContent(t *testing.T) {
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "dev")
+
+	type listResponse struct {
+		Result struct {
+			StructuredContent []core.Project `json:"structuredContent"`
+		} `json:"result"`
+	}
+	list := func() (listResponse, string) {
+		input := strings.NewReader(
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.list","arguments":{}}}` + "\n",
+		)
+		var output bytes.Buffer
+		if err := server.Serve(context.Background(), input, &output); err != nil {
+			t.Fatalf("Serve() error = %v", err)
+		}
+		var response listResponse
+		if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+			t.Fatalf("decode projects.list response: %v\n%s", err, output.String())
+		}
+		return response, output.String()
+	}
+
+	empty, emptyRaw := list()
+	if len(empty.Result.StructuredContent) != 0 {
+		t.Fatalf("empty structured projects = %+v, want empty list", empty.Result.StructuredContent)
+	}
+	if !strings.Contains(emptyRaw, `"structuredContent":[]`) {
+		t.Fatalf("empty projects response = %s, want structuredContent empty array", emptyRaw)
+	}
+
+	created, err := service.CreateProject(context.Background(), core.Project{Name: "Portable coordination", Description: "Agent-neutral project state."})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	got, _ := list()
+	if len(got.Result.StructuredContent) != 1 || got.Result.StructuredContent[0].ID != created.ID || got.Result.StructuredContent[0].Name != "Portable coordination" {
+		t.Fatalf("structured projects = %+v, want created project %s", got.Result.StructuredContent, created.ID)
+	}
+}
+
 func TestMCPTools_DeleteProfilesAndRoles(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
