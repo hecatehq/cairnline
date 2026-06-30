@@ -2128,8 +2128,11 @@ func listAgentProfiles(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		if items == nil {
+			items = []core.AgentProfile{}
+		}
 		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No agent profiles yet.")}, nil
+			return mcp.CallToolResult{Content: mcp.TextContent("No agent profiles yet."), StructuredContent: items}, nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Agent profiles (%d):\n", len(items))
@@ -2143,7 +2146,7 @@ func listAgentProfiles(service *core.Service) mcp.ToolHandler {
 			}
 			b.WriteByte('\n')
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
 	}
 }
 
@@ -2241,8 +2244,11 @@ func listExecutionProfiles(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		if items == nil {
+			items = []core.ExecutionProfile{}
+		}
 		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No execution profiles yet.")}, nil
+			return mcp.CallToolResult{Content: mcp.TextContent("No execution profiles yet."), StructuredContent: items}, nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Execution profiles (%d):\n", len(items))
@@ -2256,7 +2262,7 @@ func listExecutionProfiles(service *core.Service) mcp.ToolHandler {
 			}
 			b.WriteByte('\n')
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
 	}
 }
 
@@ -2447,8 +2453,11 @@ func listWorkItems(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		if items == nil {
+			items = []core.WorkItem{}
+		}
 		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No work items yet.")}, nil
+			return mcp.CallToolResult{Content: mcp.TextContent("No work items yet."), StructuredContent: items}, nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Work items (%d):\n", len(items))
@@ -2459,7 +2468,7 @@ func listWorkItems(service *core.Service) mcp.ToolHandler {
 			}
 			b.WriteByte('\n')
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
 	}
 }
 
@@ -2626,8 +2635,11 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		if items == nil {
+			items = []core.Role{}
+		}
 		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No roles yet.")}, nil
+			return mcp.CallToolResult{Content: mcp.TextContent("No roles yet."), StructuredContent: items}, nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Roles (%d):\n", len(items))
@@ -2644,7 +2656,7 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 			}
 			b.WriteByte('\n')
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
 	}
 }
 
@@ -2777,8 +2789,11 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		if items == nil {
+			items = []core.Assignment{}
+		}
 		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No assignments yet.")}, nil
+			return mcp.CallToolResult{Content: mcp.TextContent("No assignments yet."), StructuredContent: items}, nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Assignments (%d):\n", len(items))
@@ -2792,7 +2807,7 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 			}
 			b.WriteByte('\n')
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
 	}
 }
 
