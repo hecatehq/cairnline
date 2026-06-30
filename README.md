@@ -88,6 +88,9 @@ Implemented now:
   assignments, artifacts, evidence, reviews, handoffs, memory entries,
   memory candidates, and assistant proposal records
 - stdio MCP server with JSON-RPC framing
+- MCP read tools return human-readable text plus `structuredContent` where a
+  stable data shape exists, so compatible clients can avoid scraping text
+  output
 - MCP resources:
   - `cairnline://projects/{project_id}`
   - `cairnline://projects/{project_id}/work-items/{work_item_id}`

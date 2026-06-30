@@ -1406,8 +1406,14 @@ func listProjects(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
+		if items == nil {
+			items = []core.Project{}
+		}
 		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No projects yet.")}, nil
+			return mcp.CallToolResult{
+				Content:           mcp.TextContent("No projects yet."),
+				StructuredContent: items,
+			}, nil
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "Projects (%d):\n", len(items))
@@ -1418,7 +1424,10 @@ func listProjects(service *core.Service) mcp.ToolHandler {
 			}
 			b.WriteByte('\n')
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String())}, nil
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(b.String()),
+			StructuredContent: items,
+		}, nil
 	}
 }
 
