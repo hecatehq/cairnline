@@ -90,7 +90,8 @@ Implemented now:
 - stdio MCP server with JSON-RPC framing
 - MCP read tools return human-readable text plus `structuredContent` where a
   stable data shape exists, including core project/profile/role/work/assignment
-  list surfaces, so compatible clients can avoid scraping text output
+  list surfaces and assignment context/launch packet reads, so compatible
+  clients can avoid scraping text output
 - MCP resources:
   - `cairnline://projects/{project_id}`
   - `cairnline://projects/{project_id}/work-items/{work_item_id}`

@@ -3045,7 +3045,10 @@ func assignmentContext(service *core.Service) mcp.ToolHandler {
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
-		return mcp.CallToolResult{Content: mcp.TextContent(formatAssignmentContext(item))}, nil
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(formatAssignmentContext(item)),
+			StructuredContent: item,
+		}, nil
 	}
 }
 
