@@ -1567,6 +1567,36 @@ func TestStore_CreateRecordsValidateReferences(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("store.CreateEvidence(valid) error = %v", err)
 	}
+	if _, err := store.CreateReview(ctx, core.Review{
+		ID:         "rev_direct_missing_work",
+		ProjectID:  project.ID,
+		WorkItemID: "work_missing",
+		Body:       "Missing work review.",
+		Verdict:    core.ReviewVerdictApproved,
+		Status:     core.ReviewStatusRecorded,
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.CreateReview(missing work) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.CreateHandoff(ctx, core.Handoff{
+		ID:         "handoff_direct_missing_work",
+		ProjectID:  project.ID,
+		WorkItemID: "work_missing",
+		Title:      "Missing work handoff",
+		Body:       "Missing work handoff should be rejected.",
+		Status:     core.HandoffStatusOpen,
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.CreateHandoff(missing work) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.UpdateHandoff(ctx, core.Handoff{
+		ID:         "handoff_direct_missing_work",
+		ProjectID:  project.ID,
+		WorkItemID: "work_missing",
+		Title:      "Missing work handoff",
+		Body:       "Missing work handoff should be rejected.",
+		Status:     core.HandoffStatusOpen,
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.UpdateHandoff(missing work) error = %v, want ErrNotFound", err)
+	}
 }
 
 func TestStore_PersistsAssistantProposalLedger(t *testing.T) {
