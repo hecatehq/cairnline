@@ -1207,6 +1207,9 @@ func (s *Store) GetReview(ctx context.Context, projectID, workItemID, id string)
 }
 
 func (s *Store) CreateReview(ctx context.Context, review core.Review) (core.Review, error) {
+	if err := s.requireWorkItem(ctx, review.ProjectID, review.WorkItemID); err != nil {
+		return core.Review{}, err
+	}
 	if review.AssignmentID != "" {
 		assignment, err := s.GetAssignment(ctx, review.ProjectID, review.AssignmentID)
 		if err != nil {
@@ -1259,6 +1262,9 @@ func (s *Store) GetHandoff(ctx context.Context, projectID, workItemID, id string
 }
 
 func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
+	if err := s.requireWorkItem(ctx, handoff.ProjectID, handoff.WorkItemID); err != nil {
+		return core.Handoff{}, err
+	}
 	if handoff.SourceAssignmentID != "" {
 		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.SourceAssignmentID)
 		if err != nil {
@@ -1313,6 +1319,9 @@ func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 }
 
 func (s *Store) UpdateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
+	if err := s.requireWorkItem(ctx, handoff.ProjectID, handoff.WorkItemID); err != nil {
+		return core.Handoff{}, err
+	}
 	if handoff.SourceAssignmentID != "" {
 		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.SourceAssignmentID)
 		if err != nil {
