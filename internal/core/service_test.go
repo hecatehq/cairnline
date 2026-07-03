@@ -1314,6 +1314,18 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
+	reviewedWork, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID:       project.ID,
+		Title:           "Reviewed work",
+		OwnerRoleID:     " " + role.ID + " ",
+		ReviewerRoleIDs: []string{role.ID, role.ID, " "},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(reviewed) error = %v", err)
+	}
+	if reviewedWork.OwnerRoleID != role.ID || len(reviewedWork.ReviewerRoleIDs) != 1 || reviewedWork.ReviewerRoleIDs[0] != role.ID {
+		t.Fatalf("reviewed work item = %+v, want trimmed owner and deduped reviewer roles", reviewedWork)
+	}
 	updatedWork, err := service.UpdateWorkItem(ctx, WorkItem{
 		ProjectID:       project.ID,
 		ID:              work.ID,
@@ -1330,6 +1342,28 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	}
 	if updatedWork.Title != "Updated work" || updatedWork.OwnerRoleID != role.ID || len(updatedWork.ReviewerRoleIDs) != 1 || updatedWork.RootID != "root_feature" {
 		t.Fatalf("updated work item = %+v, want replacement metadata", updatedWork)
+	}
+	if _, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID:   project.ID,
+		Title:       "Missing owner",
+		OwnerRoleID: "missing",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateWorkItem(missing owner role) error = %v, want ErrNotFound", err)
+	}
+	if _, err := service.CreateWorkItem(ctx, WorkItem{
+		ProjectID:       project.ID,
+		Title:           "Missing reviewer",
+		ReviewerRoleIDs: []string{role.ID, "missing"},
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateWorkItem(missing reviewer role) error = %v, want ErrNotFound", err)
+	}
+	if _, err := service.UpdateWorkItem(ctx, WorkItem{
+		ProjectID:       project.ID,
+		ID:              work.ID,
+		Title:           "Missing update reviewer",
+		ReviewerRoleIDs: []string{"missing"},
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateWorkItem(missing reviewer role) error = %v, want ErrNotFound", err)
 	}
 }
 
