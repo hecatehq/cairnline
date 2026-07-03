@@ -200,9 +200,10 @@ Implemented now:
   - `memory_candidates.promote`
   - `memory_candidates.reject`
   - `memory_candidates.delete`
-- assignment launch packets with resolved profile, execution-profile, skill,
-  generic-artifact, evidence, review, handoff, accepted-memory, and
-  memory-candidate metadata
+- assignment launch packets with project, role, assignment, desired-agent,
+  execution-profile, skill, generic-artifact, evidence, review, handoff,
+  accepted-memory, and memory-candidate metadata; profile ids remain opaque
+  host hints and are not resolved by Cairnline
 - read-only work-item closeout readiness summaries derived from assignment,
   evidence, review, and handoff metadata
 - read-only project operations briefs for attention routing across active
@@ -212,7 +213,7 @@ Implemented now:
   and recent assignment state; queued assignments are attention items until
   claimed, while claimed/running/review assignments are active
 - read-only project setup-readiness and health summaries for onboarding,
-  context/profile/skill gaps, and bounded operator attention
+  context/skill gaps, and bounded operator attention
 - deterministic assistant proposal/apply tools with durable proposal records,
   proposal warnings, apply attempts, latest-result state, and repeat-apply
   protection for confirmed project-state mutations; applying a proposal can

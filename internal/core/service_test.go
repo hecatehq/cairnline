@@ -687,18 +687,11 @@ Body should not be stored in the skill registry.
 		t.Fatalf("planning skill = %+v, want Cairnline-native discovered skill", planning)
 	}
 
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
-		Name:     "Implementer profile",
-		SkillIDs: []string{"backend", "missing"},
-	})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
 	role, err := service.CreateRole(ctx, Role{
 		ProjectID:        project.ID,
 		Name:             "Implementer",
-		DefaultProfileID: profile.ID,
-		DefaultSkillIDs:  []string{"backend"},
+		DefaultProfileID: "host_profile",
+		DefaultSkillIDs:  []string{"backend", "missing"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -714,6 +707,7 @@ Body should not be stored in the skill registry.
 		ProjectID:  project.ID,
 		WorkItemID: work.ID,
 		RoleID:     role.ID,
+		ProfileID:  "assignment_host_profile",
 		DesiredAgent: DesiredAgent{
 			Kind:     DesiredAgentAny,
 			SkillIDs: []string{"backend"},
@@ -728,6 +722,9 @@ Body should not be stored in the skill registry.
 	}
 	if len(packet.Skills) != 1 || packet.Skills[0].ID != "backend" {
 		t.Fatalf("launch packet skills = %+v, want resolved backend skill", packet.Skills)
+	}
+	if packet.Profile != nil || packet.Assignment.ProfileID != "assignment_host_profile" || packet.Role.DefaultProfileID != "host_profile" {
+		t.Fatalf("launch packet profile hints = profile:%+v assignment:%q role:%q, want unresolved host hints", packet.Profile, packet.Assignment.ProfileID, packet.Role.DefaultProfileID)
 	}
 	if !containsString(packet.Warnings, "skill was not found: missing") {
 		t.Fatalf("launch packet warnings = %+v, want missing skill warning", packet.Warnings)
@@ -1907,8 +1904,8 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if launchPacket.Kind != LaunchPacketKindAssignment || launchPacket.Project.ID != project.ID || launchPacket.WorkItem.ID != work.ID || launchPacket.Role == nil || launchPacket.Role.ID != role.ID {
 		t.Fatalf("launch packet = %+v, want project/work/role packet", launchPacket)
 	}
-	if launchPacket.Profile == nil || launchPacket.Profile.ID != profile.ID || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
-		t.Fatalf("launch packet = %+v, want resolved profile metadata", launchPacket)
+	if launchPacket.Profile != nil || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
+		t.Fatalf("launch packet = %+v, want host profile hint unresolved and execution profile resolved", launchPacket)
 	}
 	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
 		t.Fatalf("launch packet memory = %+v, want accepted project memory", launchPacket.Memory)
@@ -2050,13 +2047,6 @@ func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
-		Name:     "Project default profile",
-		SkillIDs: []string{"research"},
-	})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
 	executionProfile, err := service.CreateExecutionProfile(ctx, ExecutionProfile{
 		Name:      "Project default execution",
 		AgentKind: "any",
@@ -2066,7 +2056,7 @@ func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
 	}
 	project, err := service.CreateProject(ctx, Project{
 		Name:                      "Project defaults",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          "host_project_profile",
 		DefaultExecutionProfileID: executionProfile.ID,
 	})
 	if err != nil {
@@ -2084,8 +2074,9 @@ func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
 		t.Fatalf("CreateProjectSkill() error = %v", err)
 	}
 	role, err := service.CreateRole(ctx, Role{
-		ProjectID: project.ID,
-		Name:      "Researcher",
+		ProjectID:       project.ID,
+		Name:            "Researcher",
+		DefaultSkillIDs: []string{"research"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -2110,14 +2101,14 @@ func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssignmentLaunchPacket() error = %v", err)
 	}
-	if packet.Profile == nil || packet.Profile.ID != profile.ID {
-		t.Fatalf("launch packet profile = %+v, want project default profile", packet.Profile)
+	if packet.Profile != nil || packet.Project.DefaultProfileID != "host_project_profile" {
+		t.Fatalf("launch packet profile/default = %+v/%q, want unresolved host profile hint", packet.Profile, packet.Project.DefaultProfileID)
 	}
 	if packet.ExecutionProfile == nil || packet.ExecutionProfile.ID != executionProfile.ID {
 		t.Fatalf("launch packet execution profile = %+v, want project default execution profile", packet.ExecutionProfile)
 	}
 	if len(packet.Skills) != 1 || packet.Skills[0].ID != "research" {
-		t.Fatalf("launch packet skills = %+v, want skills from project default profile", packet.Skills)
+		t.Fatalf("launch packet skills = %+v, want skills from role default metadata", packet.Skills)
 	}
 }
 
