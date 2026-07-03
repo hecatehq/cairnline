@@ -404,8 +404,8 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if launchPacket.Assignment.RootID != "root_main" {
 		t.Fatalf("launch packet assignment root = %q, want root_main", launchPacket.Assignment.RootID)
 	}
-	if launchPacket.Profile == nil || launchPacket.Profile.ID != profile.ID || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
-		t.Fatalf("launch packet = %+v, want persisted resolved profiles", launchPacket)
+	if launchPacket.Profile != nil || launchPacket.Assignment.ProfileID != profile.ID || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
+		t.Fatalf("launch packet = %+v, want persisted host profile hint and resolved execution profile", launchPacket)
 	}
 	if len(launchPacket.Skills) != 1 || launchPacket.Skills[0].ID != skill.ID {
 		t.Fatalf("launch packet skills = %+v, want persisted resolved skill", launchPacket.Skills)

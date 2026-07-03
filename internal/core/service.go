@@ -780,11 +780,6 @@ func (s *Service) CreateRole(ctx context.Context, input Role) (Role, error) {
 		return Role{}, errors.Join(ErrInvalid, errors.New("role name is required"))
 	}
 	defaultProfileID := strings.TrimSpace(input.DefaultProfileID)
-	if defaultProfileID != "" {
-		if _, err := s.store.GetAgentProfile(ctx, defaultProfileID); err != nil {
-			return Role{}, err
-		}
-	}
 	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
 	if defaultExecutionProfileID != "" {
 		if _, err := s.store.GetExecutionProfile(ctx, defaultExecutionProfileID); err != nil {
@@ -826,11 +821,6 @@ func (s *Service) UpdateRole(ctx context.Context, input Role) (Role, error) {
 		return Role{}, err
 	}
 	defaultProfileID := strings.TrimSpace(input.DefaultProfileID)
-	if defaultProfileID != "" {
-		if _, err := s.store.GetAgentProfile(ctx, defaultProfileID); err != nil {
-			return Role{}, err
-		}
-	}
 	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
 	if defaultExecutionProfileID != "" {
 		if _, err := s.store.GetExecutionProfile(ctx, defaultExecutionProfileID); err != nil {
@@ -952,11 +942,6 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 		return Assignment{}, err
 	}
 	profileID := strings.TrimSpace(input.ProfileID)
-	if profileID != "" {
-		if _, err := s.store.GetAgentProfile(ctx, profileID); err != nil {
-			return Assignment{}, err
-		}
-	}
 	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
 	if executionProfileID != "" {
 		if _, err := s.store.GetExecutionProfile(ctx, executionProfileID); err != nil {
@@ -1030,11 +1015,6 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 		return Assignment{}, err
 	}
 	profileID := strings.TrimSpace(input.ProfileID)
-	if profileID != "" {
-		if _, err := s.store.GetAgentProfile(ctx, profileID); err != nil {
-			return Assignment{}, err
-		}
-	}
 	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
 	if executionProfileID != "" {
 		if _, err := s.store.GetExecutionProfile(ctx, executionProfileID); err != nil {
@@ -1254,19 +1234,6 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		return AssignmentLaunchPacket{}, err
 	}
 	warnings := append([]string(nil), packetContext.Warnings...)
-	var profile *AgentProfile
-	profileID := firstNonEmpty(packetContext.Assignment.ProfileID, profileIDFromRole(packetContext.Role), packetContext.Project.DefaultProfileID)
-	if profileID != "" {
-		resolvedProfile, err := s.store.GetAgentProfile(ctx, profileID)
-		if err != nil {
-			if !errors.Is(err, ErrNotFound) {
-				return AssignmentLaunchPacket{}, err
-			}
-			warnings = append(warnings, "assignment profile was not found")
-		} else {
-			profile = &resolvedProfile
-		}
-	}
 	var executionProfile *ExecutionProfile
 	executionProfileID := firstNonEmpty(packetContext.Assignment.ExecutionProfileID, executionProfileIDFromRole(packetContext.Role), packetContext.Project.DefaultExecutionProfileID)
 	if executionProfileID != "" {
@@ -1280,7 +1247,7 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 			executionProfile = &resolvedExecutionProfile
 		}
 	}
-	resolvedSkills, skillWarnings, err := s.resolveLaunchPacketSkills(ctx, packetContext.Project.ID, packetContext.Assignment, packetContext.Role, profile)
+	resolvedSkills, skillWarnings, err := s.resolveLaunchPacketSkills(ctx, packetContext.Project.ID, packetContext.Assignment, packetContext.Role)
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
 	}
@@ -1291,7 +1258,6 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		Project:          packetContext.Project,
 		WorkItem:         packetContext.WorkItem,
 		Role:             packetContext.Role,
-		Profile:          profile,
 		ExecutionProfile: executionProfile,
 		Skills:           resolvedSkills,
 		Assignment:       packetContext.Assignment,
@@ -3065,13 +3031,6 @@ func isHandoffStatus(value string) bool {
 	}
 }
 
-func profileIDFromRole(role *Role) string {
-	if role == nil {
-		return ""
-	}
-	return role.DefaultProfileID
-}
-
 func executionProfileIDFromRole(role *Role) string {
 	if role == nil {
 		return ""
@@ -3117,14 +3076,11 @@ func (s *Service) validateProjectRoleRef(ctx context.Context, projectID, roleID 
 	return err
 }
 
-func (s *Service) resolveLaunchPacketSkills(ctx context.Context, projectID string, assignment Assignment, role *Role, profile *AgentProfile) ([]ProjectSkill, []string, error) {
+func (s *Service) resolveLaunchPacketSkills(ctx context.Context, projectID string, assignment Assignment, role *Role) ([]ProjectSkill, []string, error) {
 	var requested []string
 	requested = append(requested, assignment.DesiredAgent.SkillIDs...)
 	if role != nil {
 		requested = append(requested, role.DefaultSkillIDs...)
-	}
-	if profile != nil {
-		requested = append(requested, profile.SkillIDs...)
 	}
 	requested = compactStrings(requested)
 	if len(requested) == 0 {
