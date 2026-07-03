@@ -61,19 +61,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 	base := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return base }
 
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
-		ID:            "profile_architect",
-		Name:          "Architect",
-		Description:   "Plans durable project work.",
-		Instructions:  "Keep coordination state reviewable.",
-		ContextPolicy: "include_enabled",
-		MemoryPolicy:  "visible_only",
-		SourcePolicy:  "include_enabled",
-		SkillIDs:      []string{"planning", "review"},
-	})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
+	profileID := "profile_architect"
 	execution, err := service.CreateExecutionProfile(ctx, ExecutionProfile{
 		ID:             "exec_any",
 		Name:           "Any MCP agent",
@@ -95,7 +83,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		Name:                      "Snapshot project",
 		Description:               "Portable migration fixture.",
 		DefaultRootID:             "root_main",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          profileID,
 		DefaultExecutionProfileID: execution.ID,
 		Roots: []Root{{
 			ID:        "root_main",
@@ -149,7 +137,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		Name:                      "Architect",
 		Description:               "Owns project shape.",
 		Instructions:              "Design before dispatch.",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          profileID,
 		DefaultExecutionProfileID: execution.ID,
 		DefaultSkillIDs:           []string{"planning"},
 		DefaultExecutionMode:      ExecutionMCPPull,
@@ -176,7 +164,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		WorkItemID:         work.ID,
 		RoleID:             role.ID,
 		RootID:             "root_main",
-		ProfileID:          profile.ID,
+		ProfileID:          profileID,
 		ExecutionProfileID: execution.ID,
 		ExecutionMode:      ExecutionMCPPull,
 		DesiredAgent:       DesiredAgent{Kind: DesiredAgentAny, SkillIDs: []string{"planning"}},

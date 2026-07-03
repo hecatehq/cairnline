@@ -54,18 +54,6 @@ func sqliteSnapshotFixture() core.Snapshot {
 	return core.Snapshot{
 		Version:    core.SnapshotVersion,
 		ExportedAt: base.Add(30 * time.Minute),
-		AgentProfiles: []core.AgentProfile{{
-			ID:            "profile_sqlite",
-			Name:          "SQLite profile",
-			Description:   "Snapshot profile.",
-			Instructions:  "Use durable context.",
-			ContextPolicy: "include_enabled",
-			MemoryPolicy:  "visible_only",
-			SourcePolicy:  "include_enabled",
-			SkillIDs:      []string{"sqlite-skill"},
-			CreatedAt:     base,
-			UpdatedAt:     base.Add(time.Minute),
-		}},
 		ExecutionProfiles: []core.ExecutionProfile{{
 			ID:             "exec_sqlite",
 			Name:           "SQLite execution",

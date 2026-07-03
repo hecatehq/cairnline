@@ -81,19 +81,6 @@ type Role struct {
 	DefaultExecutionMode      string   `json:"default_execution_mode,omitempty"`
 }
 
-type AgentProfile struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description,omitempty"`
-	Instructions  string    `json:"instructions,omitempty"`
-	ContextPolicy string    `json:"context_policy,omitempty"`
-	MemoryPolicy  string    `json:"memory_policy,omitempty"`
-	SourcePolicy  string    `json:"source_policy,omitempty"`
-	SkillIDs      []string  `json:"skill_ids,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
 type ExecutionProfile struct {
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`
@@ -466,7 +453,6 @@ type AssignmentLaunchPacket struct {
 	Project          Project           `json:"project"`
 	WorkItem         WorkItem          `json:"work_item"`
 	Role             *Role             `json:"role,omitempty"`
-	Profile          *AgentProfile     `json:"profile,omitempty"`
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	Skills           []ProjectSkill    `json:"skills,omitempty"`
 	Assignment       Assignment        `json:"assignment"`
