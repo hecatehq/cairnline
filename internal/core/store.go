@@ -20,12 +20,6 @@ type Store interface {
 	UpdateProject(ctx context.Context, project Project) (Project, error)
 	DeleteProject(ctx context.Context, id string) error
 
-	ListAgentProfiles(ctx context.Context) ([]AgentProfile, error)
-	GetAgentProfile(ctx context.Context, id string) (AgentProfile, error)
-	CreateAgentProfile(ctx context.Context, profile AgentProfile) (AgentProfile, error)
-	UpdateAgentProfile(ctx context.Context, profile AgentProfile) (AgentProfile, error)
-	DeleteAgentProfile(ctx context.Context, id string) error
-
 	ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error)
 	GetExecutionProfile(ctx context.Context, id string) (ExecutionProfile, error)
 	CreateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error)

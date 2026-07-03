@@ -30,7 +30,6 @@ type Source = core.Source
 type ProjectSkill = core.ProjectSkill
 type RequiredPermissions = core.RequiredPermissions
 type Role = core.Role
-type AgentProfile = core.AgentProfile
 type ExecutionProfile = core.ExecutionProfile
 type WorkItem = core.WorkItem
 type WorkItemCloseoutReadiness = core.WorkItemCloseoutReadiness

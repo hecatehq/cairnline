@@ -10,7 +10,6 @@ import (
 type MemoryStore struct {
 	mu          sync.Mutex
 	projects    map[string]Project
-	agent       map[string]AgentProfile
 	execution   map[string]ExecutionProfile
 	skills      map[string]map[string]ProjectSkill
 	workItems   map[string]map[string]WorkItem
@@ -28,7 +27,6 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		projects:    make(map[string]Project),
-		agent:       make(map[string]AgentProfile),
 		execution:   make(map[string]ExecutionProfile),
 		skills:      make(map[string]map[string]ProjectSkill),
 		workItems:   make(map[string]map[string]WorkItem),
@@ -114,64 +112,6 @@ func (s *MemoryStore) DeleteProject(ctx context.Context, id string) error {
 			delete(s.assistant, proposalID)
 		}
 	}
-	return nil
-}
-
-func (s *MemoryStore) ListAgentProfiles(ctx context.Context) ([]AgentProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	items := make([]AgentProfile, 0, len(s.agent))
-	for _, item := range s.agent {
-		items = append(items, item)
-	}
-	slices.SortFunc(items, func(a, b AgentProfile) int {
-		return compareString(a.Name, b.Name)
-	})
-	return items, nil
-}
-
-func (s *MemoryStore) GetAgentProfile(ctx context.Context, id string) (AgentProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	item, ok := s.agent[id]
-	if !ok {
-		return AgentProfile{}, ErrNotFound
-	}
-	return item, nil
-}
-
-func (s *MemoryStore) CreateAgentProfile(ctx context.Context, profile AgentProfile) (AgentProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.agent[profile.ID]; ok {
-		return AgentProfile{}, ErrDuplicate
-	}
-	s.agent[profile.ID] = profile
-	return profile, nil
-}
-
-func (s *MemoryStore) UpdateAgentProfile(ctx context.Context, profile AgentProfile) (AgentProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.agent[profile.ID]; !ok {
-		return AgentProfile{}, ErrNotFound
-	}
-	s.agent[profile.ID] = profile
-	return profile, nil
-}
-
-func (s *MemoryStore) DeleteAgentProfile(ctx context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.agent[id]; !ok {
-		return ErrNotFound
-	}
-	delete(s.agent, id)
 	return nil
 }
 

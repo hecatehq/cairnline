@@ -121,10 +121,7 @@ func TestService_DeleteProjectCascadesProjectScopedState(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{Name: "Global profile"})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
+	profileID := "global_host_profile"
 	execution, err := service.CreateExecutionProfile(ctx, ExecutionProfile{Name: "Global execution"})
 	if err != nil {
 		t.Fatalf("CreateExecutionProfile() error = %v", err)
@@ -147,7 +144,7 @@ func TestService_DeleteProjectCascadesProjectScopedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProjectSkill() error = %v", err)
 	}
-	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer", DefaultProfileID: profile.ID})
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer", DefaultProfileID: profileID})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
@@ -218,16 +215,12 @@ func TestService_DeleteProjectCascadesProjectScopedState(t *testing.T) {
 		}
 	}
 
-	profiles, err := service.ListAgentProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListAgentProfiles() error = %v", err)
-	}
 	executionProfiles, err := service.ListExecutionProfiles(ctx)
 	if err != nil {
 		t.Fatalf("ListExecutionProfiles() error = %v", err)
 	}
-	if len(profiles) != 1 || profiles[0].ID != profile.ID || len(executionProfiles) != 1 || executionProfiles[0].ID != execution.ID {
-		t.Fatalf("global profiles = %+v execution = %+v, want preserved globals", profiles, executionProfiles)
+	if len(executionProfiles) != 1 || executionProfiles[0].ID != execution.ID {
+		t.Fatalf("execution profiles = %+v, want preserved global execution profile", executionProfiles)
 	}
 }
 
@@ -478,35 +471,9 @@ func TestService_CreateWorkItemValidatesProject(t *testing.T) {
 	}
 }
 
-func TestService_ProfileLifecycle(t *testing.T) {
+func TestService_ExecutionProfileLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
-
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
-		Name:          "Implementer",
-		Instructions:  "Make focused changes.",
-		ContextPolicy: "include_enabled",
-		SkillIDs:      []string{"backend", "backend"},
-	})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
-	updatedProfile, err := service.UpdateAgentProfile(ctx, AgentProfile{
-		ID:            profile.ID,
-		Name:          "Senior implementer",
-		Instructions:  "Make focused, tested changes.",
-		ContextPolicy: "include_enabled",
-		SkillIDs:      []string{"backend", "tests"},
-	})
-	if err != nil {
-		t.Fatalf("UpdateAgentProfile() error = %v", err)
-	}
-	if updatedProfile.CreatedAt.IsZero() || !updatedProfile.UpdatedAt.After(updatedProfile.CreatedAt) && !updatedProfile.UpdatedAt.Equal(updatedProfile.CreatedAt) {
-		t.Fatalf("updated profile timestamps = created %s updated %s", updatedProfile.CreatedAt, updatedProfile.UpdatedAt)
-	}
-	if updatedProfile.Name != "Senior implementer" || len(updatedProfile.SkillIDs) != 2 {
-		t.Fatalf("updated profile = %+v, want replacement values", updatedProfile)
-	}
 
 	execution, err := service.CreateExecutionProfile(ctx, ExecutionProfile{
 		Name:           "Local execution",
@@ -531,20 +498,6 @@ func TestService_ProfileLifecycle(t *testing.T) {
 	}
 	if updatedExecution.Name != "Cloud execution" || updatedExecution.ProviderHint != "cloud" {
 		t.Fatalf("updated execution profile = %+v, want replacement values", updatedExecution)
-	}
-
-	if err := service.DeleteAgentProfile(ctx, updatedProfile.ID); err != nil {
-		t.Fatalf("DeleteAgentProfile() error = %v", err)
-	}
-	profiles, err := service.ListAgentProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListAgentProfiles() after delete error = %v", err)
-	}
-	if len(profiles) != 0 {
-		t.Fatalf("profiles after delete = %+v, want none", profiles)
-	}
-	if err := service.DeleteAgentProfile(ctx, updatedProfile.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("DeleteAgentProfile(deleted) error = %v, want ErrNotFound", err)
 	}
 
 	if err := service.DeleteExecutionProfile(ctx, updatedExecution.ID); err != nil {
@@ -723,8 +676,8 @@ Body should not be stored in the skill registry.
 	if len(packet.Skills) != 1 || packet.Skills[0].ID != "backend" {
 		t.Fatalf("launch packet skills = %+v, want resolved backend skill", packet.Skills)
 	}
-	if packet.Profile != nil || packet.Assignment.ProfileID != "assignment_host_profile" || packet.Role.DefaultProfileID != "host_profile" {
-		t.Fatalf("launch packet profile hints = profile:%+v assignment:%q role:%q, want unresolved host hints", packet.Profile, packet.Assignment.ProfileID, packet.Role.DefaultProfileID)
+	if packet.Assignment.ProfileID != "assignment_host_profile" || packet.Role.DefaultProfileID != "host_profile" {
+		t.Fatalf("launch packet profile hints = assignment:%q role:%q, want unresolved host hints", packet.Assignment.ProfileID, packet.Role.DefaultProfileID)
 	}
 	if !containsString(packet.Warnings, "skill was not found: missing") {
 		t.Fatalf("launch packet warnings = %+v, want missing skill warning", packet.Warnings)
@@ -1264,10 +1217,7 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 		t.Fatalf("UpdateProject(missing default root) error = %v, want ErrNotFound", err)
 	}
 
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{Name: "Default profile"})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
+	profileID := "default_host_profile"
 	executionProfile, err := service.CreateExecutionProfile(ctx, ExecutionProfile{Name: "Local execution"})
 	if err != nil {
 		t.Fatalf("CreateExecutionProfile() error = %v", err)
@@ -1275,7 +1225,7 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 	role, err := service.CreateRole(ctx, Role{
 		ProjectID:                 project.ID,
 		Name:                      "Implementer",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          profileID,
 		DefaultExecutionProfileID: executionProfile.ID,
 	})
 	if err != nil {
@@ -1289,7 +1239,7 @@ func TestService_UpdateProjectRoleAndWorkItem(t *testing.T) {
 		ID:                        role.ID,
 		Name:                      "Senior implementer",
 		Description:               "Owns implementation.",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          profileID,
 		DefaultExecutionProfileID: executionProfile.ID,
 		DefaultSkillIDs:           []string{"backend", "backend"},
 		DefaultExecutionMode:      ExecutionMCPPull,
@@ -1547,18 +1497,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 
-	profile, err := service.CreateAgentProfile(ctx, AgentProfile{
-		Name:          "Reviewer profile",
-		Instructions:  "Prefer concise findings with evidence.",
-		ContextPolicy: "include_enabled",
-		SkillIDs:      []string{"review", "review"},
-	})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
-	if len(profile.SkillIDs) != 1 || profile.SkillIDs[0] != "review" {
-		t.Fatalf("profile = %+v, want deduped skill ids", profile)
-	}
+	profileID := "reviewer_host_profile"
 	executionProfile, err := service.CreateExecutionProfile(ctx, ExecutionProfile{
 		Name:           "Local reviewer",
 		AgentKind:      "any",
@@ -1581,7 +1520,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		ProjectID:                 project.ID,
 		Name:                      "Reviewer",
 		Instructions:              "Check the evidence and record blockers.",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          profileID,
 		DefaultExecutionProfileID: executionProfile.ID,
 	})
 	if err != nil {
@@ -1617,7 +1556,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	implementer, err := service.CreateRole(ctx, Role{
 		ProjectID:                 project.ID,
 		Name:                      "Implementer",
-		DefaultProfileID:          profile.ID,
+		DefaultProfileID:          profileID,
 		DefaultExecutionProfileID: executionProfile.ID,
 	})
 	if err != nil {
@@ -1635,7 +1574,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		ID:                 assignment.ID,
 		WorkItemID:         updatedWork.ID,
 		RoleID:             implementer.ID,
-		ProfileID:          profile.ID,
+		ProfileID:          profileID,
 		ExecutionProfileID: executionProfile.ID,
 		ExecutionMode:      ExecutionExternalAdapter,
 		Status:             AssignmentQueued,
@@ -1649,7 +1588,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateAssignment() error = %v", err)
 	}
-	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.RoleID != implementer.ID || updatedAssignment.ExecutionMode != ExecutionExternalAdapter || updatedAssignment.ProfileID != profile.ID || updatedAssignment.ExecutionProfileID != executionProfile.ID {
+	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.RoleID != implementer.ID || updatedAssignment.ExecutionMode != ExecutionExternalAdapter || updatedAssignment.ProfileID != profileID || updatedAssignment.ExecutionProfileID != executionProfile.ID {
 		t.Fatalf("updated assignment = %+v, want replacement metadata", updatedAssignment)
 	}
 	if updatedAssignment.CreatedAt != assignment.CreatedAt {
@@ -1904,7 +1843,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if launchPacket.Kind != LaunchPacketKindAssignment || launchPacket.Project.ID != project.ID || launchPacket.WorkItem.ID != work.ID || launchPacket.Role == nil || launchPacket.Role.ID != role.ID {
 		t.Fatalf("launch packet = %+v, want project/work/role packet", launchPacket)
 	}
-	if launchPacket.Profile != nil || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
+	if launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
 		t.Fatalf("launch packet = %+v, want host profile hint unresolved and execution profile resolved", launchPacket)
 	}
 	if len(launchPacket.Memory) != 1 || launchPacket.Memory[0].ID != memoryEntry.ID {
@@ -2101,8 +2040,8 @@ func TestService_AssignmentLaunchPacketUsesProjectDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssignmentLaunchPacket() error = %v", err)
 	}
-	if packet.Profile != nil || packet.Project.DefaultProfileID != "host_project_profile" {
-		t.Fatalf("launch packet profile/default = %+v/%q, want unresolved host profile hint", packet.Profile, packet.Project.DefaultProfileID)
+	if packet.Project.DefaultProfileID != "host_project_profile" {
+		t.Fatalf("launch packet profile/default = %q, want unresolved host profile hint", packet.Project.DefaultProfileID)
 	}
 	if packet.ExecutionProfile == nil || packet.ExecutionProfile.ID != executionProfile.ID {
 		t.Fatalf("launch packet execution profile = %+v, want project default execution profile", packet.ExecutionProfile)

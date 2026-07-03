@@ -41,6 +41,8 @@ those hints to their own Claude, Cursor, Copilot, OpenAI, Hecate, human, or
 other host-specific agent configuration. Cairnline records intent and
 provenance; the agent host remains responsible for runtime policy,
 permissions, model choice, sandboxing, and launch behavior.
+Profile ids stored on projects, roles, and assignments are opaque host hints;
+Cairnline does not keep a portable agent-profile catalog.
 
 ## Security Boundaries
 

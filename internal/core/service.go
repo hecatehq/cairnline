@@ -509,67 +509,6 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 	return s.store.ListProjectSkills(ctx, projectID)
 }
 
-func (s *Service) ListAgentProfiles(ctx context.Context) ([]AgentProfile, error) {
-	return s.store.ListAgentProfiles(ctx)
-}
-
-func (s *Service) CreateAgentProfile(ctx context.Context, input AgentProfile) (AgentProfile, error) {
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		return AgentProfile{}, errors.Join(ErrInvalid, errors.New("profile name is required"))
-	}
-	now := s.now()
-	item := AgentProfile{
-		ID:            firstNonEmpty(strings.TrimSpace(input.ID), newID("profile")),
-		Name:          name,
-		Description:   strings.TrimSpace(input.Description),
-		Instructions:  strings.TrimSpace(input.Instructions),
-		ContextPolicy: strings.TrimSpace(input.ContextPolicy),
-		MemoryPolicy:  strings.TrimSpace(input.MemoryPolicy),
-		SourcePolicy:  strings.TrimSpace(input.SourcePolicy),
-		SkillIDs:      compactStrings(input.SkillIDs),
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	return s.store.CreateAgentProfile(ctx, item)
-}
-
-func (s *Service) UpdateAgentProfile(ctx context.Context, input AgentProfile) (AgentProfile, error) {
-	id := strings.TrimSpace(input.ID)
-	name := strings.TrimSpace(input.Name)
-	if id == "" {
-		return AgentProfile{}, errors.Join(ErrInvalid, errors.New("profile id is required"))
-	}
-	if name == "" {
-		return AgentProfile{}, errors.Join(ErrInvalid, errors.New("profile name is required"))
-	}
-	existing, err := s.store.GetAgentProfile(ctx, id)
-	if err != nil {
-		return AgentProfile{}, err
-	}
-	item := AgentProfile{
-		ID:            id,
-		Name:          name,
-		Description:   strings.TrimSpace(input.Description),
-		Instructions:  strings.TrimSpace(input.Instructions),
-		ContextPolicy: strings.TrimSpace(input.ContextPolicy),
-		MemoryPolicy:  strings.TrimSpace(input.MemoryPolicy),
-		SourcePolicy:  strings.TrimSpace(input.SourcePolicy),
-		SkillIDs:      compactStrings(input.SkillIDs),
-		CreatedAt:     existing.CreatedAt,
-		UpdatedAt:     s.now(),
-	}
-	return s.store.UpdateAgentProfile(ctx, item)
-}
-
-func (s *Service) DeleteAgentProfile(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.Join(ErrInvalid, errors.New("profile id is required"))
-	}
-	return s.store.DeleteAgentProfile(ctx, id)
-}
-
 func (s *Service) ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error) {
 	return s.store.ListExecutionProfiles(ctx)
 }

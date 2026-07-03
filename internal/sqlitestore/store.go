@@ -42,18 +42,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA busy_timeout = 5000`,
-		`CREATE TABLE IF NOT EXISTS agent_profiles (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			instructions TEXT NOT NULL DEFAULT '',
-			context_policy TEXT NOT NULL DEFAULT '',
-			memory_policy TEXT NOT NULL DEFAULT '',
-			source_policy TEXT NOT NULL DEFAULT '',
-			skill_ids_json TEXT NOT NULL DEFAULT '[]',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`,
 		`CREATE TABLE IF NOT EXISTS execution_profiles (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -573,63 +561,6 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		return err
 	}
 	return nil
-}
-
-func (s *Store) ListAgentProfiles(ctx context.Context) ([]core.AgentProfile, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at FROM agent_profiles ORDER BY name ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []core.AgentProfile
-	for rows.Next() {
-		item, err := scanAgentProfile(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) GetAgentProfile(ctx context.Context, id string) (core.AgentProfile, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at FROM agent_profiles WHERE id = ?`, id)
-	return scanAgentProfile(row)
-}
-
-func (s *Store) CreateAgentProfile(ctx context.Context, profile core.AgentProfile) (core.AgentProfile, error) {
-	skills, err := encodeJSON(profile.SkillIDs)
-	if err != nil {
-		return core.AgentProfile{}, err
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_profiles (id, name, description, instructions, context_policy, memory_policy, source_policy, skill_ids_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		profile.ID, profile.Name, profile.Description, profile.Instructions, profile.ContextPolicy, profile.MemoryPolicy, profile.SourcePolicy, skills, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt))
-	if err != nil {
-		return core.AgentProfile{}, mapSQLiteWriteError(err)
-	}
-	return profile, nil
-}
-
-func (s *Store) UpdateAgentProfile(ctx context.Context, profile core.AgentProfile) (core.AgentProfile, error) {
-	skills, err := encodeJSON(profile.SkillIDs)
-	if err != nil {
-		return core.AgentProfile{}, err
-	}
-	result, err := s.db.ExecContext(ctx, `UPDATE agent_profiles SET name = ?, description = ?, instructions = ?, context_policy = ?, memory_policy = ?, source_policy = ?, skill_ids_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
-		profile.Name, profile.Description, profile.Instructions, profile.ContextPolicy, profile.MemoryPolicy, profile.SourcePolicy, skills, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt), profile.ID)
-	if err != nil {
-		return core.AgentProfile{}, err
-	}
-	return profile, requireAffected(result)
-}
-
-func (s *Store) DeleteAgentProfile(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM agent_profiles WHERE id = ?`, id)
-	if err != nil {
-		return mapSQLiteWriteError(err)
-	}
-	return requireAffected(result)
 }
 
 func (s *Store) ListExecutionProfiles(ctx context.Context) ([]core.ExecutionProfile, error) {
@@ -1648,25 +1579,6 @@ const assistantProposalSelectSQL = `SELECT id, project_id, source, source_id, pr
 
 type scanner interface {
 	Scan(dest ...any) error
-}
-
-func scanAgentProfile(row scanner) (core.AgentProfile, error) {
-	var item core.AgentProfile
-	var skillIDsJSON, createdAt, updatedAt string
-	if err := row.Scan(&item.ID, &item.Name, &item.Description, &item.Instructions, &item.ContextPolicy, &item.MemoryPolicy, &item.SourcePolicy, &skillIDsJSON, &createdAt, &updatedAt); err != nil {
-		return core.AgentProfile{}, mapSQLiteReadError(err)
-	}
-	if err := decodeJSON(skillIDsJSON, &item.SkillIDs); err != nil {
-		return core.AgentProfile{}, err
-	}
-	var err error
-	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
-		return core.AgentProfile{}, err
-	}
-	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
-		return core.AgentProfile{}, err
-	}
-	return item, nil
 }
 
 func scanExecutionProfile(row scanner) (core.ExecutionProfile, error) {
