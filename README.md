@@ -47,10 +47,11 @@ provider credentials, and external-agent private memory are outside Cairnline's
 core model.
 
 Role references are durable coordination metadata rather than hard ownership.
-Creating or updating an assignment validates the role at write time, but deleting
-a role does not delete or block historical assignments that still carry that
-role id. Context and launch-packet reads surface missing-role warnings so
-operators can repair or preserve the historical record deliberately.
+Creating or updating work-item owner/reviewer refs and assignment role refs
+validates the role at write time, but deleting a role does not delete or block
+historical records that still carry that role id. Context and launch-packet
+reads surface missing-role warnings so operators can repair or preserve the
+historical record deliberately.
 
 ## Current Slice
 
@@ -78,11 +79,12 @@ Implemented now:
   hints while preserving operator-edited enabled/title/description and
   trust-label fields
 - embeddable Go API for applications that want to use the coordination core
-  directly instead of speaking MCP, including assignment metadata updates that
-  preserve created time and claim ownership while validating work-item, role,
-  root, profile, and execution-profile references, a narrow claimed-assignment
-  release path for pre-dispatch retry cleanup, plus source-level context
-  metadata create/update/delete helpers that avoid whole-project replacement
+  directly instead of speaking MCP, including work-item owner/reviewer role-ref
+  validation, assignment metadata updates that preserve created time and claim
+  ownership while validating work-item, role, root, profile, and
+  execution-profile references, a narrow claimed-assignment release path for
+  pre-dispatch retry cleanup, plus source-level context metadata
+  create/update/delete helpers that avoid whole-project replacement
 - embeddable snapshot export/import for migration rehearsals and bridge seeding;
   snapshots cover profiles, execution profiles, projects, skills, roles, work,
   assignments, artifacts, evidence, reviews, handoffs, memory entries,
