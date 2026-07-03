@@ -661,6 +661,8 @@ func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 	projectID := strings.TrimSpace(input.ProjectID)
 	title := strings.TrimSpace(input.Title)
 	rootID := strings.TrimSpace(input.RootID)
+	ownerRoleID := strings.TrimSpace(input.OwnerRoleID)
+	reviewerRoleIDs := compactStrings(input.ReviewerRoleIDs)
 	if projectID == "" {
 		return WorkItem{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -668,6 +670,9 @@ func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		return WorkItem{}, errors.Join(ErrInvalid, errors.New("work item title is required"))
 	}
 	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
+		return WorkItem{}, err
+	}
+	if err := s.validateProjectRoleRefs(ctx, projectID, ownerRoleID, reviewerRoleIDs); err != nil {
 		return WorkItem{}, err
 	}
 	priority := strings.TrimSpace(input.Priority)
@@ -686,8 +691,8 @@ func (s *Service) CreateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		Brief:           strings.TrimSpace(input.Brief),
 		Status:          status,
 		Priority:        priority,
-		OwnerRoleID:     strings.TrimSpace(input.OwnerRoleID),
-		ReviewerRoleIDs: input.ReviewerRoleIDs,
+		OwnerRoleID:     ownerRoleID,
+		ReviewerRoleIDs: reviewerRoleIDs,
 		RootID:          rootID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -700,6 +705,8 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 	id := strings.TrimSpace(input.ID)
 	title := strings.TrimSpace(input.Title)
 	rootID := strings.TrimSpace(input.RootID)
+	ownerRoleID := strings.TrimSpace(input.OwnerRoleID)
+	reviewerRoleIDs := compactStrings(input.ReviewerRoleIDs)
 	if projectID == "" {
 		return WorkItem{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -714,6 +721,9 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		return WorkItem{}, err
 	}
 	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
+		return WorkItem{}, err
+	}
+	if err := s.validateProjectRoleRefs(ctx, projectID, ownerRoleID, reviewerRoleIDs); err != nil {
 		return WorkItem{}, err
 	}
 	priority := strings.TrimSpace(input.Priority)
@@ -731,8 +741,8 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input WorkItem) (WorkItem,
 		Brief:           strings.TrimSpace(input.Brief),
 		Status:          status,
 		Priority:        priority,
-		OwnerRoleID:     strings.TrimSpace(input.OwnerRoleID),
-		ReviewerRoleIDs: compactStrings(input.ReviewerRoleIDs),
+		OwnerRoleID:     ownerRoleID,
+		ReviewerRoleIDs: reviewerRoleIDs,
 		RootID:          rootID,
 		CreatedAt:       existing.CreatedAt,
 		UpdatedAt:       s.now(),
@@ -3084,6 +3094,27 @@ func (s *Service) validateProjectRoot(ctx context.Context, projectID, rootID str
 		}
 	}
 	return errors.Join(ErrNotFound, errors.New("root_id was not found in project"))
+}
+
+func (s *Service) validateProjectRoleRefs(ctx context.Context, projectID, ownerRoleID string, reviewerRoleIDs []string) error {
+	if err := s.validateProjectRoleRef(ctx, projectID, ownerRoleID); err != nil {
+		return err
+	}
+	for _, roleID := range reviewerRoleIDs {
+		if err := s.validateProjectRoleRef(ctx, projectID, roleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) validateProjectRoleRef(ctx context.Context, projectID, roleID string) error {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return nil
+	}
+	_, err := s.store.GetRole(ctx, projectID, roleID)
+	return err
 }
 
 func (s *Service) resolveLaunchPacketSkills(ctx context.Context, projectID string, assignment Assignment, role *Role, profile *AgentProfile) ([]ProjectSkill, []string, error) {
