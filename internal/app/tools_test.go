@@ -85,9 +85,16 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if projects[0].DefaultProfileID != "profile_writer" || projects[0].DefaultExecutionProfileID != "exec_review" {
 		t.Fatalf("updated project defaults = %q/%q, want MCP-updated defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
 	}
+	reviewerRole, err := service.CreateRole(context.Background(), core.Role{
+		ProjectID: projects[0].ID,
+		Name:      "Reviewer",
+	})
+	if err != nil {
+		t.Fatalf("CreateRole(reviewer) error = %v", err)
+	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes."}}}` + "\n",
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes.","owner_role_id":"` + reviewerRole.ID + `","reviewer_role_ids":["` + reviewerRole.ID + `","` + reviewerRole.ID + `"," "]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -111,6 +118,9 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	workItems, err := service.ListWorkItems(context.Background(), projects[0].ID)
 	if err != nil {
 		t.Fatalf("ListWorkItems() error = %v", err)
+	}
+	if workItems[0].OwnerRoleID != reviewerRole.ID || len(workItems[0].ReviewerRoleIDs) != 1 || workItems[0].ReviewerRoleIDs[0] != reviewerRole.ID {
+		t.Fatalf("created work item role refs = owner %q reviewers %+v, want normalized reviewer role refs", workItems[0].OwnerRoleID, workItems[0].ReviewerRoleIDs)
 	}
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"work_items.get","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `"}}}` + "\n",
