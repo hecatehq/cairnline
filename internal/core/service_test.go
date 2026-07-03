@@ -2513,9 +2513,6 @@ func TestService_ProjectSetupReadiness(t *testing.T) {
 	if _, err := service.UpdateProject(ctx, project); err != nil {
 		t.Fatalf("UpdateProject() error = %v", err)
 	}
-	if _, err := service.CreateExecutionProfile(ctx, ExecutionProfile{Name: "Local execution"}); err != nil {
-		t.Fatalf("CreateExecutionProfile() error = %v", err)
-	}
 	if _, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"}); err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
@@ -2536,13 +2533,16 @@ func TestService_ProjectSetupReadiness(t *testing.T) {
 	if readiness.ShowOnboarding || !readiness.SetupStarted || !readiness.FirstWorkReady {
 		t.Fatalf("configured readiness = %+v, want setup started and first work ready", readiness)
 	}
-	if readiness.Summary.RoleCount != 1 || readiness.Summary.SkillCount != 1 || readiness.Summary.ExecutionProfileCount != 1 || readiness.Summary.EnabledContextSourceCount != 1 || readiness.Summary.SavedMemoryCount != 1 || readiness.Summary.PendingMemoryCandidateCount != 1 {
+	if readiness.Summary.RoleCount != 1 || readiness.Summary.SkillCount != 1 || readiness.Summary.ExecutionProfileCount != 0 || readiness.Summary.EnabledContextSourceCount != 1 || readiness.Summary.SavedMemoryCount != 1 || readiness.Summary.PendingMemoryCandidateCount != 1 {
 		t.Fatalf("configured summary = %+v, want all setup counts", readiness.Summary)
 	}
-	for _, id := range []string{"purpose", "workspace_source", "execution_profiles", "sources_memory", "roles"} {
+	for _, id := range []string{"purpose", "workspace_source", "sources_memory", "roles"} {
 		if check := setupCheckByID(readiness.Checks, id); check.Status != ProjectSetupStatusReady {
 			t.Fatalf("check %s = %+v, want ready", id, check)
 		}
+	}
+	if check := setupCheckByID(readiness.Checks, "execution_profiles"); check.ID != "" {
+		t.Fatalf("execution profile check = %+v, want no host-profile checklist item", check)
 	}
 	if check := setupCheckByID(readiness.Checks, "first_work_item"); check.Status != ProjectSetupStatusTodo || check.Action == nil || check.Action.Kind != ProjectSetupActionCreateWorkItem {
 		t.Fatalf("first work check = %+v, want create work action", check)
@@ -2630,7 +2630,7 @@ func TestService_ProjectHealth(t *testing.T) {
 	}
 }
 
-func TestService_ProjectHealthIncludesProjectDefaultProfileReferences(t *testing.T) {
+func TestService_ProjectHealthIgnoresPrivateProfileReferences(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 	project, err := service.CreateProject(ctx, Project{
@@ -2645,11 +2645,11 @@ func TestService_ProjectHealthIncludesProjectDefaultProfileReferences(t *testing
 	if err != nil {
 		t.Fatalf("ProjectHealth() error = %v", err)
 	}
-	if health.Summary.MissingProfileReferenceCount != 1 {
-		t.Fatalf("health summary = %+v, want one missing project default profile", health.Summary)
+	if health.Summary.MissingProfileReferenceCount != 0 {
+		t.Fatalf("health summary = %+v, want private profile refs ignored by portable health", health.Summary)
 	}
-	if !containsHealthAttentionDetail(health.Attention, ProjectOperationKindProfile, "missing_profile") {
-		t.Fatalf("health attention = %+v, want missing project default profile detail", health.Attention)
+	if containsHealthAttentionDetail(health.Attention, ProjectOperationKindProfile, "missing_profile") {
+		t.Fatalf("health attention = %+v, want no missing project default profile detail", health.Attention)
 	}
 }
 

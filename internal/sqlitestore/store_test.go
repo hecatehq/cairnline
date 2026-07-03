@@ -384,7 +384,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectSetupReadiness() error = %v", err)
 	}
-	if setup.ShowOnboarding || !setup.SetupStarted || setup.Summary.WorkItemCount != 1 || setup.Summary.RoleCount != 1 || setup.Summary.SkillCount != 1 || setup.Summary.ExecutionProfileCount != 1 {
+	if setup.ShowOnboarding || !setup.SetupStarted || setup.Summary.WorkItemCount != 1 || setup.Summary.RoleCount != 1 || setup.Summary.SkillCount != 1 || setup.Summary.ExecutionProfileCount != 0 {
 		t.Fatalf("setup readiness = %+v, want persisted configured setup", setup)
 	}
 	health, err := reopenedService.ProjectHealth(ctx, project.ID)

@@ -31,10 +31,6 @@ func (s *Service) ProjectHealth(ctx context.Context, projectID string) (ProjectH
 	if err != nil {
 		return ProjectHealth{}, err
 	}
-	profiles, err := s.store.ListAgentProfiles(ctx)
-	if err != nil {
-		return ProjectHealth{}, err
-	}
 	skills, err := s.store.ListProjectSkills(ctx, projectID)
 	if err != nil {
 		return ProjectHealth{}, err
@@ -79,22 +75,7 @@ func (s *Service) ProjectHealth(ctx context.Context, projectID string) (ProjectH
 	for _, item := range operations.Items {
 		attention = append(attention, projectOperationHealthAttention(project.ID, item))
 	}
-	missingProfiles := missingProjectHealthProfileReferences(project, roles, assignments, profiles)
-	summary.MissingProfileReferenceCount = len(missingProfiles)
-	if len(missingProfiles) > 0 {
-		attention = append(attention, ProjectHealthAttentionItem{
-			ID:          healthItemID(project.ID, "profiles", "missing"),
-			ProjectID:   project.ID,
-			Kind:        ProjectOperationKindProfile,
-			Severity:    ProjectOperationSeverityBlocked,
-			Status:      "missing",
-			Title:       "Agent profile reference missing",
-			Detail:      "Project, role, or assignment defaults reference " + summarizeIDs(missingProfiles) + ".",
-			ActionKind:  "update_profiles",
-			ActionLabel: "Review profiles",
-		})
-	}
-	skillIssues := projectHealthSkillIssues(project, roles, assignments, profiles, skills)
+	skillIssues := projectHealthSkillIssues(roles, assignments, skills)
 	summary.ProjectSkillIssueCount = len(skillIssues)
 	if len(skillIssues) > 0 {
 		attention = append(attention, ProjectHealthAttentionItem{
@@ -173,7 +154,6 @@ func (s *Service) projectHealthArtifacts(ctx context.Context, projectID string, 
 func projectHealthSummary(project Project, setup ProjectSetupReadiness, operations ProjectOperationsBrief, entries []MemoryEntry, candidates []MemoryCandidate, handoffs []Handoff, reviews []Review) ProjectHealthSummary {
 	summary := ProjectHealthSummary{
 		MissingProjectRoot:     !projectHasActiveRoot(project),
-		HasExecutionProfile:    setup.Summary.HasExecutionProfile,
 		ActiveAssignmentCount:  operations.Counts.ActiveAssignments,
 		BlockedAssignmentCount: operations.Counts.BlockedAssignments,
 	}
@@ -282,43 +262,14 @@ func projectOperationHealthAction(item ProjectOperationItem) (string, string) {
 	}
 }
 
-func missingProjectHealthProfileReferences(project Project, roles []Role, assignments []Assignment, profiles []AgentProfile) []string {
-	profileIDs := make(map[string]struct{}, len(profiles))
-	for _, profile := range profiles {
-		if id := strings.TrimSpace(profile.ID); id != "" {
-			profileIDs[id] = struct{}{}
-		}
-	}
-	missing := make([]string, 0)
-	addMissing := func(id string) {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return
-		}
-		if _, ok := profileIDs[id]; ok {
-			return
-		}
-		missing = appendUnique(missing, id)
-	}
-	addMissing(project.DefaultProfileID)
-	for _, role := range roles {
-		addMissing(role.DefaultProfileID)
-	}
-	for _, assignment := range assignments {
-		addMissing(assignment.ProfileID)
-	}
-	sort.Strings(missing)
-	return missing
-}
-
-func projectHealthSkillIssues(project Project, roles []Role, assignments []Assignment, profiles []AgentProfile, skills []ProjectSkill) []string {
+func projectHealthSkillIssues(roles []Role, assignments []Assignment, skills []ProjectSkill) []string {
 	skillsByID := make(map[string]ProjectSkill, len(skills))
 	for _, skill := range skills {
 		if id := normalizeSkillID(skill.ID); id != "" {
 			skillsByID[id] = skill
 		}
 	}
-	referenced := referencedProjectHealthSkillIDs(project, roles, assignments, profiles)
+	referenced := referencedProjectHealthSkillIDs(roles, assignments)
 	unresolved := make([]string, 0)
 	disabled := make([]string, 0)
 	unavailable := make([]string, 0)
@@ -348,39 +299,21 @@ func projectHealthSkillIssues(project Project, roles []Role, assignments []Assig
 	return issues
 }
 
-func referencedProjectHealthSkillIDs(project Project, roles []Role, assignments []Assignment, profiles []AgentProfile) []string {
+func referencedProjectHealthSkillIDs(roles []Role, assignments []Assignment) []string {
 	referenced := make([]string, 0)
-	relevantProfileIDs := make(map[string]struct{})
 	addSkill := func(id string) {
 		id = normalizeSkillID(id)
 		if id != "" {
 			referenced = appendUnique(referenced, id)
 		}
 	}
-	if id := strings.TrimSpace(project.DefaultProfileID); id != "" {
-		relevantProfileIDs[id] = struct{}{}
-	}
 	for _, role := range roles {
 		for _, skillID := range role.DefaultSkillIDs {
 			addSkill(skillID)
 		}
-		if id := strings.TrimSpace(role.DefaultProfileID); id != "" {
-			relevantProfileIDs[id] = struct{}{}
-		}
 	}
 	for _, assignment := range assignments {
 		for _, skillID := range assignment.DesiredAgent.SkillIDs {
-			addSkill(skillID)
-		}
-		if id := strings.TrimSpace(assignment.ProfileID); id != "" {
-			relevantProfileIDs[id] = struct{}{}
-		}
-	}
-	for _, profile := range profiles {
-		if _, ok := relevantProfileIDs[strings.TrimSpace(profile.ID)]; !ok {
-			continue
-		}
-		for _, skillID := range profile.SkillIDs {
 			addSkill(skillID)
 		}
 	}

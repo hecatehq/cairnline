@@ -28,10 +28,6 @@ func (s *Service) ProjectSetupReadiness(ctx context.Context, projectID string) (
 	if err != nil {
 		return ProjectSetupReadiness{}, err
 	}
-	executionProfiles, err := s.store.ListExecutionProfiles(ctx)
-	if err != nil {
-		return ProjectSetupReadiness{}, err
-	}
 	memoryEntries, err := s.store.ListMemoryEntries(ctx, projectID, true)
 	if err != nil {
 		return ProjectSetupReadiness{}, err
@@ -41,11 +37,10 @@ func (s *Service) ProjectSetupReadiness(ctx context.Context, projectID string) (
 		return ProjectSetupReadiness{}, err
 	}
 
-	summary := projectSetupReadinessSummary(project, workItems, roles, skills, executionProfiles, memoryEntries, memoryCandidates)
+	summary := projectSetupReadinessSummary(project, workItems, roles, skills, memoryEntries, memoryCandidates)
 	setupStarted := summary.EnabledContextSourceCount > 0 ||
 		summary.RoleCount > 0 ||
 		summary.SkillCount > 0 ||
-		summary.ExecutionProfileCount > 0 ||
 		summary.SavedMemoryCount > 0 ||
 		summary.PendingMemoryCandidateCount > 0
 	return ProjectSetupReadiness{
@@ -60,15 +55,13 @@ func (s *Service) ProjectSetupReadiness(ctx context.Context, projectID string) (
 	}, nil
 }
 
-func projectSetupReadinessSummary(project Project, workItems []WorkItem, roles []Role, skills []ProjectSkill, executionProfiles []ExecutionProfile, memoryEntries []MemoryEntry, memoryCandidates []MemoryCandidate) ProjectSetupReadinessSummary {
+func projectSetupReadinessSummary(project Project, workItems []WorkItem, roles []Role, skills []ProjectSkill, memoryEntries []MemoryEntry, memoryCandidates []MemoryCandidate) ProjectSetupReadinessSummary {
 	summary := ProjectSetupReadinessSummary{
-		WorkItemCount:         len(workItems),
-		RoleCount:             len(roles),
-		SkillCount:            len(skills),
-		ExecutionProfileCount: len(executionProfiles),
-		HasPurpose:            strings.TrimSpace(project.Description) != "",
-		HasActiveRoot:         projectHasActiveRoot(project),
-		HasExecutionProfile:   len(executionProfiles) > 0,
+		WorkItemCount: len(workItems),
+		RoleCount:     len(roles),
+		SkillCount:    len(skills),
+		HasPurpose:    strings.TrimSpace(project.Description) != "",
+		HasActiveRoot: projectHasActiveRoot(project),
 	}
 	for _, source := range project.ContextSources {
 		if source.Enabled {
@@ -90,7 +83,6 @@ func projectSetupReadinessChecks(project Project, summary ProjectSetupReadinessS
 	return []ProjectSetupReadinessCheck{
 		projectSetupCheck("purpose", "Project purpose", strings.TrimSpace(project.Description), summary.HasPurpose, false, projectSetupReadinessAction(ProjectSetupActionUpdateProject, projectID, "Add purpose"), "Add a short purpose."),
 		projectSetupWorkspaceCheck(project),
-		projectSetupCheck("execution_profiles", "Execution profiles", projectSetupExecutionProfileDetail(summary), summary.HasExecutionProfile, true, projectSetupReadinessAction(ProjectSetupActionManageExecutionProfiles, projectID, "Add execution profile"), "Optional; add one when an orchestrator or host needs runtime hints."),
 		projectSetupCheck("sources_memory", "Sources and memory", projectSetupGuidanceDetail(summary, project), hasContext, false, projectSetupReadinessAction(ProjectSetupActionManageContext, projectID, "Add context"), ""),
 		projectSetupCheck("roles", "Roles", projectSetupRoleDetail(summary), summary.RoleCount > 0, false, projectSetupReadinessAction(ProjectSetupActionManageRoles, projectID, "Create role"), ""),
 		projectSetupCheck("first_work_item", "First work item", projectSetupFirstWorkDetail(summary), summary.WorkItemCount > 0, false, projectSetupReadinessAction(ProjectSetupActionCreateWorkItem, projectID, "Create work item"), ""),
@@ -151,13 +143,6 @@ func projectActiveRoot(project Project) (Root, bool) {
 func projectHasActiveRoot(project Project) bool {
 	_, ok := projectActiveRoot(project)
 	return ok
-}
-
-func projectSetupExecutionProfileDetail(summary ProjectSetupReadinessSummary) string {
-	if summary.ExecutionProfileCount > 0 {
-		return projectSetupCountLabel(summary.ExecutionProfileCount, "execution profile")
-	}
-	return "Optional; add host/runtime hints when execution will be launched by an orchestrator."
 }
 
 func projectSetupGuidanceDetail(summary ProjectSetupReadinessSummary, project Project) string {

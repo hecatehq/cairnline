@@ -674,12 +674,11 @@ const (
 	ProjectSetupStatusTodo     = "todo"
 	ProjectSetupStatusOptional = "optional"
 
-	ProjectSetupActionSetupProject            = "setup_project"
-	ProjectSetupActionCreateWorkItem          = "create_work_item"
-	ProjectSetupActionUpdateProject           = "update_project"
-	ProjectSetupActionManageContext           = "manage_context"
-	ProjectSetupActionManageExecutionProfiles = "manage_execution_profiles"
-	ProjectSetupActionManageRoles             = "manage_roles"
+	ProjectSetupActionSetupProject   = "setup_project"
+	ProjectSetupActionCreateWorkItem = "create_work_item"
+	ProjectSetupActionUpdateProject  = "update_project"
+	ProjectSetupActionManageContext  = "manage_context"
+	ProjectSetupActionManageRoles    = "manage_roles"
 
 	ProjectHealthStatusClear     = "clear"
 	ProjectHealthStatusAttention = "attention"

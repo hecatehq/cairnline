@@ -18,7 +18,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	server := NewServer(service, "dev")
 
 	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.create","arguments":{"name":"Research notes","description":"Coordinate synthesis.","default_profile_id":"profile_research","default_execution_profile_id":"exec_local","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"AGENTS.md","locator":"AGENTS.md","format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main"}}]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.create","arguments":{"name":"Research notes","description":"Coordinate synthesis.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"AGENTS.md","locator":"AGENTS.md","format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main"}}]}}}` + "\n",
 	)
 	var output bytes.Buffer
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -46,9 +46,6 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if len(projects) != 1 {
 		t.Fatalf("projects = %+v, want one project", projects)
 	}
-	if projects[0].DefaultProfileID != "profile_research" || projects[0].DefaultExecutionProfileID != "exec_local" {
-		t.Fatalf("project defaults = %q/%q, want MCP-created defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
-	}
 	if len(projects[0].ContextSources) != 1 || projects[0].ContextSources[0].Format != "agents_md" || projects[0].ContextSources[0].Metadata["root_id"] != "root_main" {
 		t.Fatalf("project sources = %+v, want MCP-created source metadata", projects[0].ContextSources)
 	}
@@ -65,7 +62,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","default_profile_id":"profile_writer","default_execution_profile_id":"exec_review","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + projects[0].ID + `","description":"Updated synthesis coordination.","context_sources":[{"id":"src_agents","kind":"workspace_instruction","title":"Repository guidance","locator":"AGENTS.md","enabled":false,"format":"agents_md","scope":"workspace","trust_label":"workspace_guidance","source_category":"instructions","metadata":{"root_id":"root_main","source":"manual"}}]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -81,9 +78,6 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	updatedSource := projects[0].ContextSources[0]
 	if updatedSource.Title != "Repository guidance" || updatedSource.Enabled || updatedSource.Metadata["source"] != "manual" {
 		t.Fatalf("updated project source = %+v, want MCP-updated source metadata", updatedSource)
-	}
-	if projects[0].DefaultProfileID != "profile_writer" || projects[0].DefaultExecutionProfileID != "exec_review" {
-		t.Fatalf("updated project defaults = %q/%q, want MCP-updated defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
 	}
 	reviewerRole, err := service.CreateRole(context.Background(), core.Role{
 		ProjectID: projects[0].ID,
@@ -262,20 +256,10 @@ func TestMCPTools_CoordinationListsStructuredContent(t *testing.T) {
 		}
 	}
 
-	assertEmpty(1, "profiles.list", map[string]any{})
-	assertEmpty(2, "execution_profiles.list", map[string]any{})
-	assertEmpty(3, "work_items.list", map[string]any{"project_id": project.ID})
-	assertEmpty(4, "roles.list", map[string]any{"project_id": project.ID})
-	assertEmpty(5, "assignments.list", map[string]any{"project_id": project.ID})
+	assertEmpty(1, "work_items.list", map[string]any{"project_id": project.ID})
+	assertEmpty(2, "roles.list", map[string]any{"project_id": project.ID})
+	assertEmpty(3, "assignments.list", map[string]any{"project_id": project.ID})
 
-	profile, err := service.CreateAgentProfile(ctx, core.AgentProfile{Name: "Planner"})
-	if err != nil {
-		t.Fatalf("CreateAgentProfile() error = %v", err)
-	}
-	executionProfile, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Local CLI", AgentKind: "any"})
-	if err != nil {
-		t.Fatalf("CreateExecutionProfile() error = %v", err)
-	}
 	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Map contract"})
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
@@ -289,35 +273,21 @@ func TestMCPTools_CoordinationListsStructuredContent(t *testing.T) {
 		t.Fatalf("CreateAssignment() error = %v", err)
 	}
 
-	raw, _ := call(6, "profiles.list", map[string]any{})
-	var profiles []core.AgentProfile
-	decodeSlice("profiles.list", raw, &profiles)
-	if len(profiles) != 1 || profiles[0].ID != profile.ID || profiles[0].Name != "Planner" {
-		t.Fatalf("profiles structuredContent = %+v, want created profile %s", profiles, profile.ID)
-	}
-
-	raw, _ = call(7, "execution_profiles.list", map[string]any{})
-	var executionProfiles []core.ExecutionProfile
-	decodeSlice("execution_profiles.list", raw, &executionProfiles)
-	if len(executionProfiles) != 1 || executionProfiles[0].ID != executionProfile.ID || executionProfiles[0].AgentKind != "any" {
-		t.Fatalf("execution profiles structuredContent = %+v, want created execution profile %s", executionProfiles, executionProfile.ID)
-	}
-
-	raw, _ = call(8, "work_items.list", map[string]any{"project_id": project.ID})
+	raw, _ := call(4, "work_items.list", map[string]any{"project_id": project.ID})
 	var workItems []core.WorkItem
 	decodeSlice("work_items.list", raw, &workItems)
 	if len(workItems) != 1 || workItems[0].ID != work.ID || workItems[0].Title != "Map contract" {
 		t.Fatalf("work items structuredContent = %+v, want created work item %s", workItems, work.ID)
 	}
 
-	raw, _ = call(9, "roles.list", map[string]any{"project_id": project.ID})
+	raw, _ = call(5, "roles.list", map[string]any{"project_id": project.ID})
 	var roles []core.Role
 	decodeSlice("roles.list", raw, &roles)
 	if len(roles) != 1 || roles[0].ID != role.ID || roles[0].Name != "Architect" {
 		t.Fatalf("roles structuredContent = %+v, want created role %s", roles, role.ID)
 	}
 
-	raw, _ = call(10, "assignments.list", map[string]any{"project_id": project.ID})
+	raw, _ = call(6, "assignments.list", map[string]any{"project_id": project.ID})
 	var assignments []core.Assignment
 	decodeSlice("assignments.list", raw, &assignments)
 	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].WorkItemID != work.ID || assignments[0].RoleID != role.ID {
@@ -325,65 +295,22 @@ func TestMCPTools_CoordinationListsStructuredContent(t *testing.T) {
 	}
 }
 
-func TestMCPTools_DeleteProfilesAndRoles(t *testing.T) {
+func TestMCPTools_DoesNotExposeProfilesAndDeletesRoles(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
 	server := NewServer(service, "dev")
 
 	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"profiles.create","arguments":{"id":"profile_temp","name":"Temporary profile"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n",
 	)
 	var output bytes.Buffer
 	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve(profile create) error = %v", err)
+		t.Fatalf("Serve(tools/list) error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Created agent profile profile_temp") {
-		t.Fatalf("create profile response = %s", output.String())
-	}
-	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"profiles.delete","arguments":{"id":"profile_temp"}}}` + "\n",
-	)
-	output.Reset()
-	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve(profile delete) error = %v", err)
-	}
-	if !strings.Contains(output.String(), "Deleted agent profile profile_temp") {
-		t.Fatalf("delete profile response = %s", output.String())
-	}
-	profiles, err := service.ListAgentProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListAgentProfiles() error = %v", err)
-	}
-	if len(profiles) != 0 {
-		t.Fatalf("profiles after delete = %+v, want none", profiles)
-	}
-
-	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execution_profiles.create","arguments":{"id":"exec_temp","name":"Temporary execution","agent_kind":"any"}}}` + "\n",
-	)
-	output.Reset()
-	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve(execution create) error = %v", err)
-	}
-	if !strings.Contains(output.String(), "Created execution profile exec_temp") {
-		t.Fatalf("create execution profile response = %s", output.String())
-	}
-	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"execution_profiles.delete","arguments":{"id":"exec_temp"}}}` + "\n",
-	)
-	output.Reset()
-	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve(execution delete) error = %v", err)
-	}
-	if !strings.Contains(output.String(), "Deleted execution profile exec_temp") {
-		t.Fatalf("delete execution profile response = %s", output.String())
-	}
-	executionProfiles, err := service.ListExecutionProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListExecutionProfiles() error = %v", err)
-	}
-	if len(executionProfiles) != 0 {
-		t.Fatalf("execution profiles after delete = %+v, want none", executionProfiles)
+	for _, removed := range []string{"profiles.", "execution_profiles."} {
+		if strings.Contains(output.String(), removed) {
+			t.Fatalf("tools/list response exposes removed profile surface %q: %s", removed, output.String())
+		}
 	}
 
 	project, err := service.CreateProject(ctx, core.Project{Name: "Delete role"})
@@ -590,27 +517,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	service := core.NewService(core.NewMemoryStore())
 	server := NewServer(service, "dev")
 
-	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"profiles.create","arguments":{"id":"profile_reviewer","name":"Reviewer profile","instructions":"Review with evidence.","skill_ids":["review"]}}}` + "\n",
-	)
 	var output bytes.Buffer
-	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve() error = %v", err)
-	}
-	if !strings.Contains(output.String(), "Created agent profile profile_reviewer") {
-		t.Fatalf("create profile response = %s", output.String())
-	}
-
-	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execution_profiles.create","arguments":{"id":"exec_local","name":"Local reviewer","agent_kind":"any","provider_hint":"local","model_hint":"local-small","tools_policy":"readonly","writes_policy":"block","network_policy":"block","approval_policy":"require","adapter_options":{"mode":"test"}}}}` + "\n",
-	)
-	output.Reset()
-	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve() error = %v", err)
-	}
-	if !strings.Contains(output.String(), "Created execution profile exec_local") {
-		t.Fatalf("create execution profile response = %s", output.String())
-	}
 
 	project, err := service.CreateProject(ctx, core.Project{
 		Name: "Dogfood",
@@ -627,7 +534,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if project.DefaultRootID != "root_main" {
 		t.Fatalf("default root = %q, want root_main", project.DefaultRootID)
 	}
-	input = strings.NewReader(
+	input := strings.NewReader(
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"projects.update","arguments":{"id":"` + project.ID + `","roots":[{"id":"root_review","path":"/workspace/dogfood-review","kind":"git_worktree"}]}}}` + "\n",
 	)
 	output.Reset()
@@ -645,11 +552,10 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("projects = %+v, want default root to follow replacement roots", projects)
 	}
 	role, err := service.CreateRole(ctx, core.Role{
-		ProjectID:                 project.ID,
-		Name:                      "Reviewer",
-		Instructions:              "Review evidence.",
-		DefaultProfileID:          "profile_reviewer",
-		DefaultExecutionProfileID: "exec_local",
+		ProjectID:       project.ID,
+		Name:            "Reviewer",
+		Instructions:    "Review evidence.",
+		DefaultSkillIDs: []string{"review"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -668,8 +574,8 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRoles() error = %v", err)
 	}
-	if len(updatedRoles) != 1 || updatedRoles[0].DefaultProfileID != "profile_reviewer" || updatedRoles[0].DefaultExecutionProfileID != "exec_local" || updatedRoles[0].Name != "Senior reviewer" {
-		t.Fatalf("updated roles = %+v, want patch preserving default profiles", updatedRoles)
+	if len(updatedRoles) != 1 || updatedRoles[0].Name != "Senior reviewer" || len(updatedRoles[0].DefaultSkillIDs) != 1 || updatedRoles[0].DefaultSkillIDs[0] != "review" {
+		t.Fatalf("updated roles = %+v, want patch preserving role skill metadata", updatedRoles)
 	}
 	work, err := service.CreateWorkItem(ctx, core.WorkItem{
 		ProjectID: project.ID,
@@ -682,7 +588,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"assignments.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_profile_id":"exec_local","desired_agent_kind":"any","skill_ids":["review"]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"assignments.create","arguments":{"project_id":"` + project.ID + `","work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","root_id":"root_review","desired_agent_kind":"any","skill_ids":["review"]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -713,7 +619,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("CreateWorkItem(updated) error = %v", err)
 	}
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","profile_id":"profile_reviewer","execution_profile_id":"exec_local","execution_mode":"mcp_pull","desired_agent_kind":"codex","skill_ids":["review","backend","backend"],"status":"queued","execution_ref":"chat-1","context_snapshot_id":"ctx-1"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_mode":"mcp_pull","desired_agent_kind":"codex","skill_ids":["review","backend","backend"],"status":"queued","execution_ref":"chat-1","context_snapshot_id":"ctx-1"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -731,7 +637,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("update assignment response did not unmarshal: %v\n%s", err, output.String())
 	}
 	updatedAssignment := updateAssignmentResponse.Result.StructuredContent
-	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.ProfileID != "profile_reviewer" || updatedAssignment.ExecutionProfileID != "exec_local" || updatedAssignment.ContextSnapshotID != "ctx-1" {
+	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.ProfileID != "" || updatedAssignment.ExecutionProfileID != "" || updatedAssignment.ContextSnapshotID != "ctx-1" {
 		t.Fatalf("updated assignment = %+v, want retargeted assignment metadata", updatedAssignment)
 	}
 	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" {
@@ -1032,8 +938,8 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if packet.Kind != core.LaunchPacketKindAssignment || packet.Assignment.ID != assignmentID || packet.Role == nil || packet.Role.ID != role.ID {
 		t.Fatalf("launch packet = %+v, want structured assignment packet", packet)
 	}
-	if packet.Profile == nil || packet.Profile.ID != "profile_reviewer" || packet.ExecutionProfile == nil || packet.ExecutionProfile.ID != "exec_local" {
-		t.Fatalf("launch packet = %+v, want resolved profile metadata", packet)
+	if packet.Profile != nil || packet.ExecutionProfile != nil {
+		t.Fatalf("launch packet = %+v, want agent-neutral MCP packet without host profiles", packet)
 	}
 	if len(packet.Memory) != 1 || packet.Memory[0].Title != "Accepted review convention" {
 		t.Fatalf("launch packet memory = %+v, want accepted memory entry", packet.Memory)

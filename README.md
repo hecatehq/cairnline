@@ -20,6 +20,28 @@ local MCP server, but its contracts are not stable yet.
   orchestration.
 - Keep Hecate-specific runtime behavior out of the portable core.
 
+## Concept Boundary
+
+Cairnline's portable concepts are coordination concepts:
+
+- **Project role**: a responsibility inside a project, such as architect,
+  implementer, reviewer, researcher, designer, or operator.
+- **Assignment**: a durable coordination record binding work item, role,
+  optional root, execution mode, desired agent metadata, and lifecycle status.
+- **Desired agent**: a portable hint about which kind of human or agent host
+  should claim work, plus skill ids the claimant may understand.
+- **Skill metadata**: referenced capability/instruction metadata only; it does
+  not load, inject, execute, install, or fetch skill bodies.
+
+Cairnline does not expose agent presets, runtime profiles, provider settings,
+model settings, sandbox policy, or launch permissions as portable MCP concepts.
+MCP clients should create project roles plus assignments with
+`execution_mode`, `desired_agent.kind`, and `desired_agent.skill_ids`, then map
+those hints to their own Claude, Cursor, Copilot, OpenAI, Hecate, human, or
+other host-specific agent configuration. Cairnline records intent and
+provenance; the agent host remains responsible for runtime policy,
+permissions, model choice, sandboxing, and launch behavior.
+
 ## Security Boundaries
 
 Cairnline is local-first and single-operator by default. It stores coordination
@@ -46,6 +68,10 @@ policy, credential handling, or logged-in session boundaries. Secrets, cookies,
 provider credentials, and external-agent private memory are outside Cairnline's
 core model.
 
+Cairnline assignment metadata is not authorization. Agent hosts and
+orchestrators must enforce their own policy boundaries even when an assignment
+asks for a particular execution mode, desired agent kind, or skill id.
+
 Role references are durable coordination metadata rather than hard ownership.
 Creating or updating work-item owner/reviewer refs and assignment role refs
 validates the role at write time, but deleting a role does not delete or block
@@ -57,18 +83,17 @@ historical record deliberately.
 
 Implemented now:
 
-- portable core types for projects with roots/default root and
-  profile/execution-profile default references, context source provenance
-  metadata, roles with agent/execution-profile defaults,
-  profiles, work items, assignments with lifecycle timestamps, skill metadata,
+- portable core types for projects with roots/default root, context source
+  provenance metadata, project roles, work items, assignments with lifecycle
+  timestamps, desired agent hints, skill metadata,
   generic collaboration artifacts, assignment-scoped evidence with
   source/provider/external-id metadata, Hecate-compatible structured review
   verdict/risk metadata, handoffs with source/target refs and status-transition
   timestamps, accepted memory, and memory candidates
-- in-memory service for projects, profiles, roles, work items, assignments,
+- in-memory service for projects, project roles, work items, assignments,
   assistant proposal records including project-root/default-root actions, and
   collaboration artifacts
-- SQLite store for durable projects, profiles, roles, work items, assignments,
+- SQLite store for durable projects, project roles, work items, assignments,
   skill metadata, assistant proposal records, and collaboration artifacts
 - project skill discovery from `.agents/skills`, Hecate-compatible
   `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
@@ -81,17 +106,17 @@ Implemented now:
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP, including work-item owner/reviewer role-ref
   validation, assignment metadata updates that preserve created time and claim
-  ownership while validating work-item, role, root, profile, and
-  execution-profile references, a narrow claimed-assignment release path for
+  ownership while validating work-item, role, root, and durable coordination
+  references, a narrow claimed-assignment release path for
   pre-dispatch retry cleanup, plus source-level context metadata
   create/update/delete helpers that avoid whole-project replacement
 - embeddable snapshot export/import for migration rehearsals and bridge seeding;
-  snapshots cover profiles, execution profiles, projects, skills, roles, work,
+  snapshots cover projects, skills, roles, work,
   assignments, artifacts, evidence, reviews, handoffs, memory entries,
   memory candidates, and assistant proposal records
 - stdio MCP server with JSON-RPC framing
 - MCP read tools return human-readable text plus `structuredContent` where a
-  stable data shape exists, including core project/profile/role/work/assignment
+  stable data shape exists, including core project/role/work/assignment
   list surfaces and assignment context/launch packet reads, so compatible
   clients can avoid scraping text output
 - MCP resources:
@@ -123,14 +148,6 @@ Implemented now:
   - `assistant.proposals.list`
   - `assistant.proposals.get`
   - `assistant.apply`
-  - `profiles.list`
-  - `profiles.create`
-  - `profiles.update`
-  - `profiles.delete`
-  - `execution_profiles.list`
-  - `execution_profiles.create`
-  - `execution_profiles.update`
-  - `execution_profiles.delete`
   - `skills.list`
   - `skills.create`
   - `skills.update`
@@ -346,9 +363,9 @@ Current Hecate dogfood covers:
   setup, health, skills, memory, roles, work, assignment, collaboration,
   Project Assistant, chat-context, activity, closeout, and operations views
 - opt-in embedded write-authority switchpoints for portable project identity,
-  metadata/defaults, roots, context sources, agent profiles, skills, roles,
-  work items, assignments, collaboration artifacts, handoffs, accepted memory,
-  memory candidates, and Project Assistant proposal-ledger records
+  metadata/defaults, roots, context sources, skills, roles, work items,
+  assignments, collaboration artifacts, handoffs, accepted memory, memory
+  candidates, and Project Assistant proposal-ledger records
 - strict embedded mirror/parity probes, migration rehearsal evidence, rollback
   notes, and backend-status gates for deciding when Cairnline is authoritative
   for portable project coordination state

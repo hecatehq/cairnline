@@ -140,12 +140,11 @@ const (
 	ProjectSetupStatusTodo     = core.ProjectSetupStatusTodo
 	ProjectSetupStatusOptional = core.ProjectSetupStatusOptional
 
-	ProjectSetupActionSetupProject            = core.ProjectSetupActionSetupProject
-	ProjectSetupActionCreateWorkItem          = core.ProjectSetupActionCreateWorkItem
-	ProjectSetupActionUpdateProject           = core.ProjectSetupActionUpdateProject
-	ProjectSetupActionManageContext           = core.ProjectSetupActionManageContext
-	ProjectSetupActionManageExecutionProfiles = core.ProjectSetupActionManageExecutionProfiles
-	ProjectSetupActionManageRoles             = core.ProjectSetupActionManageRoles
+	ProjectSetupActionSetupProject   = core.ProjectSetupActionSetupProject
+	ProjectSetupActionCreateWorkItem = core.ProjectSetupActionCreateWorkItem
+	ProjectSetupActionUpdateProject  = core.ProjectSetupActionUpdateProject
+	ProjectSetupActionManageContext  = core.ProjectSetupActionManageContext
+	ProjectSetupActionManageRoles    = core.ProjectSetupActionManageRoles
 
 	ProjectHealthStatusClear     = core.ProjectHealthStatusClear
 	ProjectHealthStatusAttention = core.ProjectHealthStatusAttention
