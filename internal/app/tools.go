@@ -51,8 +51,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"active":{"type":"boolean"}
 				},"required":["path"]}},
 				"default_root_id":{"type":"string"},
-				"default_profile_id":{"type":"string"},
-				"default_execution_profile_id":{"type":"string"},
 				"context_sources":{"type":"array","items":{"type":"object","properties":{
 					"id":{"type":"string"},
 					"kind":{"type":"string"},
@@ -89,8 +87,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 					"active":{"type":"boolean"}
 				},"required":["path"]}},
 				"default_root_id":{"type":"string"},
-				"default_profile_id":{"type":"string"},
-				"default_execution_profile_id":{"type":"string"},
 				"context_sources":{"type":"array","items":{"type":"object","properties":{
 					"id":{"type":"string"},
 					"kind":{"type":"string"},
@@ -111,7 +107,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "projects.delete",
 		Title:       "Delete project",
-		Description: "Delete a project and its project-scoped coordination records. Global profiles and execution profiles are not deleted.",
+		Description: "Delete a project and its project-scoped coordination records.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{"id":{"type":"string","minLength":1}},
@@ -360,130 +356,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	}, assistantApply(service))
 
 	server.RegisterTool(mcp.Tool{
-		Name:        "profiles.list",
-		Title:       "List agent profiles",
-		Description: "List portable agent behavior and context-policy profiles.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
-		Annotations: readOnly,
-	}, listAgentProfiles(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "profiles.create",
-		Title:       "Create agent profile",
-		Description: "Create a portable agent behavior and context-policy profile.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{
-				"id":{"type":"string"},
-				"name":{"type":"string","minLength":1},
-				"description":{"type":"string"},
-				"instructions":{"type":"string"},
-				"context_policy":{"type":"string"},
-				"memory_policy":{"type":"string"},
-				"source_policy":{"type":"string"},
-				"skill_ids":{"type":"array","items":{"type":"string"}}
-			},
-			"required":["name"]
-		}`),
-	}, createAgentProfile(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "profiles.update",
-		Title:       "Update agent profile",
-		Description: "Replace a portable agent behavior and context-policy profile.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{
-				"id":{"type":"string","minLength":1},
-				"name":{"type":"string","minLength":1},
-				"description":{"type":"string"},
-				"instructions":{"type":"string"},
-				"context_policy":{"type":"string"},
-				"memory_policy":{"type":"string"},
-				"source_policy":{"type":"string"},
-				"skill_ids":{"type":"array","items":{"type":"string"}}
-			},
-			"required":["id","name"]
-		}`),
-	}, updateAgentProfile(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "profiles.delete",
-		Title:       "Delete agent profile",
-		Description: "Delete a portable agent behavior and context-policy profile.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{"id":{"type":"string","minLength":1}},
-			"required":["id"]
-		}`),
-	}, deleteAgentProfile(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "execution_profiles.list",
-		Title:       "List execution profiles",
-		Description: "List optional host/runtime-specific execution hints.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
-		Annotations: readOnly,
-	}, listExecutionProfiles(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "execution_profiles.create",
-		Title:       "Create execution profile",
-		Description: "Create optional host/runtime-specific execution hints.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{
-				"id":{"type":"string"},
-				"name":{"type":"string","minLength":1},
-				"description":{"type":"string"},
-				"agent_kind":{"type":"string"},
-				"model_hint":{"type":"string"},
-				"provider_hint":{"type":"string"},
-				"tools_policy":{"type":"string"},
-				"writes_policy":{"type":"string"},
-				"network_policy":{"type":"string"},
-				"approval_policy":{"type":"string"},
-				"adapter_options":{"type":"object"}
-			},
-			"required":["name"]
-		}`),
-	}, createExecutionProfile(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "execution_profiles.update",
-		Title:       "Update execution profile",
-		Description: "Replace optional host/runtime-specific execution hints.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{
-				"id":{"type":"string","minLength":1},
-				"name":{"type":"string","minLength":1},
-				"description":{"type":"string"},
-				"agent_kind":{"type":"string"},
-				"model_hint":{"type":"string"},
-				"provider_hint":{"type":"string"},
-				"tools_policy":{"type":"string"},
-				"writes_policy":{"type":"string"},
-				"network_policy":{"type":"string"},
-				"approval_policy":{"type":"string"},
-				"adapter_options":{"type":"object"}
-			},
-			"required":["id","name"]
-		}`),
-	}, updateExecutionProfile(service))
-
-	server.RegisterTool(mcp.Tool{
-		Name:        "execution_profiles.delete",
-		Title:       "Delete execution profile",
-		Description: "Delete optional host/runtime-specific execution hints.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{"id":{"type":"string","minLength":1}},
-			"required":["id"]
-		}`),
-	}, deleteExecutionProfile(service))
-
-	server.RegisterTool(mcp.Tool{
 		Name:        "skills.list",
 		Title:       "List project skills",
 		Description: "List project-scoped skill metadata records.",
@@ -692,8 +564,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"name":{"type":"string","minLength":1},
 				"description":{"type":"string"},
 				"instructions":{"type":"string"},
-				"default_profile_id":{"type":"string"},
-				"default_execution_profile_id":{"type":"string"},
 				"default_skill_ids":{"type":"array","items":{"type":"string"}},
 				"default_execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]}
 			},
@@ -713,8 +583,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"name":{"type":"string"},
 				"description":{"type":"string"},
 				"instructions":{"type":"string"},
-				"default_profile_id":{"type":"string"},
-				"default_execution_profile_id":{"type":"string"},
 				"default_skill_ids":{"type":"array","items":{"type":"string"}},
 				"default_execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]}
 			},
@@ -793,8 +661,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"work_item_id":{"type":"string","minLength":1},
 				"role_id":{"type":"string","minLength":1},
 				"root_id":{"type":"string"},
-				"profile_id":{"type":"string"},
-				"execution_profile_id":{"type":"string"},
 				"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
 				"desired_agent_kind":{"type":"string"},
 				"skill_ids":{"type":"array","items":{"type":"string"}}
@@ -806,7 +672,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.update",
 		Title:       "Update assignment metadata",
-		Description: "Update assignment coordination metadata such as work item, role, root, profiles, execution mode, desired agent, status, and context refs.",
+		Description: "Update assignment coordination metadata such as work item, role, root, execution mode, desired agent, status, and context refs.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
@@ -815,8 +681,6 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"work_item_id":{"type":"string","minLength":1},
 				"role_id":{"type":"string","minLength":1},
 				"root_id":{"type":"string"},
-				"profile_id":{"type":"string"},
-				"execution_profile_id":{"type":"string"},
 				"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
 				"desired_agent_kind":{"type":"string"},
 				"skill_ids":{"type":"array","items":{"type":"string"}},
@@ -1531,13 +1395,11 @@ func toCoreSources(input []sourceArgs) []core.Source {
 
 func createProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		Name                      string       `json:"name"`
-		Description               string       `json:"description"`
-		Roots                     []rootArgs   `json:"roots"`
-		DefaultRootID             string       `json:"default_root_id"`
-		DefaultProfileID          string       `json:"default_profile_id"`
-		DefaultExecutionProfileID string       `json:"default_execution_profile_id"`
-		ContextSources            []sourceArgs `json:"context_sources"`
+		Name           string       `json:"name"`
+		Description    string       `json:"description"`
+		Roots          []rootArgs   `json:"roots"`
+		DefaultRootID  string       `json:"default_root_id"`
+		ContextSources []sourceArgs `json:"context_sources"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1545,13 +1407,11 @@ func createProject(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateProject(ctx, core.Project{
-			Name:                      input.Name,
-			Description:               input.Description,
-			Roots:                     toCoreRoots(input.Roots),
-			DefaultRootID:             input.DefaultRootID,
-			DefaultProfileID:          input.DefaultProfileID,
-			DefaultExecutionProfileID: input.DefaultExecutionProfileID,
-			ContextSources:            toCoreSources(input.ContextSources),
+			Name:           input.Name,
+			Description:    input.Description,
+			Roots:          toCoreRoots(input.Roots),
+			DefaultRootID:  input.DefaultRootID,
+			ContextSources: toCoreSources(input.ContextSources),
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -1564,14 +1424,12 @@ func createProject(service *core.Service) mcp.ToolHandler {
 
 func updateProject(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ID                        string        `json:"id"`
-		Name                      *string       `json:"name"`
-		Description               *string       `json:"description"`
-		Roots                     *[]rootArgs   `json:"roots"`
-		DefaultRootID             *string       `json:"default_root_id"`
-		DefaultProfileID          *string       `json:"default_profile_id"`
-		DefaultExecutionProfileID *string       `json:"default_execution_profile_id"`
-		ContextSources            *[]sourceArgs `json:"context_sources"`
+		ID             string        `json:"id"`
+		Name           *string       `json:"name"`
+		Description    *string       `json:"description"`
+		Roots          *[]rootArgs   `json:"roots"`
+		DefaultRootID  *string       `json:"default_root_id"`
+		ContextSources *[]sourceArgs `json:"context_sources"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -1596,12 +1454,6 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 		}
 		if input.DefaultRootID != nil {
 			existing.DefaultRootID = *input.DefaultRootID
-		}
-		if input.DefaultProfileID != nil {
-			existing.DefaultProfileID = *input.DefaultProfileID
-		}
-		if input.DefaultExecutionProfileID != nil {
-			existing.DefaultExecutionProfileID = *input.DefaultExecutionProfileID
 		}
 		if input.ContextSources != nil {
 			existing.ContextSources = toCoreSources(*input.ContextSources)
@@ -2125,250 +1977,6 @@ func assistantApply(service *core.Service) mcp.ToolHandler {
 	}
 }
 
-func listAgentProfiles(service *core.Service) mcp.ToolHandler {
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		items, err := service.ListAgentProfiles(ctx)
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		if items == nil {
-			items = []core.AgentProfile{}
-		}
-		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No agent profiles yet."), StructuredContent: items}, nil
-		}
-		var b strings.Builder
-		fmt.Fprintf(&b, "Agent profiles (%d):\n", len(items))
-		for _, item := range items {
-			fmt.Fprintf(&b, "- %s: %s", item.ID, item.Name)
-			if item.Description != "" {
-				fmt.Fprintf(&b, " — %s", item.Description)
-			}
-			if len(item.SkillIDs) > 0 {
-				fmt.Fprintf(&b, " skills=%s", strings.Join(item.SkillIDs, ","))
-			}
-			b.WriteByte('\n')
-		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
-	}
-}
-
-func createAgentProfile(service *core.Service) mcp.ToolHandler {
-	type args struct {
-		ID            string   `json:"id"`
-		Name          string   `json:"name"`
-		Description   string   `json:"description"`
-		Instructions  string   `json:"instructions"`
-		ContextPolicy string   `json:"context_policy"`
-		MemoryPolicy  string   `json:"memory_policy"`
-		SourcePolicy  string   `json:"source_policy"`
-		SkillIDs      []string `json:"skill_ids"`
-	}
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		var input args
-		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-		item, err := service.CreateAgentProfile(ctx, core.AgentProfile{
-			ID:            input.ID,
-			Name:          input.Name,
-			Description:   input.Description,
-			Instructions:  input.Instructions,
-			ContextPolicy: input.ContextPolicy,
-			MemoryPolicy:  input.MemoryPolicy,
-			SourcePolicy:  input.SourcePolicy,
-			SkillIDs:      input.SkillIDs,
-		})
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Created agent profile %s: %s", item.ID, item.Name)),
-		}, nil
-	}
-}
-
-func updateAgentProfile(service *core.Service) mcp.ToolHandler {
-	type args struct {
-		ID            string   `json:"id"`
-		Name          string   `json:"name"`
-		Description   string   `json:"description"`
-		Instructions  string   `json:"instructions"`
-		ContextPolicy string   `json:"context_policy"`
-		MemoryPolicy  string   `json:"memory_policy"`
-		SourcePolicy  string   `json:"source_policy"`
-		SkillIDs      []string `json:"skill_ids"`
-	}
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		var input args
-		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-		item, err := service.UpdateAgentProfile(ctx, core.AgentProfile{
-			ID:            input.ID,
-			Name:          input.Name,
-			Description:   input.Description,
-			Instructions:  input.Instructions,
-			ContextPolicy: input.ContextPolicy,
-			MemoryPolicy:  input.MemoryPolicy,
-			SourcePolicy:  input.SourcePolicy,
-			SkillIDs:      input.SkillIDs,
-		})
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Updated agent profile %s: %s", item.ID, item.Name)),
-		}, nil
-	}
-}
-
-func deleteAgentProfile(service *core.Service) mcp.ToolHandler {
-	type args struct {
-		ID string `json:"id"`
-	}
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		var input args
-		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-		if err := service.DeleteAgentProfile(ctx, input.ID); err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Deleted agent profile %s", strings.TrimSpace(input.ID))),
-		}, nil
-	}
-}
-
-func listExecutionProfiles(service *core.Service) mcp.ToolHandler {
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		items, err := service.ListExecutionProfiles(ctx)
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		if items == nil {
-			items = []core.ExecutionProfile{}
-		}
-		if len(items) == 0 {
-			return mcp.CallToolResult{Content: mcp.TextContent("No execution profiles yet."), StructuredContent: items}, nil
-		}
-		var b strings.Builder
-		fmt.Fprintf(&b, "Execution profiles (%d):\n", len(items))
-		for _, item := range items {
-			fmt.Fprintf(&b, "- %s: %s", item.ID, item.Name)
-			if item.AgentKind != "" {
-				fmt.Fprintf(&b, " agent=%s", item.AgentKind)
-			}
-			if item.ProviderHint != "" || item.ModelHint != "" {
-				fmt.Fprintf(&b, " model=%s/%s", item.ProviderHint, item.ModelHint)
-			}
-			b.WriteByte('\n')
-		}
-		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
-	}
-}
-
-func createExecutionProfile(service *core.Service) mcp.ToolHandler {
-	type args struct {
-		ID             string         `json:"id"`
-		Name           string         `json:"name"`
-		Description    string         `json:"description"`
-		AgentKind      string         `json:"agent_kind"`
-		ModelHint      string         `json:"model_hint"`
-		ProviderHint   string         `json:"provider_hint"`
-		ToolsPolicy    string         `json:"tools_policy"`
-		WritesPolicy   string         `json:"writes_policy"`
-		NetworkPolicy  string         `json:"network_policy"`
-		ApprovalPolicy string         `json:"approval_policy"`
-		AdapterOptions map[string]any `json:"adapter_options"`
-	}
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		var input args
-		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-		item, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{
-			ID:             input.ID,
-			Name:           input.Name,
-			Description:    input.Description,
-			AgentKind:      input.AgentKind,
-			ModelHint:      input.ModelHint,
-			ProviderHint:   input.ProviderHint,
-			ToolsPolicy:    input.ToolsPolicy,
-			WritesPolicy:   input.WritesPolicy,
-			NetworkPolicy:  input.NetworkPolicy,
-			ApprovalPolicy: input.ApprovalPolicy,
-			AdapterOptions: input.AdapterOptions,
-		})
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Created execution profile %s: %s", item.ID, item.Name)),
-		}, nil
-	}
-}
-
-func updateExecutionProfile(service *core.Service) mcp.ToolHandler {
-	type args struct {
-		ID             string         `json:"id"`
-		Name           string         `json:"name"`
-		Description    string         `json:"description"`
-		AgentKind      string         `json:"agent_kind"`
-		ModelHint      string         `json:"model_hint"`
-		ProviderHint   string         `json:"provider_hint"`
-		ToolsPolicy    string         `json:"tools_policy"`
-		WritesPolicy   string         `json:"writes_policy"`
-		NetworkPolicy  string         `json:"network_policy"`
-		ApprovalPolicy string         `json:"approval_policy"`
-		AdapterOptions map[string]any `json:"adapter_options"`
-	}
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		var input args
-		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-		item, err := service.UpdateExecutionProfile(ctx, core.ExecutionProfile{
-			ID:             input.ID,
-			Name:           input.Name,
-			Description:    input.Description,
-			AgentKind:      input.AgentKind,
-			ModelHint:      input.ModelHint,
-			ProviderHint:   input.ProviderHint,
-			ToolsPolicy:    input.ToolsPolicy,
-			WritesPolicy:   input.WritesPolicy,
-			NetworkPolicy:  input.NetworkPolicy,
-			ApprovalPolicy: input.ApprovalPolicy,
-			AdapterOptions: input.AdapterOptions,
-		})
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Updated execution profile %s: %s", item.ID, item.Name)),
-		}, nil
-	}
-}
-
-func deleteExecutionProfile(service *core.Service) mcp.ToolHandler {
-	type args struct {
-		ID string `json:"id"`
-	}
-	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
-		var input args
-		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-		if err := service.DeleteExecutionProfile(ctx, input.ID); err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Deleted execution profile %s", strings.TrimSpace(input.ID))),
-		}, nil
-	}
-}
-
 func listProjectSkills(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID string `json:"project_id"`
@@ -2660,9 +2268,6 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 			if item.DefaultExecutionMode != "" {
 				fmt.Fprintf(&b, " (%s)", item.DefaultExecutionMode)
 			}
-			if item.DefaultExecutionProfileID != "" {
-				fmt.Fprintf(&b, " exec=%s", item.DefaultExecutionProfileID)
-			}
 			b.WriteByte('\n')
 		}
 		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
@@ -2671,14 +2276,12 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 
 func createRole(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID                 string   `json:"project_id"`
-		Name                      string   `json:"name"`
-		Description               string   `json:"description"`
-		Instructions              string   `json:"instructions"`
-		DefaultProfileID          string   `json:"default_profile_id"`
-		DefaultExecutionProfileID string   `json:"default_execution_profile_id"`
-		DefaultSkillIDs           []string `json:"default_skill_ids"`
-		DefaultExecutionMode      string   `json:"default_execution_mode"`
+		ProjectID            string   `json:"project_id"`
+		Name                 string   `json:"name"`
+		Description          string   `json:"description"`
+		Instructions         string   `json:"instructions"`
+		DefaultSkillIDs      []string `json:"default_skill_ids"`
+		DefaultExecutionMode string   `json:"default_execution_mode"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2686,14 +2289,12 @@ func createRole(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateRole(ctx, core.Role{
-			ProjectID:                 input.ProjectID,
-			Name:                      input.Name,
-			Description:               input.Description,
-			Instructions:              input.Instructions,
-			DefaultProfileID:          input.DefaultProfileID,
-			DefaultExecutionProfileID: input.DefaultExecutionProfileID,
-			DefaultSkillIDs:           input.DefaultSkillIDs,
-			DefaultExecutionMode:      input.DefaultExecutionMode,
+			ProjectID:            input.ProjectID,
+			Name:                 input.Name,
+			Description:          input.Description,
+			Instructions:         input.Instructions,
+			DefaultSkillIDs:      input.DefaultSkillIDs,
+			DefaultExecutionMode: input.DefaultExecutionMode,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -2706,15 +2307,13 @@ func createRole(service *core.Service) mcp.ToolHandler {
 
 func updateRole(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID                 string    `json:"project_id"`
-		ID                        string    `json:"id"`
-		Name                      *string   `json:"name"`
-		Description               *string   `json:"description"`
-		Instructions              *string   `json:"instructions"`
-		DefaultProfileID          *string   `json:"default_profile_id"`
-		DefaultExecutionProfileID *string   `json:"default_execution_profile_id"`
-		DefaultSkillIDs           *[]string `json:"default_skill_ids"`
-		DefaultExecutionMode      *string   `json:"default_execution_mode"`
+		ProjectID            string    `json:"project_id"`
+		ID                   string    `json:"id"`
+		Name                 *string   `json:"name"`
+		Description          *string   `json:"description"`
+		Instructions         *string   `json:"instructions"`
+		DefaultSkillIDs      *[]string `json:"default_skill_ids"`
+		DefaultExecutionMode *string   `json:"default_execution_mode"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2743,12 +2342,6 @@ func updateRole(service *core.Service) mcp.ToolHandler {
 		}
 		if input.Instructions != nil {
 			existing.Instructions = *input.Instructions
-		}
-		if input.DefaultProfileID != nil {
-			existing.DefaultProfileID = *input.DefaultProfileID
-		}
-		if input.DefaultExecutionProfileID != nil {
-			existing.DefaultExecutionProfileID = *input.DefaultExecutionProfileID
 		}
 		if input.DefaultSkillIDs != nil {
 			existing.DefaultSkillIDs = *input.DefaultSkillIDs
@@ -2880,15 +2473,13 @@ func nextAssignments(service *core.Service) mcp.ToolHandler {
 
 func createAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID          string   `json:"project_id"`
-		WorkItemID         string   `json:"work_item_id"`
-		RoleID             string   `json:"role_id"`
-		RootID             string   `json:"root_id"`
-		ProfileID          string   `json:"profile_id"`
-		ExecutionProfileID string   `json:"execution_profile_id"`
-		ExecutionMode      string   `json:"execution_mode"`
-		DesiredAgentKind   string   `json:"desired_agent_kind"`
-		SkillIDs           []string `json:"skill_ids"`
+		ProjectID        string   `json:"project_id"`
+		WorkItemID       string   `json:"work_item_id"`
+		RoleID           string   `json:"role_id"`
+		RootID           string   `json:"root_id"`
+		ExecutionMode    string   `json:"execution_mode"`
+		DesiredAgentKind string   `json:"desired_agent_kind"`
+		SkillIDs         []string `json:"skill_ids"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2896,13 +2487,11 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateAssignment(ctx, core.Assignment{
-			ProjectID:          input.ProjectID,
-			WorkItemID:         input.WorkItemID,
-			RoleID:             input.RoleID,
-			RootID:             input.RootID,
-			ProfileID:          input.ProfileID,
-			ExecutionProfileID: input.ExecutionProfileID,
-			ExecutionMode:      input.ExecutionMode,
+			ProjectID:     input.ProjectID,
+			WorkItemID:    input.WorkItemID,
+			RoleID:        input.RoleID,
+			RootID:        input.RootID,
+			ExecutionMode: input.ExecutionMode,
 			DesiredAgent: core.DesiredAgent{
 				Kind:     input.DesiredAgentKind,
 				SkillIDs: input.SkillIDs,
@@ -2923,19 +2512,17 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 
 func updateAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID          string   `json:"project_id"`
-		AssignmentID       string   `json:"assignment_id"`
-		WorkItemID         string   `json:"work_item_id"`
-		RoleID             string   `json:"role_id"`
-		RootID             string   `json:"root_id"`
-		ProfileID          string   `json:"profile_id"`
-		ExecutionProfileID string   `json:"execution_profile_id"`
-		ExecutionMode      string   `json:"execution_mode"`
-		DesiredAgentKind   string   `json:"desired_agent_kind"`
-		SkillIDs           []string `json:"skill_ids"`
-		Status             string   `json:"status"`
-		ExecutionRef       string   `json:"execution_ref"`
-		ContextSnapshotID  string   `json:"context_snapshot_id"`
+		ProjectID         string   `json:"project_id"`
+		AssignmentID      string   `json:"assignment_id"`
+		WorkItemID        string   `json:"work_item_id"`
+		RoleID            string   `json:"role_id"`
+		RootID            string   `json:"root_id"`
+		ExecutionMode     string   `json:"execution_mode"`
+		DesiredAgentKind  string   `json:"desired_agent_kind"`
+		SkillIDs          []string `json:"skill_ids"`
+		Status            string   `json:"status"`
+		ExecutionRef      string   `json:"execution_ref"`
+		ContextSnapshotID string   `json:"context_snapshot_id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2943,15 +2530,13 @@ func updateAssignment(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.UpdateAssignment(ctx, core.Assignment{
-			ProjectID:          input.ProjectID,
-			ID:                 input.AssignmentID,
-			WorkItemID:         input.WorkItemID,
-			RoleID:             input.RoleID,
-			RootID:             input.RootID,
-			ProfileID:          input.ProfileID,
-			ExecutionProfileID: input.ExecutionProfileID,
-			ExecutionMode:      input.ExecutionMode,
-			Status:             input.Status,
+			ProjectID:     input.ProjectID,
+			ID:            input.AssignmentID,
+			WorkItemID:    input.WorkItemID,
+			RoleID:        input.RoleID,
+			RootID:        input.RootID,
+			ExecutionMode: input.ExecutionMode,
+			Status:        input.Status,
 			DesiredAgent: core.DesiredAgent{
 				Kind:     input.DesiredAgentKind,
 				SkillIDs: input.SkillIDs,
@@ -4286,11 +3871,10 @@ func formatProjectSetupReadiness(readiness core.ProjectSetupReadiness) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Setup readiness %s\n", readiness.ProjectID)
 	fmt.Fprintf(&b, "show_onboarding=%t setup_started=%t first_work_ready=%t\n", readiness.ShowOnboarding, readiness.SetupStarted, readiness.FirstWorkReady)
-	fmt.Fprintf(&b, "Summary: work_items=%d roles=%d skills=%d execution_profiles=%d sources=%d memory=%d candidates=%d purpose=%t active_root=%t\n",
+	fmt.Fprintf(&b, "Summary: work_items=%d roles=%d skills=%d sources=%d memory=%d candidates=%d purpose=%t active_root=%t\n",
 		readiness.Summary.WorkItemCount,
 		readiness.Summary.RoleCount,
 		readiness.Summary.SkillCount,
-		readiness.Summary.ExecutionProfileCount,
 		readiness.Summary.EnabledContextSourceCount,
 		readiness.Summary.SavedMemoryCount,
 		readiness.Summary.PendingMemoryCandidateCount,
@@ -4326,7 +3910,7 @@ func formatProjectHealth(health core.ProjectHealth) string {
 	if health.Detail != "" {
 		fmt.Fprintf(&b, "%s\n", health.Detail)
 	}
-	fmt.Fprintf(&b, "Counts: attention=%d/%d omitted=%d setup_todo=%d active=%d blocked=%d memory_candidates=%d review_follow_ups=%d open_handoffs=%d profile_refs=%d skill_issues=%d\n",
+	fmt.Fprintf(&b, "Counts: attention=%d/%d omitted=%d setup_todo=%d active=%d blocked=%d memory_candidates=%d review_follow_ups=%d open_handoffs=%d skill_issues=%d\n",
 		health.Summary.AttentionCount,
 		health.Summary.AvailableAttentionCount,
 		health.Summary.OmittedAttentionCount,
@@ -4336,7 +3920,6 @@ func formatProjectHealth(health core.ProjectHealth) string {
 		health.Summary.PendingMemoryCandidateCount,
 		health.Summary.ReviewFollowUpCount,
 		health.Summary.OpenHandoffCount,
-		health.Summary.MissingProfileReferenceCount,
 		health.Summary.ProjectSkillIssueCount,
 	)
 	if len(health.Attention) > 0 {
