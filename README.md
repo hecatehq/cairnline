@@ -42,7 +42,9 @@ other host-specific agent configuration. Cairnline records intent and
 provenance; the agent host remains responsible for runtime policy,
 permissions, model choice, sandboxing, and launch behavior.
 Profile ids stored on projects, roles, and assignments are opaque host hints;
-Cairnline does not keep a portable agent-profile catalog.
+execution-profile ids stored on projects, roles, and assignments are also
+opaque host hints. Cairnline does not keep portable agent-profile or
+runtime-profile catalogs.
 
 ## Security Boundaries
 
@@ -203,8 +205,8 @@ Implemented now:
   - `memory_candidates.reject`
   - `memory_candidates.delete`
 - assignment launch packets with project, role, assignment, desired-agent,
-  execution-profile, skill, generic-artifact, evidence, review, handoff,
-  accepted-memory, and memory-candidate metadata; profile ids remain opaque
+  skill, generic-artifact, evidence, review, handoff, accepted-memory, and
+  memory-candidate metadata; profile and execution-profile ids remain opaque
   host hints and are not resolved by Cairnline
 - read-only work-item closeout readiness summaries derived from assignment,
   evidence, review, and handoff metadata

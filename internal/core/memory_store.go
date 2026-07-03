@@ -10,7 +10,6 @@ import (
 type MemoryStore struct {
 	mu          sync.Mutex
 	projects    map[string]Project
-	execution   map[string]ExecutionProfile
 	skills      map[string]map[string]ProjectSkill
 	workItems   map[string]map[string]WorkItem
 	roles       map[string]map[string]Role
@@ -27,7 +26,6 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		projects:    make(map[string]Project),
-		execution:   make(map[string]ExecutionProfile),
 		skills:      make(map[string]map[string]ProjectSkill),
 		workItems:   make(map[string]map[string]WorkItem),
 		roles:       make(map[string]map[string]Role),
@@ -112,64 +110,6 @@ func (s *MemoryStore) DeleteProject(ctx context.Context, id string) error {
 			delete(s.assistant, proposalID)
 		}
 	}
-	return nil
-}
-
-func (s *MemoryStore) ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	items := make([]ExecutionProfile, 0, len(s.execution))
-	for _, item := range s.execution {
-		items = append(items, item)
-	}
-	slices.SortFunc(items, func(a, b ExecutionProfile) int {
-		return compareString(a.Name, b.Name)
-	})
-	return items, nil
-}
-
-func (s *MemoryStore) GetExecutionProfile(ctx context.Context, id string) (ExecutionProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	item, ok := s.execution[id]
-	if !ok {
-		return ExecutionProfile{}, ErrNotFound
-	}
-	return item, nil
-}
-
-func (s *MemoryStore) CreateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.execution[profile.ID]; ok {
-		return ExecutionProfile{}, ErrDuplicate
-	}
-	s.execution[profile.ID] = profile
-	return profile, nil
-}
-
-func (s *MemoryStore) UpdateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.execution[profile.ID]; !ok {
-		return ExecutionProfile{}, ErrNotFound
-	}
-	s.execution[profile.ID] = profile
-	return profile, nil
-}
-
-func (s *MemoryStore) DeleteExecutionProfile(ctx context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.execution[id]; !ok {
-		return ErrNotFound
-	}
-	delete(s.execution, id)
 	return nil
 }
 

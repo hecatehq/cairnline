@@ -509,73 +509,6 @@ func (s *Service) DiscoverProjectSkills(ctx context.Context, projectID string) (
 	return s.store.ListProjectSkills(ctx, projectID)
 }
 
-func (s *Service) ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error) {
-	return s.store.ListExecutionProfiles(ctx)
-}
-
-func (s *Service) CreateExecutionProfile(ctx context.Context, input ExecutionProfile) (ExecutionProfile, error) {
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		return ExecutionProfile{}, errors.Join(ErrInvalid, errors.New("execution profile name is required"))
-	}
-	now := s.now()
-	item := ExecutionProfile{
-		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("execprof")),
-		Name:           name,
-		Description:    strings.TrimSpace(input.Description),
-		AgentKind:      strings.TrimSpace(input.AgentKind),
-		ModelHint:      strings.TrimSpace(input.ModelHint),
-		ProviderHint:   strings.TrimSpace(input.ProviderHint),
-		ToolsPolicy:    strings.TrimSpace(input.ToolsPolicy),
-		WritesPolicy:   strings.TrimSpace(input.WritesPolicy),
-		NetworkPolicy:  strings.TrimSpace(input.NetworkPolicy),
-		ApprovalPolicy: strings.TrimSpace(input.ApprovalPolicy),
-		AdapterOptions: input.AdapterOptions,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	return s.store.CreateExecutionProfile(ctx, item)
-}
-
-func (s *Service) UpdateExecutionProfile(ctx context.Context, input ExecutionProfile) (ExecutionProfile, error) {
-	id := strings.TrimSpace(input.ID)
-	name := strings.TrimSpace(input.Name)
-	if id == "" {
-		return ExecutionProfile{}, errors.Join(ErrInvalid, errors.New("execution profile id is required"))
-	}
-	if name == "" {
-		return ExecutionProfile{}, errors.Join(ErrInvalid, errors.New("execution profile name is required"))
-	}
-	existing, err := s.store.GetExecutionProfile(ctx, id)
-	if err != nil {
-		return ExecutionProfile{}, err
-	}
-	item := ExecutionProfile{
-		ID:             id,
-		Name:           name,
-		Description:    strings.TrimSpace(input.Description),
-		AgentKind:      strings.TrimSpace(input.AgentKind),
-		ModelHint:      strings.TrimSpace(input.ModelHint),
-		ProviderHint:   strings.TrimSpace(input.ProviderHint),
-		ToolsPolicy:    strings.TrimSpace(input.ToolsPolicy),
-		WritesPolicy:   strings.TrimSpace(input.WritesPolicy),
-		NetworkPolicy:  strings.TrimSpace(input.NetworkPolicy),
-		ApprovalPolicy: strings.TrimSpace(input.ApprovalPolicy),
-		AdapterOptions: input.AdapterOptions,
-		CreatedAt:      existing.CreatedAt,
-		UpdatedAt:      s.now(),
-	}
-	return s.store.UpdateExecutionProfile(ctx, item)
-}
-
-func (s *Service) DeleteExecutionProfile(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.Join(ErrInvalid, errors.New("execution profile id is required"))
-	}
-	return s.store.DeleteExecutionProfile(ctx, id)
-}
-
 func (s *Service) ListWorkItems(ctx context.Context, projectID string) ([]WorkItem, error) {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
@@ -720,11 +653,6 @@ func (s *Service) CreateRole(ctx context.Context, input Role) (Role, error) {
 	}
 	defaultProfileID := strings.TrimSpace(input.DefaultProfileID)
 	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
-	if defaultExecutionProfileID != "" {
-		if _, err := s.store.GetExecutionProfile(ctx, defaultExecutionProfileID); err != nil {
-			return Role{}, err
-		}
-	}
 	executionMode, err := normalizeExecutionMode(input.DefaultExecutionMode, true)
 	if err != nil {
 		return Role{}, err
@@ -761,11 +689,6 @@ func (s *Service) UpdateRole(ctx context.Context, input Role) (Role, error) {
 	}
 	defaultProfileID := strings.TrimSpace(input.DefaultProfileID)
 	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
-	if defaultExecutionProfileID != "" {
-		if _, err := s.store.GetExecutionProfile(ctx, defaultExecutionProfileID); err != nil {
-			return Role{}, err
-		}
-	}
 	executionMode, err := normalizeExecutionMode(input.DefaultExecutionMode, true)
 	if err != nil {
 		return Role{}, err
@@ -882,11 +805,6 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	}
 	profileID := strings.TrimSpace(input.ProfileID)
 	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
-	if executionProfileID != "" {
-		if _, err := s.store.GetExecutionProfile(ctx, executionProfileID); err != nil {
-			return Assignment{}, err
-		}
-	}
 	executionMode, err := normalizeExecutionMode(input.ExecutionMode, false)
 	if err != nil {
 		return Assignment{}, err
@@ -955,11 +873,6 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 	}
 	profileID := strings.TrimSpace(input.ProfileID)
 	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
-	if executionProfileID != "" {
-		if _, err := s.store.GetExecutionProfile(ctx, executionProfileID); err != nil {
-			return Assignment{}, err
-		}
-	}
 	executionMode, err := normalizeExecutionMode(input.ExecutionMode, false)
 	if err != nil {
 		return Assignment{}, err
@@ -1173,19 +1086,6 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		return AssignmentLaunchPacket{}, err
 	}
 	warnings := append([]string(nil), packetContext.Warnings...)
-	var executionProfile *ExecutionProfile
-	executionProfileID := firstNonEmpty(packetContext.Assignment.ExecutionProfileID, executionProfileIDFromRole(packetContext.Role), packetContext.Project.DefaultExecutionProfileID)
-	if executionProfileID != "" {
-		resolvedExecutionProfile, err := s.store.GetExecutionProfile(ctx, executionProfileID)
-		if err != nil {
-			if !errors.Is(err, ErrNotFound) {
-				return AssignmentLaunchPacket{}, err
-			}
-			warnings = append(warnings, "assignment execution profile was not found")
-		} else {
-			executionProfile = &resolvedExecutionProfile
-		}
-	}
 	resolvedSkills, skillWarnings, err := s.resolveLaunchPacketSkills(ctx, packetContext.Project.ID, packetContext.Assignment, packetContext.Role)
 	if err != nil {
 		return AssignmentLaunchPacket{}, err
@@ -1197,7 +1097,6 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 		Project:          packetContext.Project,
 		WorkItem:         packetContext.WorkItem,
 		Role:             packetContext.Role,
-		ExecutionProfile: executionProfile,
 		Skills:           resolvedSkills,
 		Assignment:       packetContext.Assignment,
 		Artifacts:        artifacts,
@@ -2968,13 +2867,6 @@ func isHandoffStatus(value string) bool {
 	default:
 		return false
 	}
-}
-
-func executionProfileIDFromRole(role *Role) string {
-	if role == nil {
-		return ""
-	}
-	return role.DefaultExecutionProfileID
 }
 
 func (s *Service) validateProjectRoot(ctx context.Context, projectID, rootID string) error {

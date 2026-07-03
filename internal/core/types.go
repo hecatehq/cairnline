@@ -81,22 +81,6 @@ type Role struct {
 	DefaultExecutionMode      string   `json:"default_execution_mode,omitempty"`
 }
 
-type ExecutionProfile struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Description    string         `json:"description,omitempty"`
-	AgentKind      string         `json:"agent_kind,omitempty"`
-	ModelHint      string         `json:"model_hint,omitempty"`
-	ProviderHint   string         `json:"provider_hint,omitempty"`
-	ToolsPolicy    string         `json:"tools_policy,omitempty"`
-	WritesPolicy   string         `json:"writes_policy,omitempty"`
-	NetworkPolicy  string         `json:"network_policy,omitempty"`
-	ApprovalPolicy string         `json:"approval_policy,omitempty"`
-	AdapterOptions map[string]any `json:"adapter_options,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-}
-
 type WorkItem struct {
 	ID              string    `json:"id"`
 	ProjectID       string    `json:"project_id"`
@@ -144,13 +128,11 @@ type ProjectSetupReadinessSummary struct {
 	WorkItemCount               int  `json:"work_item_count"`
 	RoleCount                   int  `json:"role_count"`
 	SkillCount                  int  `json:"skill_count"`
-	ExecutionProfileCount       int  `json:"execution_profile_count"`
 	EnabledContextSourceCount   int  `json:"enabled_context_source_count"`
 	SavedMemoryCount            int  `json:"saved_memory_count"`
 	PendingMemoryCandidateCount int  `json:"pending_memory_candidate_count"`
 	HasPurpose                  bool `json:"has_purpose"`
 	HasActiveRoot               bool `json:"has_active_root"`
-	HasExecutionProfile         bool `json:"has_execution_profile"`
 }
 
 type ProjectSetupReadinessCheck struct {
@@ -185,7 +167,6 @@ type ProjectHealthSummary struct {
 	AttentionLimit               int  `json:"attention_limit"`
 	SetupTodoCount               int  `json:"setup_todo_count"`
 	MissingProjectRoot           bool `json:"missing_project_root"`
-	HasExecutionProfile          bool `json:"has_execution_profile"`
 	EnabledMemoryCount           int  `json:"enabled_memory_count"`
 	SavedMemoryCount             int  `json:"saved_memory_count"`
 	EnabledContextSourceCount    int  `json:"enabled_context_source_count"`
@@ -453,7 +434,6 @@ type AssignmentLaunchPacket struct {
 	Project          Project           `json:"project"`
 	WorkItem         WorkItem          `json:"work_item"`
 	Role             *Role             `json:"role,omitempty"`
-	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	Skills           []ProjectSkill    `json:"skills,omitempty"`
 	Assignment       Assignment        `json:"assignment"`
 	Artifacts        []Artifact        `json:"artifacts,omitempty"`

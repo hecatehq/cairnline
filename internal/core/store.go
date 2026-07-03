@@ -20,12 +20,6 @@ type Store interface {
 	UpdateProject(ctx context.Context, project Project) (Project, error)
 	DeleteProject(ctx context.Context, id string) error
 
-	ListExecutionProfiles(ctx context.Context) ([]ExecutionProfile, error)
-	GetExecutionProfile(ctx context.Context, id string) (ExecutionProfile, error)
-	CreateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error)
-	UpdateExecutionProfile(ctx context.Context, profile ExecutionProfile) (ExecutionProfile, error)
-	DeleteExecutionProfile(ctx context.Context, id string) error
-
 	ListProjectSkills(ctx context.Context, projectID string) ([]ProjectSkill, error)
 	GetProjectSkill(ctx context.Context, projectID, id string) (ProjectSkill, error)
 	CreateProjectSkill(ctx context.Context, skill ProjectSkill) (ProjectSkill, error)
