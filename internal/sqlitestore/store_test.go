@@ -1472,7 +1472,7 @@ func TestStore_ClaimAssignmentRaceHasOneWinner(t *testing.T) {
 	}
 }
 
-func TestStore_CreateAssignmentValidatesReferences(t *testing.T) {
+func TestStore_CreateRecordsValidateReferences(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "validation.db"))
 	if err != nil {
@@ -1529,6 +1529,43 @@ func TestStore_CreateAssignmentValidatesReferences(t *testing.T) {
 	missingWorkAssignment.WorkItemID = "work_missing"
 	if _, err := store.UpdateAssignment(ctx, missingWorkAssignment); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("store.UpdateAssignment(missing work item) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.CreateEvidence(ctx, core.Evidence{
+		ID:         "ev_direct_missing_work",
+		ProjectID:  project.ID,
+		WorkItemID: "work_missing",
+		Title:      "Missing work evidence",
+		Locator:    "file://missing.md",
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.CreateEvidence(missing work) error = %v, want ErrNotFound", err)
+	}
+	otherWork, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Other evidence work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(other) error = %v", err)
+	}
+	otherAssignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: otherWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(other) error = %v", err)
+	}
+	if _, err := store.CreateEvidence(ctx, core.Evidence{
+		ID:           "ev_direct_wrong_assignment",
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: otherAssignment.ID,
+		Title:        "Wrong assignment evidence",
+		Locator:      "file://wrong.md",
+	}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.CreateEvidence(wrong assignment) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.CreateEvidence(ctx, core.Evidence{
+		ID:           "ev_direct_valid",
+		ProjectID:    project.ID,
+		WorkItemID:   work.ID,
+		AssignmentID: assignment.ID,
+		Title:        "Valid direct evidence",
+		Locator:      "file://valid.md",
+	}); err != nil {
+		t.Fatalf("store.CreateEvidence(valid) error = %v", err)
 	}
 }
 
