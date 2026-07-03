@@ -609,6 +609,8 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"project_id":{"type":"string","minLength":1},
 				"title":{"type":"string","minLength":1},
 				"brief":{"type":"string"},
+				"status":{"type":"string"},
+				"priority":{"type":"string"},
 				"owner_role_id":{"type":"string"},
 				"reviewer_role_ids":{"type":"array","items":{"type":"string"}},
 				"root_id":{"type":"string"}
@@ -2507,6 +2509,8 @@ func createWorkItem(service *core.Service) mcp.ToolHandler {
 		ProjectID       string   `json:"project_id"`
 		Title           string   `json:"title"`
 		Brief           string   `json:"brief"`
+		Status          string   `json:"status"`
+		Priority        string   `json:"priority"`
 		OwnerRoleID     string   `json:"owner_role_id"`
 		ReviewerRoleIDs []string `json:"reviewer_role_ids"`
 		RootID          string   `json:"root_id"`
@@ -2520,6 +2524,8 @@ func createWorkItem(service *core.Service) mcp.ToolHandler {
 			ProjectID:       input.ProjectID,
 			Title:           input.Title,
 			Brief:           input.Brief,
+			Status:          input.Status,
+			Priority:        input.Priority,
 			OwnerRoleID:     input.OwnerRoleID,
 			ReviewerRoleIDs: input.ReviewerRoleIDs,
 			RootID:          input.RootID,

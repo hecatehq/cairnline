@@ -94,7 +94,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes.","owner_role_id":"` + reviewerRole.ID + `","reviewer_role_ids":["` + reviewerRole.ID + `","` + reviewerRole.ID + `"," "]}}}` + "\n",
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + projects[0].ID + `","title":"Summarize interviews","brief":"Produce themes.","status":"done","priority":"high","owner_role_id":"` + reviewerRole.ID + `","reviewer_role_ids":["` + reviewerRole.ID + `","` + reviewerRole.ID + `"," "]}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(context.Background(), input, &output); err != nil {
@@ -119,8 +119,8 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkItems() error = %v", err)
 	}
-	if workItems[0].OwnerRoleID != reviewerRole.ID || len(workItems[0].ReviewerRoleIDs) != 1 || workItems[0].ReviewerRoleIDs[0] != reviewerRole.ID {
-		t.Fatalf("created work item role refs = owner %q reviewers %+v, want normalized reviewer role refs", workItems[0].OwnerRoleID, workItems[0].ReviewerRoleIDs)
+	if workItems[0].Status != core.WorkStatusDone || workItems[0].Priority != "high" || workItems[0].OwnerRoleID != reviewerRole.ID || len(workItems[0].ReviewerRoleIDs) != 1 || workItems[0].ReviewerRoleIDs[0] != reviewerRole.ID {
+		t.Fatalf("created work item = %+v, want MCP-created status, priority, and normalized reviewer role refs", workItems[0])
 	}
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"work_items.get","arguments":{"project_id":"` + projects[0].ID + `","id":"` + workItems[0].ID + `"}}}` + "\n",
@@ -129,7 +129,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if err := server.Serve(context.Background(), input, &output); err != nil {
 		t.Fatalf("Serve() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Work item "+workItems[0].ID+": [ready] Summarize interviews") || !strings.Contains(output.String(), `"structuredContent"`) {
+	if !strings.Contains(output.String(), "Work item "+workItems[0].ID+": [done] Summarize interviews") || !strings.Contains(output.String(), `"structuredContent"`) {
 		t.Fatalf("get work item response = %s", output.String())
 	}
 
@@ -147,7 +147,7 @@ func TestMCPTools_CreateProjectAndWorkItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkItems() after update error = %v", err)
 	}
-	if workItems[0].Title != "Summarize interviews" || workItems[0].Brief != "Updated themes." {
+	if workItems[0].Title != "Summarize interviews" || workItems[0].Brief != "Updated themes." || workItems[0].Status != core.WorkStatusDone || workItems[0].Priority != "high" {
 		t.Fatalf("updated work item = %+v, want patch preserving title and replacing brief", workItems[0])
 	}
 
