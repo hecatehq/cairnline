@@ -610,6 +610,7 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 				"title":{"type":"string","minLength":1},
 				"brief":{"type":"string"},
 				"owner_role_id":{"type":"string"},
+				"reviewer_role_ids":{"type":"array","items":{"type":"string"}},
 				"root_id":{"type":"string"}
 			},
 			"required":["project_id","title"]
@@ -2503,11 +2504,12 @@ func getWorkItem(service *core.Service) mcp.ToolHandler {
 
 func createWorkItem(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID   string `json:"project_id"`
-		Title       string `json:"title"`
-		Brief       string `json:"brief"`
-		OwnerRoleID string `json:"owner_role_id"`
-		RootID      string `json:"root_id"`
+		ProjectID       string   `json:"project_id"`
+		Title           string   `json:"title"`
+		Brief           string   `json:"brief"`
+		OwnerRoleID     string   `json:"owner_role_id"`
+		ReviewerRoleIDs []string `json:"reviewer_role_ids"`
+		RootID          string   `json:"root_id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2515,11 +2517,12 @@ func createWorkItem(service *core.Service) mcp.ToolHandler {
 			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 		item, err := service.CreateWorkItem(ctx, core.WorkItem{
-			ProjectID:   input.ProjectID,
-			Title:       input.Title,
-			Brief:       input.Brief,
-			OwnerRoleID: input.OwnerRoleID,
-			RootID:      input.RootID,
+			ProjectID:       input.ProjectID,
+			Title:           input.Title,
+			Brief:           input.Brief,
+			OwnerRoleID:     input.OwnerRoleID,
+			ReviewerRoleIDs: input.ReviewerRoleIDs,
+			RootID:          input.RootID,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
