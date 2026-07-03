@@ -1157,6 +1157,18 @@ func (s *Store) GetEvidence(ctx context.Context, projectID, workItemID, id strin
 }
 
 func (s *Store) CreateEvidence(ctx context.Context, evidence core.Evidence) (core.Evidence, error) {
+	if err := s.requireWorkItem(ctx, evidence.ProjectID, evidence.WorkItemID); err != nil {
+		return core.Evidence{}, err
+	}
+	if evidence.AssignmentID != "" {
+		assignment, err := s.GetAssignment(ctx, evidence.ProjectID, evidence.AssignmentID)
+		if err != nil {
+			return core.Evidence{}, err
+		}
+		if assignment.WorkItemID != evidence.WorkItemID {
+			return core.Evidence{}, core.ErrNotFound
+		}
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO evidence (project_id, id, work_item_id, assignment_id, title, body, locator, source_kind, external_id, provider, trust_label, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		evidence.ProjectID, evidence.ID, evidence.WorkItemID, evidence.AssignmentID, evidence.Title, evidence.Body, evidence.Locator, evidence.SourceKind, evidence.ExternalID, evidence.Provider, evidence.TrustLabel, encodeTime(evidence.CreatedAt), encodeTime(evidence.UpdatedAt))
 	if err != nil {

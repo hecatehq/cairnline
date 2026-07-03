@@ -2238,6 +2238,46 @@ func TestService_WorkItemCloseoutReadinessManualAndActiveStates(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_CreateEvidenceValidatesDependencies(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	project, err := service.CreateProject(ctx, Project{Name: "Evidence dependencies"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Implementer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Record evidence"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	otherWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Other work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(other) error = %v", err)
+	}
+	otherAssignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: otherWork.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(other) error = %v", err)
+	}
+
+	if _, err := store.CreateEvidence(ctx, Evidence{ID: "ev_missing_work", ProjectID: project.ID, WorkItemID: "work_missing", Title: "Missing work"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateEvidence(missing work) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.CreateEvidence(ctx, Evidence{ID: "ev_wrong_assignment", ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: otherAssignment.ID, Title: "Wrong assignment"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CreateEvidence(wrong assignment) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.CreateEvidence(ctx, Evidence{ID: "ev_valid", ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Valid evidence", Locator: "file://evidence.md"}); err != nil {
+		t.Fatalf("CreateEvidence(valid) error = %v", err)
+	}
+}
+
 func TestService_WorkItemCloseoutReadinessReviewFollowUp(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

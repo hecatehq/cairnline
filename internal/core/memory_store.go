@@ -747,6 +747,12 @@ func (s *MemoryStore) CreateEvidence(ctx context.Context, evidence Evidence) (Ev
 	if err := s.requireWorkItemLocked(evidence.ProjectID, evidence.WorkItemID); err != nil {
 		return Evidence{}, err
 	}
+	if evidence.AssignmentID != "" {
+		assignment, ok := s.assignments[evidence.ProjectID][evidence.AssignmentID]
+		if !ok || assignment.WorkItemID != evidence.WorkItemID {
+			return Evidence{}, ErrNotFound
+		}
+	}
 	if s.evidence[evidence.ProjectID] == nil {
 		s.evidence[evidence.ProjectID] = make(map[string]Evidence)
 	}
