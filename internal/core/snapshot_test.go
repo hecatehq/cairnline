@@ -62,29 +62,14 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 	service.now = func() time.Time { return base }
 
 	profileID := "profile_architect"
-	execution, err := service.CreateExecutionProfile(ctx, ExecutionProfile{
-		ID:             "exec_any",
-		Name:           "Any MCP agent",
-		Description:    "Portable MCP pull execution.",
-		AgentKind:      "any",
-		ModelHint:      "local",
-		ProviderHint:   "local",
-		ToolsPolicy:    "readonly",
-		WritesPolicy:   "block",
-		NetworkPolicy:  "block",
-		ApprovalPolicy: "require",
-		AdapterOptions: map[string]any{"driver": "mcp_pull"},
-	})
-	if err != nil {
-		t.Fatalf("CreateExecutionProfile() error = %v", err)
-	}
+	executionProfileID := "exec_any"
 	project, err := service.CreateProject(ctx, Project{
 		ID:                        "proj_snapshot",
 		Name:                      "Snapshot project",
 		Description:               "Portable migration fixture.",
 		DefaultRootID:             "root_main",
 		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: execution.ID,
+		DefaultExecutionProfileID: executionProfileID,
 		Roots: []Root{{
 			ID:        "root_main",
 			Path:      "/tmp/cairnline-snapshot",
@@ -138,7 +123,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		Description:               "Owns project shape.",
 		Instructions:              "Design before dispatch.",
 		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: execution.ID,
+		DefaultExecutionProfileID: executionProfileID,
 		DefaultSkillIDs:           []string{"planning"},
 		DefaultExecutionMode:      ExecutionMCPPull,
 	})
@@ -165,7 +150,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		RoleID:             role.ID,
 		RootID:             "root_main",
 		ProfileID:          profileID,
-		ExecutionProfileID: execution.ID,
+		ExecutionProfileID: executionProfileID,
 		ExecutionMode:      ExecutionMCPPull,
 		DesiredAgent:       DesiredAgent{Kind: DesiredAgentAny, SkillIDs: []string{"planning"}},
 		ContextSnapshotID:  "ctx_snapshot",

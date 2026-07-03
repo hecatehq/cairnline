@@ -42,21 +42,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA busy_timeout = 5000`,
-		`CREATE TABLE IF NOT EXISTS execution_profiles (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			agent_kind TEXT NOT NULL DEFAULT '',
-			model_hint TEXT NOT NULL DEFAULT '',
-			provider_hint TEXT NOT NULL DEFAULT '',
-			tools_policy TEXT NOT NULL DEFAULT '',
-			writes_policy TEXT NOT NULL DEFAULT '',
-			network_policy TEXT NOT NULL DEFAULT '',
-			approval_policy TEXT NOT NULL DEFAULT '',
-			adapter_options_json TEXT NOT NULL DEFAULT '{}',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`,
 		`CREATE TABLE IF NOT EXISTS projects (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -561,63 +546,6 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		return err
 	}
 	return nil
-}
-
-func (s *Store) ListExecutionProfiles(ctx context.Context) ([]core.ExecutionProfile, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at FROM execution_profiles ORDER BY name ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []core.ExecutionProfile
-	for rows.Next() {
-		item, err := scanExecutionProfile(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) GetExecutionProfile(ctx context.Context, id string) (core.ExecutionProfile, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at FROM execution_profiles WHERE id = ?`, id)
-	return scanExecutionProfile(row)
-}
-
-func (s *Store) CreateExecutionProfile(ctx context.Context, profile core.ExecutionProfile) (core.ExecutionProfile, error) {
-	options, err := encodeJSON(profile.AdapterOptions)
-	if err != nil {
-		return core.ExecutionProfile{}, err
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO execution_profiles (id, name, description, agent_kind, model_hint, provider_hint, tools_policy, writes_policy, network_policy, approval_policy, adapter_options_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		profile.ID, profile.Name, profile.Description, profile.AgentKind, profile.ModelHint, profile.ProviderHint, profile.ToolsPolicy, profile.WritesPolicy, profile.NetworkPolicy, profile.ApprovalPolicy, options, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt))
-	if err != nil {
-		return core.ExecutionProfile{}, mapSQLiteWriteError(err)
-	}
-	return profile, nil
-}
-
-func (s *Store) UpdateExecutionProfile(ctx context.Context, profile core.ExecutionProfile) (core.ExecutionProfile, error) {
-	options, err := encodeJSON(profile.AdapterOptions)
-	if err != nil {
-		return core.ExecutionProfile{}, err
-	}
-	result, err := s.db.ExecContext(ctx, `UPDATE execution_profiles SET name = ?, description = ?, agent_kind = ?, model_hint = ?, provider_hint = ?, tools_policy = ?, writes_policy = ?, network_policy = ?, approval_policy = ?, adapter_options_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
-		profile.Name, profile.Description, profile.AgentKind, profile.ModelHint, profile.ProviderHint, profile.ToolsPolicy, profile.WritesPolicy, profile.NetworkPolicy, profile.ApprovalPolicy, options, encodeTime(profile.CreatedAt), encodeTime(profile.UpdatedAt), profile.ID)
-	if err != nil {
-		return core.ExecutionProfile{}, err
-	}
-	return profile, requireAffected(result)
-}
-
-func (s *Store) DeleteExecutionProfile(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM execution_profiles WHERE id = ?`, id)
-	if err != nil {
-		return mapSQLiteWriteError(err)
-	}
-	return requireAffected(result)
 }
 
 func (s *Store) ListProjectSkills(ctx context.Context, projectID string) ([]core.ProjectSkill, error) {
@@ -1579,25 +1507,6 @@ const assistantProposalSelectSQL = `SELECT id, project_id, source, source_id, pr
 
 type scanner interface {
 	Scan(dest ...any) error
-}
-
-func scanExecutionProfile(row scanner) (core.ExecutionProfile, error) {
-	var item core.ExecutionProfile
-	var adapterOptionsJSON, createdAt, updatedAt string
-	if err := row.Scan(&item.ID, &item.Name, &item.Description, &item.AgentKind, &item.ModelHint, &item.ProviderHint, &item.ToolsPolicy, &item.WritesPolicy, &item.NetworkPolicy, &item.ApprovalPolicy, &adapterOptionsJSON, &createdAt, &updatedAt); err != nil {
-		return core.ExecutionProfile{}, mapSQLiteReadError(err)
-	}
-	if err := decodeJSON(adapterOptionsJSON, &item.AdapterOptions); err != nil {
-		return core.ExecutionProfile{}, err
-	}
-	var err error
-	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
-		return core.ExecutionProfile{}, err
-	}
-	if item.UpdatedAt, err = decodeTime(updatedAt); err != nil {
-		return core.ExecutionProfile{}, err
-	}
-	return item, nil
 }
 
 func scanProject(row scanner) (core.Project, error) {

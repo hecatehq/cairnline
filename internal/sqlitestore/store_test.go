@@ -24,26 +24,13 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	service := core.NewService(store)
 	profileID := "reviewer_host_profile"
-	executionProfile, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{
-		Name:           "SQLite execution",
-		AgentKind:      "any",
-		ModelHint:      "local",
-		ProviderHint:   "local",
-		ToolsPolicy:    "readonly",
-		WritesPolicy:   "block",
-		NetworkPolicy:  "block",
-		ApprovalPolicy: "require",
-		AdapterOptions: map[string]any{"mode": "test"},
-	})
-	if err != nil {
-		t.Fatalf("CreateExecutionProfile() error = %v", err)
-	}
+	executionProfileID := "exec_sqlite"
 	project, err := service.CreateProject(ctx, core.Project{
 		Name:                      "Persistent project",
 		Description:               "Survives process restart.",
 		DefaultRootID:             "root_main",
 		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: executionProfile.ID,
+		DefaultExecutionProfileID: executionProfileID,
 		Roots: []core.Root{{
 			ID:     "root_main",
 			Path:   "/tmp/example",
@@ -89,7 +76,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		Name:                      "Reviewer",
 		Instructions:              "Review the durable trail.",
 		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: executionProfile.ID,
+		DefaultExecutionProfileID: executionProfileID,
 		DefaultSkillIDs:           []string{"review", "evidence"},
 		DefaultExecutionMode:      core.ExecutionMCPPull,
 	})
@@ -111,7 +98,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		WorkItemID:         work.ID,
 		RoleID:             role.ID,
 		RootID:             "root_main",
-		ExecutionProfileID: executionProfile.ID,
+		ExecutionProfileID: executionProfileID,
 		ExecutionMode:      core.ExecutionMCPPull,
 		DesiredAgent: core.DesiredAgent{
 			Kind:     "any",
@@ -128,7 +115,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		RoleID:             role.ID,
 		RootID:             "root_main",
 		ProfileID:          profileID,
-		ExecutionProfileID: executionProfile.ID,
+		ExecutionProfileID: executionProfileID,
 		ExecutionMode:      core.ExecutionMCPPull,
 		Status:             core.AssignmentQueued,
 		DesiredAgent: core.DesiredAgent{
@@ -248,25 +235,18 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if projects[0].DefaultRootID != "root_main" {
 		t.Fatalf("default root = %q, want root_main", projects[0].DefaultRootID)
 	}
-	if projects[0].DefaultProfileID != profileID || projects[0].DefaultExecutionProfileID != executionProfile.ID {
+	if projects[0].DefaultProfileID != profileID || projects[0].DefaultExecutionProfileID != executionProfileID {
 		t.Fatalf("project defaults = %q/%q, want persisted profile and execution profile defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
 	}
 	source := projects[0].ContextSources[0]
 	if source.Locator != "AGENTS.md" || source.Format != "agents_md" || source.Scope != "workspace" || source.SourceCategory != "instructions" || source.Metadata["root_id"] != "root_main" {
 		t.Fatalf("source = %+v, want persisted context source metadata", source)
 	}
-	executionProfiles, err := reopenedService.ListExecutionProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListExecutionProfiles() error = %v", err)
-	}
-	if len(executionProfiles) != 1 || executionProfiles[0].ID != executionProfile.ID || executionProfiles[0].AdapterOptions["mode"] != "test" {
-		t.Fatalf("execution profiles = %+v, want persisted execution profile metadata", executionProfiles)
-	}
 	roles, err := reopenedService.ListRoles(ctx, project.ID)
 	if err != nil {
 		t.Fatalf("ListRoles() error = %v", err)
 	}
-	if len(roles) != 1 || roles[0].ID != role.ID || roles[0].DefaultExecutionProfileID != executionProfile.ID || len(roles[0].DefaultSkillIDs) != 2 {
+	if len(roles) != 1 || roles[0].ID != role.ID || roles[0].DefaultExecutionProfileID != executionProfileID || len(roles[0].DefaultSkillIDs) != 2 {
 		t.Fatalf("roles = %+v, want persisted role metadata", roles)
 	}
 	skills, err := reopenedService.ListProjectSkills(ctx, project.ID)
@@ -369,7 +349,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectSetupReadiness() error = %v", err)
 	}
-	if setup.ShowOnboarding || !setup.SetupStarted || setup.Summary.WorkItemCount != 1 || setup.Summary.RoleCount != 1 || setup.Summary.SkillCount != 1 || setup.Summary.ExecutionProfileCount != 0 {
+	if setup.ShowOnboarding || !setup.SetupStarted || setup.Summary.WorkItemCount != 1 || setup.Summary.RoleCount != 1 || setup.Summary.SkillCount != 1 {
 		t.Fatalf("setup readiness = %+v, want persisted configured setup", setup)
 	}
 	health, err := reopenedService.ProjectHealth(ctx, project.ID)
@@ -389,8 +369,8 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if launchPacket.Assignment.RootID != "root_main" {
 		t.Fatalf("launch packet assignment root = %q, want root_main", launchPacket.Assignment.RootID)
 	}
-	if launchPacket.Assignment.ProfileID != profileID || launchPacket.ExecutionProfile == nil || launchPacket.ExecutionProfile.ID != executionProfile.ID {
-		t.Fatalf("launch packet = %+v, want persisted host profile hint and resolved execution profile", launchPacket)
+	if launchPacket.Assignment.ProfileID != profileID || launchPacket.Assignment.ExecutionProfileID != executionProfileID {
+		t.Fatalf("launch packet = %+v, want persisted opaque host profile and execution profile hints", launchPacket)
 	}
 	if len(launchPacket.Skills) != 1 || launchPacket.Skills[0].ID != skill.ID {
 		t.Fatalf("launch packet skills = %+v, want persisted resolved skill", launchPacket.Skills)
@@ -614,10 +594,7 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	service := core.NewService(store)
 
 	profileID := "global_host_profile"
-	execution, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Global execution"})
-	if err != nil {
-		t.Fatalf("CreateExecutionProfile() error = %v", err)
-	}
+	executionProfileID := "exec_global"
 	project, err := service.CreateProject(ctx, core.Project{Name: "Delete me"})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
@@ -630,7 +607,7 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
-	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionProfileID: execution.ID})
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionProfileID: executionProfileID})
 	if err != nil {
 		t.Fatalf("CreateAssignment() error = %v", err)
 	}
@@ -665,41 +642,16 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	if _, err := service.ListMemoryEntries(ctx, project.ID, false); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("ListMemoryEntries() after delete error = %v, want ErrNotFound", err)
 	}
-	executionProfiles, err := service.ListExecutionProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListExecutionProfiles() error = %v", err)
-	}
-	if len(executionProfiles) != 1 || executionProfiles[0].ID != execution.ID {
-		t.Fatalf("execution profiles = %+v, want preserved global execution profile", executionProfiles)
-	}
 }
 
-func TestStore_DeleteExecutionProfiles(t *testing.T) {
+func TestStore_DeleteRoleAllowsHistoricalAssignments(t *testing.T) {
 	ctx := context.Background()
-	store, err := Open(ctx, filepath.Join(t.TempDir(), "delete-execution-profiles.db"))
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "delete-roles.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
 	service := core.NewService(store)
-
-	executionProfile, err := service.CreateExecutionProfile(ctx, core.ExecutionProfile{Name: "Temporary execution"})
-	if err != nil {
-		t.Fatalf("CreateExecutionProfile() error = %v", err)
-	}
-	if err := service.DeleteExecutionProfile(ctx, executionProfile.ID); err != nil {
-		t.Fatalf("DeleteExecutionProfile() error = %v", err)
-	}
-	executionProfiles, err := service.ListExecutionProfiles(ctx)
-	if err != nil {
-		t.Fatalf("ListExecutionProfiles() error = %v", err)
-	}
-	if len(executionProfiles) != 0 {
-		t.Fatalf("execution profiles = %+v, want deleted global removed", executionProfiles)
-	}
-	if err := service.DeleteExecutionProfile(ctx, executionProfile.ID); !errors.Is(err, core.ErrNotFound) {
-		t.Fatalf("DeleteExecutionProfile(deleted) error = %v, want ErrNotFound", err)
-	}
 
 	project, err := service.CreateProject(ctx, core.Project{Name: "Role cleanup"})
 	if err != nil {

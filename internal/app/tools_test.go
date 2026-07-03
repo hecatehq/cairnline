@@ -938,8 +938,8 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if packet.Kind != core.LaunchPacketKindAssignment || packet.Assignment.ID != assignmentID || packet.Role == nil || packet.Role.ID != role.ID {
 		t.Fatalf("launch packet = %+v, want structured assignment packet", packet)
 	}
-	if packet.ExecutionProfile != nil {
-		t.Fatalf("launch packet = %+v, want agent-neutral MCP packet without host runtime profile", packet)
+	if packet.Assignment.ProfileID != "" || packet.Assignment.ExecutionProfileID != "" {
+		t.Fatalf("launch packet assignment = %+v, want no resolved host runtime records in MCP packet", packet.Assignment)
 	}
 	if len(packet.Memory) != 1 || packet.Memory[0].Title != "Accepted review convention" {
 		t.Fatalf("launch packet memory = %+v, want accepted memory entry", packet.Memory)

@@ -17,7 +17,6 @@ const SnapshotVersion = 1
 type Snapshot struct {
 	Version            int                       `json:"version"`
 	ExportedAt         time.Time                 `json:"exported_at"`
-	ExecutionProfiles  []ExecutionProfile        `json:"execution_profiles,omitempty"`
 	Projects           []Project                 `json:"projects,omitempty"`
 	ProjectSkills      []ProjectSkill            `json:"project_skills,omitempty"`
 	Roles              []Role                    `json:"roles,omitempty"`
@@ -38,9 +37,6 @@ func (s *Service) ExportSnapshot(ctx context.Context) (Snapshot, error) {
 		ExportedAt: s.now(),
 	}
 	var err error
-	if snapshot.ExecutionProfiles, err = s.store.ListExecutionProfiles(ctx); err != nil {
-		return Snapshot{}, err
-	}
 	if snapshot.Projects, err = s.store.ListProjects(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -109,11 +105,6 @@ func (s *Service) ImportSnapshot(ctx context.Context, snapshot Snapshot) (Snapsh
 	if snapshot.Version != SnapshotVersion {
 		return Snapshot{}, errors.Join(ErrInvalid, fmt.Errorf("snapshot version %d is unsupported", snapshot.Version))
 	}
-	for _, item := range snapshot.ExecutionProfiles {
-		if err := upsertExecutionProfile(ctx, s.store, item); err != nil {
-			return Snapshot{}, err
-		}
-	}
 	for _, item := range snapshot.Projects {
 		if err := upsertProject(ctx, s.store, item); err != nil {
 			return Snapshot{}, err
@@ -178,9 +169,6 @@ func (s *Service) ImportSnapshot(ctx context.Context, snapshot Snapshot) (Snapsh
 }
 
 func sortSnapshot(snapshot *Snapshot) {
-	sort.Slice(snapshot.ExecutionProfiles, func(i, j int) bool {
-		return snapshot.ExecutionProfiles[i].ID < snapshot.ExecutionProfiles[j].ID
-	})
 	sort.Slice(snapshot.Projects, func(i, j int) bool {
 		return snapshot.Projects[i].ID < snapshot.Projects[j].ID
 	})
@@ -233,16 +221,6 @@ func upsertProject(ctx context.Context, store Store, item Project) error {
 	if _, err := store.CreateProject(ctx, item); err != nil {
 		if errors.Is(err, ErrDuplicate) {
 			_, err = store.UpdateProject(ctx, item)
-		}
-		return err
-	}
-	return nil
-}
-
-func upsertExecutionProfile(ctx context.Context, store Store, item ExecutionProfile) error {
-	if _, err := store.CreateExecutionProfile(ctx, item); err != nil {
-		if errors.Is(err, ErrDuplicate) {
-			_, err = store.UpdateExecutionProfile(ctx, item)
 		}
 		return err
 	}
