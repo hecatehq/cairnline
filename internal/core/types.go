@@ -594,6 +594,8 @@ const (
 	SkillPathAgents      = ".agents/skills"
 	SkillPathHecate      = ".hecate/skills"
 	SkillPathCairnline   = ".cairnline/skills"
+	SkillPathClaude      = ".claude/skills"
+	SkillPathGemini      = ".gemini/skills"
 
 	EvidenceTrustOperator = "operator_provided"
 

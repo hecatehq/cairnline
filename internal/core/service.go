@@ -2355,13 +2355,17 @@ func validSkillStatus(value string) bool {
 func projectSkillDiscoveryBases(rootPath string, root Root, sources []Source) []skillDiscoveryBase {
 	bases := []skillDiscoveryBase{
 		{path: SkillPathAgents},
-		{path: SkillPathHecate},
 		{path: SkillPathCairnline},
+		{path: SkillPathClaude},
+		{path: SkillPathGemini},
+		{path: SkillPathHecate},
 	}
 	seen := map[string]int{
 		SkillPathAgents:    0,
-		SkillPathHecate:    1,
-		SkillPathCairnline: 2,
+		SkillPathCairnline: 1,
+		SkillPathClaude:    2,
+		SkillPathGemini:    3,
+		SkillPathHecate:    4,
 	}
 	for _, source := range sources {
 		if !skillGuidanceSourceForRoot(source, root.ID) {

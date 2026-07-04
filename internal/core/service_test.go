@@ -527,6 +527,8 @@ Body should not be stored in the skill registry.
 `)
 	writeSkill(t, root, SkillPathHecate, "qa", "# QA reviewer\n")
 	writeSkill(t, root, SkillPathCairnline, "planning", "# Planning\n")
+	writeSkill(t, root, SkillPathClaude, "debug", "# Claude debug\n")
+	writeSkill(t, root, SkillPathGemini, "research", "# Gemini research\n")
 
 	project, err := service.CreateProject(ctx, Project{
 		Name: "Skill project",
@@ -544,8 +546,8 @@ Body should not be stored in the skill registry.
 	if err != nil {
 		t.Fatalf("DiscoverProjectSkills() error = %v", err)
 	}
-	if len(skills) != 3 {
-		t.Fatalf("skills = %+v, want three discovered skills", skills)
+	if len(skills) != 5 {
+		t.Fatalf("skills = %+v, want five discovered skills", skills)
 	}
 	skill := findProjectSkillForTest(skills, "backend")
 	if skill == nil {
@@ -570,6 +572,14 @@ Body should not be stored in the skill registry.
 	planning := findProjectSkillForTest(skills, "planning")
 	if planning == nil || planning.Path != ".cairnline/skills/planning/SKILL.md" || planning.Title != "Planning" {
 		t.Fatalf("planning skill = %+v, want Cairnline-native discovered skill", planning)
+	}
+	debug := findProjectSkillForTest(skills, "debug")
+	if debug == nil || debug.Path != ".claude/skills/debug/SKILL.md" || debug.Title != "Claude debug" {
+		t.Fatalf("debug skill = %+v, want Claude-compatible discovered skill", debug)
+	}
+	research := findProjectSkillForTest(skills, "research")
+	if research == nil || research.Path != ".gemini/skills/research/SKILL.md" || research.Title != "Gemini research" {
+		t.Fatalf("research skill = %+v, want Gemini-compatible discovered skill", research)
 	}
 
 	role, err := service.CreateRole(ctx, Role{
