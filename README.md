@@ -98,14 +98,24 @@ Implemented now:
   collaboration artifacts
 - SQLite store for durable projects, project roles, work items, assignments,
   skill metadata, assistant proposal records, and collaboration artifacts
-- project skill discovery from `.agents/skills`, compatibility
-  `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
-  guidance-linked local skill roots; recognized guidance locators include
-  `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules`,
+- project skill discovery from interoperable `.agents/skills`,
+  Cairnline-native `.cairnline/skills`, Claude-compatible `.claude/skills`,
+  Gemini-compatible `.gemini/skills`, compatibility `.hecate/skills`, and
+  enabled guidance-linked local skill roots; recognized guidance locators
+  include `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules`,
   `.github/instructions`, `.devin/rules`, and `.windsurf/rules`; rediscovery
   refreshes discovered status, provenance, suggested tools, and permission
   hints while preserving operator-edited enabled/title/description and
   trust-label fields
+
+Skill roots are metadata discovery only: Cairnline records `SKILL.md` title,
+description, path, provenance, suggested-tool hints, and nullable permission
+hints, but never loads skill bodies, executes skill code, or treats a skill as
+authorization. The `.claude/skills` default follows the Claude Code skills
+documentation, and `.gemini/skills` follows Gemini CLI Agent Skills workspace
+discovery; both were checked on July 4, 2026:
+[Claude Code skills](https://code.claude.com/docs/en/skills),
+[Gemini CLI Agent Skills](https://geminicli.com/docs/cli/skills/).
 - embeddable Go API for applications that want to use the coordination core
   directly instead of speaking MCP, including work-item owner/reviewer role-ref
   validation, assignment metadata updates that preserve created time and claim

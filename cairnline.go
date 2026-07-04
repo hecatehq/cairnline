@@ -101,6 +101,8 @@ const (
 	SkillPathAgents      = core.SkillPathAgents
 	SkillPathHecate      = core.SkillPathHecate
 	SkillPathCairnline   = core.SkillPathCairnline
+	SkillPathClaude      = core.SkillPathClaude
+	SkillPathGemini      = core.SkillPathGemini
 
 	EvidenceTrustOperator = core.EvidenceTrustOperator
 
