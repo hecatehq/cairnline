@@ -90,15 +90,15 @@ Implemented now:
   provenance metadata, project roles, work items, assignments with lifecycle
   timestamps, desired agent hints, skill metadata,
   generic collaboration artifacts, assignment-scoped evidence with
-  source/provider/external-id metadata, Hecate-compatible structured review
-  verdict/risk metadata, handoffs with source/target refs and status-transition
+  source/provider/external-id metadata, structured review verdict/risk
+  metadata, handoffs with source/target refs and status-transition
   timestamps, accepted memory, and memory candidates
 - in-memory service for projects, project roles, work items, assignments,
   assistant proposal records including project-root/default-root actions, and
   collaboration artifacts
 - SQLite store for durable projects, project roles, work items, assignments,
   skill metadata, assistant proposal records, and collaboration artifacts
-- project skill discovery from `.agents/skills`, Hecate-compatible
+- project skill discovery from `.agents/skills`, compatibility
   `.hecate/skills`, Cairnline-native `.cairnline/skills`, and enabled
   guidance-linked local skill roots; recognized guidance locators include
   `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules`,
