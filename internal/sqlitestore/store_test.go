@@ -23,14 +23,10 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	service := core.NewService(store)
-	profileID := "reviewer_host_profile"
-	executionProfileID := "exec_sqlite"
 	project, err := service.CreateProject(ctx, core.Project{
-		Name:                      "Persistent project",
-		Description:               "Survives process restart.",
-		DefaultRootID:             "root_main",
-		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: executionProfileID,
+		Name:          "Persistent project",
+		Description:   "Survives process restart.",
+		DefaultRootID: "root_main",
 		Roots: []core.Root{{
 			ID:     "root_main",
 			Path:   "/tmp/example",
@@ -72,13 +68,11 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateProjectSkill() error = %v", err)
 	}
 	role, err := service.CreateRole(ctx, core.Role{
-		ProjectID:                 project.ID,
-		Name:                      "Reviewer",
-		Instructions:              "Review the durable trail.",
-		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: executionProfileID,
-		DefaultSkillIDs:           []string{"review", "evidence"},
-		DefaultExecutionMode:      core.ExecutionMCPPull,
+		ProjectID:            project.ID,
+		Name:                 "Reviewer",
+		Instructions:         "Review the durable trail.",
+		DefaultSkillIDs:      []string{"review", "evidence"},
+		DefaultExecutionMode: core.ExecutionMCPPull,
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -94,12 +88,11 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
 	assignment, err := service.CreateAssignment(ctx, core.Assignment{
-		ProjectID:          project.ID,
-		WorkItemID:         work.ID,
-		RoleID:             role.ID,
-		RootID:             "root_main",
-		ExecutionProfileID: executionProfileID,
-		ExecutionMode:      core.ExecutionMCPPull,
+		ProjectID:     project.ID,
+		WorkItemID:    work.ID,
+		RoleID:        role.ID,
+		RootID:        "root_main",
+		ExecutionMode: core.ExecutionMCPPull,
 		DesiredAgent: core.DesiredAgent{
 			Kind:     "any",
 			SkillIDs: []string{"review"},
@@ -109,15 +102,13 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("CreateAssignment() error = %v", err)
 	}
 	assignment, err = service.UpdateAssignment(ctx, core.Assignment{
-		ProjectID:          project.ID,
-		ID:                 assignment.ID,
-		WorkItemID:         work.ID,
-		RoleID:             role.ID,
-		RootID:             "root_main",
-		ProfileID:          profileID,
-		ExecutionProfileID: executionProfileID,
-		ExecutionMode:      core.ExecutionMCPPull,
-		Status:             core.AssignmentQueued,
+		ProjectID:     project.ID,
+		ID:            assignment.ID,
+		WorkItemID:    work.ID,
+		RoleID:        role.ID,
+		RootID:        "root_main",
+		ExecutionMode: core.ExecutionMCPPull,
+		Status:        core.AssignmentQueued,
 		DesiredAgent: core.DesiredAgent{
 			Kind:     "any",
 			SkillIDs: []string{"review", "evidence"},
@@ -235,9 +226,6 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if projects[0].DefaultRootID != "root_main" {
 		t.Fatalf("default root = %q, want root_main", projects[0].DefaultRootID)
 	}
-	if projects[0].DefaultProfileID != profileID || projects[0].DefaultExecutionProfileID != executionProfileID {
-		t.Fatalf("project defaults = %q/%q, want persisted profile and execution profile defaults", projects[0].DefaultProfileID, projects[0].DefaultExecutionProfileID)
-	}
 	source := projects[0].ContextSources[0]
 	if source.Locator != "AGENTS.md" || source.Format != "agents_md" || source.Scope != "workspace" || source.SourceCategory != "instructions" || source.Metadata["root_id"] != "root_main" {
 		t.Fatalf("source = %+v, want persisted context source metadata", source)
@@ -246,7 +234,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRoles() error = %v", err)
 	}
-	if len(roles) != 1 || roles[0].ID != role.ID || roles[0].DefaultExecutionProfileID != executionProfileID || len(roles[0].DefaultSkillIDs) != 2 {
+	if len(roles) != 1 || roles[0].ID != role.ID || len(roles[0].DefaultSkillIDs) != 2 {
 		t.Fatalf("roles = %+v, want persisted role metadata", roles)
 	}
 	skills, err := reopenedService.ListProjectSkills(ctx, project.ID)
@@ -269,8 +257,8 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if assignments[0].StartedAt.IsZero() || assignments[0].CompletedAt.IsZero() {
 		t.Fatalf("assignment timestamps = started:%s completed:%s, want persisted lifecycle timestamps", assignments[0].StartedAt, assignments[0].CompletedAt)
 	}
-	if assignments[0].RootID != "root_main" || assignments[0].ProfileID != profileID || assignments[0].ContextSnapshotID != "ctx-prep" || len(assignments[0].DesiredAgent.SkillIDs) != 2 {
-		t.Fatalf("assignment metadata = %+v, want persisted root/profile/context/desired-agent update", assignments[0])
+	if assignments[0].RootID != "root_main" || assignments[0].ContextSnapshotID != "ctx-prep" || len(assignments[0].DesiredAgent.SkillIDs) != 2 {
+		t.Fatalf("assignment metadata = %+v, want persisted root/context/desired-agent update", assignments[0])
 	}
 	packet, err := reopenedService.AssignmentContext(ctx, project.ID, assignment.ID)
 	if err != nil {
@@ -368,9 +356,6 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	}
 	if launchPacket.Assignment.RootID != "root_main" {
 		t.Fatalf("launch packet assignment root = %q, want root_main", launchPacket.Assignment.RootID)
-	}
-	if launchPacket.Assignment.ProfileID != profileID || launchPacket.Assignment.ExecutionProfileID != executionProfileID {
-		t.Fatalf("launch packet = %+v, want persisted opaque host profile and execution profile hints", launchPacket)
 	}
 	if len(launchPacket.Skills) != 1 || launchPacket.Skills[0].ID != skill.ID {
 		t.Fatalf("launch packet skills = %+v, want persisted resolved skill", launchPacket.Skills)
@@ -593,13 +578,11 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	defer store.Close()
 	service := core.NewService(store)
 
-	profileID := "global_host_profile"
-	executionProfileID := "exec_global"
 	project, err := service.CreateProject(ctx, core.Project{Name: "Delete me"})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
-	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer", DefaultProfileID: profileID})
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Reviewer"})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
 	}
@@ -607,7 +590,7 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
-	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionProfileID: executionProfileID})
+	assignment, err := service.CreateAssignment(ctx, core.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
 	if err != nil {
 		t.Fatalf("CreateAssignment() error = %v", err)
 	}
@@ -1129,8 +1112,6 @@ func TestStore_MigrateAddsAssignmentRootID(t *testing.T) {
 		id TEXT NOT NULL,
 		work_item_id TEXT NOT NULL,
 		role_id TEXT NOT NULL,
-		profile_id TEXT NOT NULL DEFAULT '',
-		execution_profile_id TEXT NOT NULL DEFAULT '',
 		execution_mode TEXT NOT NULL,
 		status TEXT NOT NULL,
 		desired_agent_json TEXT NOT NULL DEFAULT '{}',
@@ -1223,8 +1204,6 @@ func TestStore_MigrateMakesAssignmentRoleSoftReference(t *testing.T) {
 		id TEXT NOT NULL,
 		work_item_id TEXT NOT NULL,
 		role_id TEXT NOT NULL,
-		profile_id TEXT NOT NULL DEFAULT '',
-		execution_profile_id TEXT NOT NULL DEFAULT '',
 		execution_mode TEXT NOT NULL,
 		status TEXT NOT NULL,
 		desired_agent_json TEXT NOT NULL DEFAULT '{}',
@@ -1305,9 +1284,7 @@ func TestStore_MigrateAddsProjectDefaultColumns(t *testing.T) {
 	defer rows.Close()
 	found := map[string]bool{}
 	want := map[string]bool{
-		"default_root_id":              true,
-		"default_profile_id":           true,
-		"default_execution_profile_id": true,
+		"default_root_id": true,
 	}
 	for rows.Next() {
 		var cid int

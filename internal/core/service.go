@@ -61,16 +61,14 @@ func (s *Service) CreateProject(ctx context.Context, input Project) (Project, er
 	}
 	now := s.now()
 	item := Project{
-		ID:                        firstNonEmpty(strings.TrimSpace(input.ID), newID("proj")),
-		Name:                      name,
-		Description:               strings.TrimSpace(input.Description),
-		Roots:                     roots,
-		DefaultRootID:             defaultRootID,
-		DefaultProfileID:          strings.TrimSpace(input.DefaultProfileID),
-		DefaultExecutionProfileID: strings.TrimSpace(input.DefaultExecutionProfileID),
-		ContextSources:            normalizeSources(input.ContextSources, nil, now),
-		CreatedAt:                 now,
-		UpdatedAt:                 now,
+		ID:             firstNonEmpty(strings.TrimSpace(input.ID), newID("proj")),
+		Name:           name,
+		Description:    strings.TrimSpace(input.Description),
+		Roots:          roots,
+		DefaultRootID:  defaultRootID,
+		ContextSources: normalizeSources(input.ContextSources, nil, now),
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	return s.store.CreateProject(ctx, item)
 }
@@ -95,16 +93,14 @@ func (s *Service) UpdateProject(ctx context.Context, input Project) (Project, er
 	}
 	now := s.now()
 	item := Project{
-		ID:                        id,
-		Name:                      name,
-		Description:               strings.TrimSpace(input.Description),
-		Roots:                     roots,
-		DefaultRootID:             defaultRootID,
-		DefaultProfileID:          strings.TrimSpace(input.DefaultProfileID),
-		DefaultExecutionProfileID: strings.TrimSpace(input.DefaultExecutionProfileID),
-		ContextSources:            normalizeSources(input.ContextSources, existingSourcesByID(existing.ContextSources), now),
-		CreatedAt:                 existing.CreatedAt,
-		UpdatedAt:                 now,
+		ID:             id,
+		Name:           name,
+		Description:    strings.TrimSpace(input.Description),
+		Roots:          roots,
+		DefaultRootID:  defaultRootID,
+		ContextSources: normalizeSources(input.ContextSources, existingSourcesByID(existing.ContextSources), now),
+		CreatedAt:      existing.CreatedAt,
+		UpdatedAt:      now,
 	}
 	return s.store.UpdateProject(ctx, item)
 }
@@ -651,22 +647,18 @@ func (s *Service) CreateRole(ctx context.Context, input Role) (Role, error) {
 	if name == "" {
 		return Role{}, errors.Join(ErrInvalid, errors.New("role name is required"))
 	}
-	defaultProfileID := strings.TrimSpace(input.DefaultProfileID)
-	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
 	executionMode, err := normalizeExecutionMode(input.DefaultExecutionMode, true)
 	if err != nil {
 		return Role{}, err
 	}
 	item := Role{
-		ID:                        firstNonEmpty(strings.TrimSpace(input.ID), newID("role")),
-		ProjectID:                 projectID,
-		Name:                      name,
-		Description:               strings.TrimSpace(input.Description),
-		Instructions:              strings.TrimSpace(input.Instructions),
-		DefaultProfileID:          defaultProfileID,
-		DefaultExecutionProfileID: defaultExecutionProfileID,
-		DefaultSkillIDs:           compactStrings(input.DefaultSkillIDs),
-		DefaultExecutionMode:      executionMode,
+		ID:                   firstNonEmpty(strings.TrimSpace(input.ID), newID("role")),
+		ProjectID:            projectID,
+		Name:                 name,
+		Description:          strings.TrimSpace(input.Description),
+		Instructions:         strings.TrimSpace(input.Instructions),
+		DefaultSkillIDs:      compactStrings(input.DefaultSkillIDs),
+		DefaultExecutionMode: executionMode,
 	}
 	return s.store.CreateRole(ctx, item)
 }
@@ -687,22 +679,18 @@ func (s *Service) UpdateRole(ctx context.Context, input Role) (Role, error) {
 	if _, err := s.store.GetRole(ctx, projectID, id); err != nil {
 		return Role{}, err
 	}
-	defaultProfileID := strings.TrimSpace(input.DefaultProfileID)
-	defaultExecutionProfileID := strings.TrimSpace(input.DefaultExecutionProfileID)
 	executionMode, err := normalizeExecutionMode(input.DefaultExecutionMode, true)
 	if err != nil {
 		return Role{}, err
 	}
 	item := Role{
-		ID:                        id,
-		ProjectID:                 projectID,
-		Name:                      name,
-		Description:               strings.TrimSpace(input.Description),
-		Instructions:              strings.TrimSpace(input.Instructions),
-		DefaultProfileID:          defaultProfileID,
-		DefaultExecutionProfileID: defaultExecutionProfileID,
-		DefaultSkillIDs:           compactStrings(input.DefaultSkillIDs),
-		DefaultExecutionMode:      executionMode,
+		ID:                   id,
+		ProjectID:            projectID,
+		Name:                 name,
+		Description:          strings.TrimSpace(input.Description),
+		Instructions:         strings.TrimSpace(input.Instructions),
+		DefaultSkillIDs:      compactStrings(input.DefaultSkillIDs),
+		DefaultExecutionMode: executionMode,
 	}
 	return s.store.UpdateRole(ctx, item)
 }
@@ -803,8 +791,6 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	if _, err := s.store.GetRole(ctx, projectID, roleID); err != nil {
 		return Assignment{}, err
 	}
-	profileID := strings.TrimSpace(input.ProfileID)
-	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
 	executionMode, err := normalizeExecutionMode(input.ExecutionMode, false)
 	if err != nil {
 		return Assignment{}, err
@@ -820,22 +806,20 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 		updatedAt = createdAt
 	}
 	item := Assignment{
-		ID:                 firstNonEmpty(strings.TrimSpace(input.ID), newID("asgn")),
-		ProjectID:          projectID,
-		WorkItemID:         workItemID,
-		RoleID:             roleID,
-		RootID:             rootID,
-		ProfileID:          profileID,
-		ExecutionProfileID: executionProfileID,
-		ExecutionMode:      executionMode,
-		Status:             AssignmentQueued,
-		DesiredAgent:       desiredAgent,
-		ExecutionRef:       strings.TrimSpace(input.ExecutionRef),
-		ContextSnapshotID:  strings.TrimSpace(input.ContextSnapshotID),
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
-		StartedAt:          input.StartedAt,
-		CompletedAt:        input.CompletedAt,
+		ID:                firstNonEmpty(strings.TrimSpace(input.ID), newID("asgn")),
+		ProjectID:         projectID,
+		WorkItemID:        workItemID,
+		RoleID:            roleID,
+		RootID:            rootID,
+		ExecutionMode:     executionMode,
+		Status:            AssignmentQueued,
+		DesiredAgent:      desiredAgent,
+		ExecutionRef:      strings.TrimSpace(input.ExecutionRef),
+		ContextSnapshotID: strings.TrimSpace(input.ContextSnapshotID),
+		CreatedAt:         createdAt,
+		UpdatedAt:         updatedAt,
+		StartedAt:         input.StartedAt,
+		CompletedAt:       input.CompletedAt,
 	}
 	return s.store.CreateAssignment(ctx, item)
 }
@@ -871,8 +855,6 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
 		return Assignment{}, err
 	}
-	profileID := strings.TrimSpace(input.ProfileID)
-	executionProfileID := strings.TrimSpace(input.ExecutionProfileID)
 	executionMode, err := normalizeExecutionMode(input.ExecutionMode, false)
 	if err != nil {
 		return Assignment{}, err
@@ -897,23 +879,21 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 		completedAt = existing.CompletedAt
 	}
 	item := Assignment{
-		ID:                 id,
-		ProjectID:          projectID,
-		WorkItemID:         workItemID,
-		RoleID:             roleID,
-		RootID:             rootID,
-		ProfileID:          profileID,
-		ExecutionProfileID: executionProfileID,
-		ExecutionMode:      executionMode,
-		Status:             status,
-		DesiredAgent:       normalizeDesiredAgent(input.DesiredAgent),
-		ClaimedBy:          claimedBy,
-		ExecutionRef:       strings.TrimSpace(input.ExecutionRef),
-		ContextSnapshotID:  strings.TrimSpace(input.ContextSnapshotID),
-		CreatedAt:          existing.CreatedAt,
-		UpdatedAt:          s.now(),
-		StartedAt:          startedAt,
-		CompletedAt:        completedAt,
+		ID:                id,
+		ProjectID:         projectID,
+		WorkItemID:        workItemID,
+		RoleID:            roleID,
+		RootID:            rootID,
+		ExecutionMode:     executionMode,
+		Status:            status,
+		DesiredAgent:      normalizeDesiredAgent(input.DesiredAgent),
+		ClaimedBy:         claimedBy,
+		ExecutionRef:      strings.TrimSpace(input.ExecutionRef),
+		ContextSnapshotID: strings.TrimSpace(input.ContextSnapshotID),
+		CreatedAt:         existing.CreatedAt,
+		UpdatedAt:         s.now(),
+		StartedAt:         startedAt,
+		CompletedAt:       completedAt,
 	}
 	return s.store.UpdateAssignment(ctx, item)
 }

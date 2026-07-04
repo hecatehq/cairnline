@@ -48,8 +48,6 @@ func (s *Store) migrate(ctx context.Context) error {
 			description TEXT NOT NULL DEFAULT '',
 			roots_json TEXT NOT NULL DEFAULT '[]',
 			default_root_id TEXT NOT NULL DEFAULT '',
-			default_profile_id TEXT NOT NULL DEFAULT '',
-			default_execution_profile_id TEXT NOT NULL DEFAULT '',
 			context_sources_json TEXT NOT NULL DEFAULT '[]',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -96,8 +94,6 @@ func (s *Store) migrate(ctx context.Context) error {
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
 			instructions TEXT NOT NULL DEFAULT '',
-			default_profile_id TEXT NOT NULL DEFAULT '',
-			default_execution_profile_id TEXT NOT NULL DEFAULT '',
 			default_skill_ids_json TEXT NOT NULL DEFAULT '[]',
 			default_execution_mode TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (project_id, id),
@@ -109,8 +105,6 @@ func (s *Store) migrate(ctx context.Context) error {
 			work_item_id TEXT NOT NULL,
 			role_id TEXT NOT NULL,
 			root_id TEXT NOT NULL DEFAULT '',
-			profile_id TEXT NOT NULL DEFAULT '',
-			execution_profile_id TEXT NOT NULL DEFAULT '',
 			execution_mode TEXT NOT NULL,
 			status TEXT NOT NULL,
 			desired_agent_json TEXT NOT NULL DEFAULT '{}',
@@ -259,12 +253,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "projects", "default_root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
-	if err := s.ensureColumn(ctx, "projects", "default_profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("migrate sqlite: %w", err)
-	}
-	if err := s.ensureColumn(ctx, "projects", "default_execution_profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return fmt.Errorf("migrate sqlite: %w", err)
-	}
 	if err := s.ensureColumn(ctx, "assignments", "root_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
@@ -275,9 +263,6 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	if err := s.ensureAssignmentRoleSoftReference(ctx); err != nil {
-		return fmt.Errorf("migrate sqlite: %w", err)
-	}
-	if err := s.ensureColumn(ctx, "roles", "default_execution_profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
 	if err := s.ensureColumn(ctx, "project_skills", "suggested_tools_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
@@ -398,8 +383,6 @@ func (s *Store) ensureAssignmentRoleSoftReference(ctx context.Context) error {
 			work_item_id TEXT NOT NULL,
 			role_id TEXT NOT NULL,
 			root_id TEXT NOT NULL DEFAULT '',
-			profile_id TEXT NOT NULL DEFAULT '',
-			execution_profile_id TEXT NOT NULL DEFAULT '',
 			execution_mode TEXT NOT NULL,
 			status TEXT NOT NULL,
 			desired_agent_json TEXT NOT NULL DEFAULT '{}',
@@ -414,8 +397,8 @@ func (s *Store) ensureAssignmentRoleSoftReference(ctx context.Context) error {
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
 		)`,
-		`INSERT INTO assignments_new (project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at)
-			SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`,
+		`INSERT INTO assignments_new (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at)
+			SELECT project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`,
 		`DROP TABLE assignments`,
 		`ALTER TABLE assignments_new RENAME TO assignments`,
 	}
@@ -451,7 +434,7 @@ func (s *Store) assignmentRoleForeignKeyExists(ctx context.Context) (bool, error
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]core.Project, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, roots_json, default_root_id, default_profile_id, default_execution_profile_id, context_sources_json, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at FROM projects ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +452,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]core.Project, error) {
 }
 
 func (s *Store) GetProject(ctx context.Context, id string) (core.Project, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, roots_json, default_root_id, default_profile_id, default_execution_profile_id, context_sources_json, created_at, updated_at FROM projects WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at FROM projects WHERE id = ?`, id)
 	return scanProject(row)
 }
 
@@ -482,8 +465,8 @@ func (s *Store) CreateProject(ctx context.Context, project core.Project) (core.P
 	if err != nil {
 		return core.Project{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO projects (id, name, description, roots_json, default_root_id, default_profile_id, default_execution_profile_id, context_sources_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		project.ID, project.Name, project.Description, roots, project.DefaultRootID, project.DefaultProfileID, project.DefaultExecutionProfileID, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO projects (id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		project.ID, project.Name, project.Description, roots, project.DefaultRootID, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt))
 	if err != nil {
 		return core.Project{}, mapSQLiteWriteError(err)
 	}
@@ -499,8 +482,8 @@ func (s *Store) UpdateProject(ctx context.Context, project core.Project) (core.P
 	if err != nil {
 		return core.Project{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE projects SET name = ?, description = ?, roots_json = ?, default_root_id = ?, default_profile_id = ?, default_execution_profile_id = ?, context_sources_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
-		project.Name, project.Description, roots, project.DefaultRootID, project.DefaultProfileID, project.DefaultExecutionProfileID, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt), project.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE projects SET name = ?, description = ?, roots_json = ?, default_root_id = ?, context_sources_json = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		project.Name, project.Description, roots, project.DefaultRootID, sources, encodeTime(project.CreatedAt), encodeTime(project.UpdatedAt), project.ID)
 	if err != nil {
 		return core.Project{}, err
 	}
@@ -719,7 +702,7 @@ func (s *Store) ListRoles(ctx context.Context, projectID string) ([]core.Role, e
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_execution_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? ORDER BY name ASC`, projectID)
+	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, name, description, instructions, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? ORDER BY name ASC`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -740,7 +723,7 @@ func (s *Store) GetRole(ctx context.Context, projectID, id string) (core.Role, e
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return core.Role{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_profile_id, default_execution_profile_id, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
+	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, projectID, id)
 	return scanRole(row)
 }
 
@@ -749,8 +732,8 @@ func (s *Store) CreateRole(ctx context.Context, role core.Role) (core.Role, erro
 	if err != nil {
 		return core.Role{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO roles (project_id, id, name, description, instructions, default_profile_id, default_execution_profile_id, default_skill_ids_json, default_execution_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		role.ProjectID, role.ID, role.Name, role.Description, role.Instructions, role.DefaultProfileID, role.DefaultExecutionProfileID, skills, role.DefaultExecutionMode)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO roles (project_id, id, name, description, instructions, default_skill_ids_json, default_execution_mode) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		role.ProjectID, role.ID, role.Name, role.Description, role.Instructions, skills, role.DefaultExecutionMode)
 	if err != nil {
 		return core.Role{}, mapSQLiteWriteError(err)
 	}
@@ -762,8 +745,8 @@ func (s *Store) UpdateRole(ctx context.Context, role core.Role) (core.Role, erro
 	if err != nil {
 		return core.Role{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, description = ?, instructions = ?, default_profile_id = ?, default_execution_profile_id = ?, default_skill_ids_json = ?, default_execution_mode = ? WHERE project_id = ? AND id = ?`,
-		role.Name, role.Description, role.Instructions, role.DefaultProfileID, role.DefaultExecutionProfileID, skills, role.DefaultExecutionMode, role.ProjectID, role.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE roles SET name = ?, description = ?, instructions = ?, default_skill_ids_json = ?, default_execution_mode = ? WHERE project_id = ? AND id = ?`,
+		role.Name, role.Description, role.Instructions, skills, role.DefaultExecutionMode, role.ProjectID, role.ID)
 	if err != nil {
 		return core.Role{}, err
 	}
@@ -821,8 +804,8 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -840,8 +823,8 @@ func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, root_id = ?, profile_id = ?, execution_profile_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ? WHERE project_id = ? AND id = ?`,
-		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ProfileID, assignment.ExecutionProfileID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
+	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ? WHERE project_id = ? AND id = ?`,
+		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -1499,7 +1482,7 @@ func (s *Store) UpdateAssistantProposal(ctx context.Context, record core.Assista
 	return record, nil
 }
 
-const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, profile_id, execution_profile_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`
+const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`
 
 const memoryCandidateSelectSQL = `SELECT project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at FROM memory_candidates`
 
@@ -1512,7 +1495,7 @@ type scanner interface {
 func scanProject(row scanner) (core.Project, error) {
 	var item core.Project
 	var rootsJSON, sourcesJSON, createdAt, updatedAt string
-	if err := row.Scan(&item.ID, &item.Name, &item.Description, &rootsJSON, &item.DefaultRootID, &item.DefaultProfileID, &item.DefaultExecutionProfileID, &sourcesJSON, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.Description, &rootsJSON, &item.DefaultRootID, &sourcesJSON, &createdAt, &updatedAt); err != nil {
 		return core.Project{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(rootsJSON, &item.Roots); err != nil {
@@ -1584,7 +1567,7 @@ func scanWorkItem(row scanner) (core.WorkItem, error) {
 func scanRole(row scanner) (core.Role, error) {
 	var item core.Role
 	var skillIDsJSON string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.Name, &item.Description, &item.Instructions, &item.DefaultProfileID, &item.DefaultExecutionProfileID, &skillIDsJSON, &item.DefaultExecutionMode); err != nil {
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.Name, &item.Description, &item.Instructions, &skillIDsJSON, &item.DefaultExecutionMode); err != nil {
 		return core.Role{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(skillIDsJSON, &item.DefaultSkillIDs); err != nil {
@@ -1596,7 +1579,7 @@ func scanRole(row scanner) (core.Role, error) {
 func scanAssignment(row scanner) (core.Assignment, error) {
 	var item core.Assignment
 	var desiredAgentJSON, createdAt, updatedAt, startedAt, completedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ProfileID, &item.ExecutionProfileID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &item.ExecutionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &item.ExecutionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
 		return core.Assignment{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(desiredAgentJSON, &item.DesiredAgent); err != nil {

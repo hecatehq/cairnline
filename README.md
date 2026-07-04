@@ -41,10 +41,9 @@ those hints to their own Claude, Cursor, Copilot, OpenAI, Hecate, human, or
 other host-specific agent configuration. Cairnline records intent and
 provenance; the agent host remains responsible for runtime policy,
 permissions, model choice, sandboxing, and launch behavior.
-Profile ids stored on projects, roles, and assignments are opaque host hints;
-execution-profile ids stored on projects, roles, and assignments are also
-opaque host hints. Cairnline does not keep portable agent-profile or
-runtime-profile catalogs.
+Cairnline does not keep portable agent-preset or runtime-profile catalogs, and
+host-specific preset/runtime ids should live in the consuming agent host rather
+than in Cairnline coordination records.
 
 ## Security Boundaries
 
@@ -206,8 +205,7 @@ Implemented now:
   - `memory_candidates.delete`
 - assignment launch packets with project, role, assignment, desired-agent,
   skill, generic-artifact, evidence, review, handoff, accepted-memory, and
-  memory-candidate metadata; profile and execution-profile ids remain opaque
-  host hints and are not resolved by Cairnline
+  memory-candidate metadata
 - read-only work-item closeout readiness summaries derived from assignment,
   evidence, review, and handoff metadata
 - read-only project operations briefs for attention routing across active
