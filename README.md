@@ -356,9 +356,9 @@ coordination substrate. It is still developed as a standalone, agent-neutral
 server first; Hecate is one integration client, not the host that defines the
 core model.
 
-Cairnline now has a public embeddable Go API, so Hecate can integrate through
-the in-process service while MCP remains the interoperability surface for
-external agents and other hosts.
+Cairnline now has a public embeddable Go API. Hecate uses that in-process
+service as its first replacement path, while MCP remains the interoperability
+surface for external agents and other hosts.
 
 Current Hecate dogfood covers:
 
@@ -379,15 +379,15 @@ Hecate still owns native operator UI/UX, model gateway behavior, task runtime,
 External Agent supervision, approvals, traces, root discovery, and Git worktree
 creation. Those are host/orchestrator responsibilities, not Cairnline core.
 
-Before Hecate can rely on Cairnline as the default Projects backend in normal
-builds, the remaining integration work is:
+Before Hecate can make Cairnline the default Projects backend in normal builds,
+the remaining integration work is:
 
 - keep replacement-status gates green under real dogfood, not only fixture tests
 - shrink Hecate compatibility-shadow code once cutover behavior is stable
 - package Cairnline as an additional local download for non-Hecate hosts
 - keep MCP contracts stable enough for MCP-pull/manual assignment workflows
-- decide whether Hecate embeds the Go service, launches the standalone MCP
-  server, or supports both as operator-selectable deployment modes
+- decide whether Hecate should also support standalone MCP-server mode as an
+  operator-selectable backend in addition to the embedded Go service
 
 ## Test
 
