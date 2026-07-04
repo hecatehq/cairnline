@@ -184,7 +184,6 @@ const (
 	ProjectOperationKindMissingEvidence = core.ProjectOperationKindMissingEvidence
 	ProjectOperationKindReviewFollowUp  = core.ProjectOperationKindReviewFollowUp
 	ProjectOperationKindProjectSetup    = core.ProjectOperationKindProjectSetup
-	ProjectOperationKindProfile         = core.ProjectOperationKindProfile
 	ProjectOperationKindSkill           = core.ProjectOperationKindSkill
 	ProjectOperationKindWorkItem        = core.ProjectOperationKindWorkItem
 

@@ -3,16 +3,14 @@ package core
 import "time"
 
 type Project struct {
-	ID                        string    `json:"id"`
-	Name                      string    `json:"name"`
-	Description               string    `json:"description,omitempty"`
-	Roots                     []Root    `json:"roots,omitempty"`
-	DefaultRootID             string    `json:"default_root_id,omitempty"`
-	DefaultProfileID          string    `json:"default_profile_id,omitempty"`
-	DefaultExecutionProfileID string    `json:"default_execution_profile_id,omitempty"`
-	ContextSources            []Source  `json:"context_sources,omitempty"`
-	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description,omitempty"`
+	Roots          []Root    `json:"roots,omitempty"`
+	DefaultRootID  string    `json:"default_root_id,omitempty"`
+	ContextSources []Source  `json:"context_sources,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Root struct {
@@ -70,15 +68,13 @@ func (permissions RequiredPermissions) Empty() bool {
 }
 
 type Role struct {
-	ID                        string   `json:"id"`
-	ProjectID                 string   `json:"project_id"`
-	Name                      string   `json:"name"`
-	Description               string   `json:"description,omitempty"`
-	Instructions              string   `json:"instructions,omitempty"`
-	DefaultProfileID          string   `json:"default_profile_id,omitempty"`
-	DefaultExecutionProfileID string   `json:"default_execution_profile_id,omitempty"`
-	DefaultSkillIDs           []string `json:"default_skill_ids,omitempty"`
-	DefaultExecutionMode      string   `json:"default_execution_mode,omitempty"`
+	ID                   string   `json:"id"`
+	ProjectID            string   `json:"project_id"`
+	Name                 string   `json:"name"`
+	Description          string   `json:"description,omitempty"`
+	Instructions         string   `json:"instructions,omitempty"`
+	DefaultSkillIDs      []string `json:"default_skill_ids,omitempty"`
+	DefaultExecutionMode string   `json:"default_execution_mode,omitempty"`
 }
 
 type WorkItem struct {
@@ -182,7 +178,6 @@ type ProjectHealthSummary struct {
 	ChangesRequestedReviewCount  int  `json:"changes_requested_review_count"`
 	ActiveAssignmentCount        int  `json:"active_assignment_count"`
 	BlockedAssignmentCount       int  `json:"blocked_assignment_count"`
-	MissingProfileReferenceCount int  `json:"missing_profile_reference_count"`
 	ProjectSkillIssueCount       int  `json:"project_skill_issue_count"`
 }
 
@@ -390,23 +385,21 @@ type DesiredAgent struct {
 }
 
 type Assignment struct {
-	ID                 string       `json:"id"`
-	ProjectID          string       `json:"project_id"`
-	WorkItemID         string       `json:"work_item_id"`
-	RoleID             string       `json:"role_id"`
-	RootID             string       `json:"root_id,omitempty"`
-	ProfileID          string       `json:"profile_id,omitempty"`
-	ExecutionProfileID string       `json:"execution_profile_id,omitempty"`
-	ExecutionMode      string       `json:"execution_mode"`
-	Status             string       `json:"status"`
-	DesiredAgent       DesiredAgent `json:"desired_agent,omitempty"`
-	ClaimedBy          string       `json:"claimed_by,omitempty"`
-	ExecutionRef       string       `json:"execution_ref,omitempty"`
-	ContextSnapshotID  string       `json:"context_snapshot_id,omitempty"`
-	CreatedAt          time.Time    `json:"created_at"`
-	UpdatedAt          time.Time    `json:"updated_at"`
-	StartedAt          time.Time    `json:"started_at,omitempty"`
-	CompletedAt        time.Time    `json:"completed_at,omitempty"`
+	ID                string       `json:"id"`
+	ProjectID         string       `json:"project_id"`
+	WorkItemID        string       `json:"work_item_id"`
+	RoleID            string       `json:"role_id"`
+	RootID            string       `json:"root_id,omitempty"`
+	ExecutionMode     string       `json:"execution_mode"`
+	Status            string       `json:"status"`
+	DesiredAgent      DesiredAgent `json:"desired_agent,omitempty"`
+	ClaimedBy         string       `json:"claimed_by,omitempty"`
+	ExecutionRef      string       `json:"execution_ref,omitempty"`
+	ContextSnapshotID string       `json:"context_snapshot_id,omitempty"`
+	CreatedAt         time.Time    `json:"created_at"`
+	UpdatedAt         time.Time    `json:"updated_at"`
+	StartedAt         time.Time    `json:"started_at,omitempty"`
+	CompletedAt       time.Time    `json:"completed_at,omitempty"`
 }
 
 type AssignmentCompatibilityFilter struct {
@@ -686,7 +679,6 @@ const (
 	ProjectOperationKindMissingEvidence = "missing_evidence"
 	ProjectOperationKindReviewFollowUp  = "review_follow_up"
 	ProjectOperationKindProjectSetup    = "project_setup"
-	ProjectOperationKindProfile         = "profile"
 	ProjectOperationKindSkill           = "skill"
 	ProjectOperationKindWorkItem        = "work_item"
 

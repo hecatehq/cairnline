@@ -61,15 +61,11 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 	base := time.Date(2026, 6, 28, 10, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return base }
 
-	profileID := "profile_architect"
-	executionProfileID := "exec_any"
 	project, err := service.CreateProject(ctx, Project{
-		ID:                        "proj_snapshot",
-		Name:                      "Snapshot project",
-		Description:               "Portable migration fixture.",
-		DefaultRootID:             "root_main",
-		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: executionProfileID,
+		ID:            "proj_snapshot",
+		Name:          "Snapshot project",
+		Description:   "Portable migration fixture.",
+		DefaultRootID: "root_main",
 		Roots: []Root{{
 			ID:        "root_main",
 			Path:      "/tmp/cairnline-snapshot",
@@ -117,15 +113,13 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		t.Fatalf("CreateProjectSkill() error = %v", err)
 	}
 	role, err := service.CreateRole(ctx, Role{
-		ID:                        "role_architect",
-		ProjectID:                 project.ID,
-		Name:                      "Architect",
-		Description:               "Owns project shape.",
-		Instructions:              "Design before dispatch.",
-		DefaultProfileID:          profileID,
-		DefaultExecutionProfileID: executionProfileID,
-		DefaultSkillIDs:           []string{"planning"},
-		DefaultExecutionMode:      ExecutionMCPPull,
+		ID:                   "role_architect",
+		ProjectID:            project.ID,
+		Name:                 "Architect",
+		Description:          "Owns project shape.",
+		Instructions:         "Design before dispatch.",
+		DefaultSkillIDs:      []string{"planning"},
+		DefaultExecutionMode: ExecutionMCPPull,
 	})
 	if err != nil {
 		t.Fatalf("CreateRole() error = %v", err)
@@ -144,16 +138,14 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 		t.Fatalf("CreateWorkItem() error = %v", err)
 	}
 	assignment, err := service.CreateAssignment(ctx, Assignment{
-		ID:                 "asgn_snapshot",
-		ProjectID:          project.ID,
-		WorkItemID:         work.ID,
-		RoleID:             role.ID,
-		RootID:             "root_main",
-		ProfileID:          profileID,
-		ExecutionProfileID: executionProfileID,
-		ExecutionMode:      ExecutionMCPPull,
-		DesiredAgent:       DesiredAgent{Kind: DesiredAgentAny, SkillIDs: []string{"planning"}},
-		ContextSnapshotID:  "ctx_snapshot",
+		ID:                "asgn_snapshot",
+		ProjectID:         project.ID,
+		WorkItemID:        work.ID,
+		RoleID:            role.ID,
+		RootID:            "root_main",
+		ExecutionMode:     ExecutionMCPPull,
+		DesiredAgent:      DesiredAgent{Kind: DesiredAgentAny, SkillIDs: []string{"planning"}},
+		ContextSnapshotID: "ctx_snapshot",
 	})
 	if err != nil {
 		t.Fatalf("CreateAssignment() error = %v", err)

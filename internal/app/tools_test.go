@@ -637,7 +637,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("update assignment response did not unmarshal: %v\n%s", err, output.String())
 	}
 	updatedAssignment := updateAssignmentResponse.Result.StructuredContent
-	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.ProfileID != "" || updatedAssignment.ExecutionProfileID != "" || updatedAssignment.ContextSnapshotID != "ctx-1" {
+	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.ContextSnapshotID != "ctx-1" {
 		t.Fatalf("updated assignment = %+v, want retargeted assignment metadata", updatedAssignment)
 	}
 	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" {
@@ -937,9 +937,6 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	packet := launchResponse.Result.StructuredContent
 	if packet.Kind != core.LaunchPacketKindAssignment || packet.Assignment.ID != assignmentID || packet.Role == nil || packet.Role.ID != role.ID {
 		t.Fatalf("launch packet = %+v, want structured assignment packet", packet)
-	}
-	if packet.Assignment.ProfileID != "" || packet.Assignment.ExecutionProfileID != "" {
-		t.Fatalf("launch packet assignment = %+v, want no resolved host runtime records in MCP packet", packet.Assignment)
 	}
 	if len(packet.Memory) != 1 || packet.Memory[0].Title != "Accepted review convention" {
 		t.Fatalf("launch packet memory = %+v, want accepted memory entry", packet.Memory)
