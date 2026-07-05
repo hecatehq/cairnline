@@ -19,6 +19,7 @@ type Server struct {
 	tools             map[string]registeredTool
 	resourceProviders []ResourceProvider
 	resourceReaders   []ResourceReader
+	resourceTemplates []ResourceTemplate
 
 	writeMu sync.Mutex
 }
@@ -46,6 +47,10 @@ func (s *Server) RegisterTool(tool Tool, handler ToolHandler) {
 func (s *Server) RegisterResourceProvider(provider ResourceProvider, reader ResourceReader) {
 	s.resourceProviders = append(s.resourceProviders, provider)
 	s.resourceReaders = append(s.resourceReaders, reader)
+}
+
+func (s *Server) RegisterResourceTemplates(templates []ResourceTemplate) {
+	s.resourceTemplates = append(s.resourceTemplates, templates...)
 }
 
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -118,6 +123,8 @@ func (s *Server) dispatch(ctx context.Context, req Request) (any, *RPCError) {
 		return s.handleCallTool(ctx, req.Params)
 	case "resources/list":
 		return s.handleListResources(ctx)
+	case "resources/templates/list":
+		return s.handleListResourceTemplates(), nil
 	case "resources/read":
 		return s.handleReadResource(ctx, req.Params)
 	case "ping":
@@ -129,7 +136,7 @@ func (s *Server) dispatch(ctx context.Context, req Request) (any, *RPCError) {
 
 func (s *Server) capabilities() ServerCapabilities {
 	capabilities := ServerCapabilities{Tools: &ToolsCapability{}}
-	if len(s.resourceProviders) > 0 {
+	if len(s.resourceProviders) > 0 || len(s.resourceTemplates) > 0 {
 		capabilities.Resources = &ResourcesCapability{}
 	}
 	return capabilities
@@ -153,6 +160,12 @@ func (s *Server) handleListResources(ctx context.Context) (any, *RPCError) {
 		resources = append(resources, items...)
 	}
 	return ListResourcesResult{Resources: resources}, nil
+}
+
+func (s *Server) handleListResourceTemplates() ListResourceTemplatesResult {
+	templates := make([]ResourceTemplate, len(s.resourceTemplates))
+	copy(templates, s.resourceTemplates)
+	return ListResourceTemplatesResult{ResourceTemplates: templates}
 }
 
 func (s *Server) handleReadResource(ctx context.Context, raw json.RawMessage) (any, *RPCError) {

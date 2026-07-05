@@ -33,20 +33,26 @@ func TestServer_InitializeAndListTools(t *testing.T) {
 			Text:     `{"id":"proj_1"}`,
 		}}}, true, nil
 	})
+	server.RegisterResourceTemplates([]ResourceTemplate{{
+		URITemplate: "cairnline://projects/{project_id}",
+		Name:        "project",
+		MimeType:    "application/json",
+	}})
 
 	input := strings.NewReader(
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}` + "\n" +
 			`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n" +
 			`{"jsonrpc":"2.0","id":3,"method":"resources/list"}` + "\n" +
-			`{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"cairnline://projects/proj_1"}}` + "\n",
+			`{"jsonrpc":"2.0","id":4,"method":"resources/templates/list"}` + "\n" +
+			`{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"cairnline://projects/proj_1"}}` + "\n",
 	)
 	var output bytes.Buffer
 	if err := server.Serve(context.Background(), input, &output); err != nil {
 		t.Fatalf("Serve() error = %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("responses = %q, want 4 responses", output.String())
+	if len(lines) != 5 {
+		t.Fatalf("responses = %q, want 5 responses", output.String())
 	}
 	responses := responsesByID(t, lines)
 	if !strings.Contains(responses["1"], `"protocolVersion":"2025-11-25"`) {
@@ -61,11 +67,14 @@ func TestServer_InitializeAndListTools(t *testing.T) {
 	if !strings.Contains(responses["3"], "cairnline://projects/proj_1") {
 		t.Fatalf("resources/list response = %s", responses["3"])
 	}
+	if !strings.Contains(responses["4"], `"uriTemplate":"cairnline://projects/{project_id}"`) {
+		t.Fatalf("resources/templates/list response = %s", responses["4"])
+	}
 	var readResponse struct {
 		Result ReadResourceResult `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(responses["4"]), &readResponse); err != nil {
-		t.Fatalf("resources/read response did not unmarshal: %v\n%s", err, responses["4"])
+	if err := json.Unmarshal([]byte(responses["5"]), &readResponse); err != nil {
+		t.Fatalf("resources/read response did not unmarshal: %v\n%s", err, responses["5"])
 	}
 	if len(readResponse.Result.Contents) != 1 || readResponse.Result.Contents[0].Text != `{"id":"proj_1"}` {
 		t.Fatalf("resources/read response = %+v, want project text", readResponse.Result.Contents)

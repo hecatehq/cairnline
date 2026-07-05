@@ -17,6 +17,54 @@ const (
 
 func RegisterResources(server *mcp.Server, service *core.Service) {
 	server.RegisterResourceProvider(projectResources(service), readProjectResource(service))
+	server.RegisterResourceTemplates(projectResourceTemplates())
+}
+
+func projectResourceTemplates() []mcp.ResourceTemplate {
+	return []mcp.ResourceTemplate{
+		{
+			URITemplate: resourcePrefix + "{project_id}",
+			Name:        "project",
+			Title:       "Project",
+			Description: "Project coordination summary.",
+			MimeType:    jsonMimeType,
+		},
+		{
+			URITemplate: resourcePrefix + "{project_id}/work-items/{work_item_id}",
+			Name:        "work_item",
+			Title:       "Work item",
+			Description: "Work item with collaboration artifacts.",
+			MimeType:    jsonMimeType,
+		},
+		{
+			URITemplate: resourcePrefix + "{project_id}/work-items/{work_item_id}/closeout-readiness",
+			Name:        "work_item_closeout_readiness",
+			Title:       "Work item closeout readiness",
+			Description: "Work item closeout readiness with blockers, warnings, and review follow-up.",
+			MimeType:    jsonMimeType,
+		},
+		{
+			URITemplate: resourcePrefix + "{project_id}/assignments/{assignment_id}",
+			Name:        "assignment",
+			Title:       "Assignment context",
+			Description: "Assignment context metadata.",
+			MimeType:    jsonMimeType,
+		},
+		{
+			URITemplate: resourcePrefix + "{project_id}/assignments/{assignment_id}/launch-packet",
+			Name:        "assignment_launch_packet",
+			Title:       "Assignment launch packet",
+			Description: "Assignment launch packet for manual or MCP-pull execution.",
+			MimeType:    jsonMimeType,
+		},
+		{
+			URITemplate: resourcePrefix + "{project_id}/memory-candidates/{memory_candidate_id}",
+			Name:        "memory_candidate",
+			Title:       "Memory candidate",
+			Description: "Memory candidate with provenance and review status.",
+			MimeType:    jsonMimeType,
+		},
+	}
 }
 
 func projectResources(service *core.Service) mcp.ResourceProvider {

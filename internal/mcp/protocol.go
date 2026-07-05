@@ -103,8 +103,20 @@ type Resource struct {
 	MimeType    string `json:"mimeType,omitempty"`
 }
 
+type ResourceTemplate struct {
+	URITemplate string `json:"uriTemplate"`
+	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
 type ListResourcesResult struct {
 	Resources []Resource `json:"resources"`
+}
+
+type ListResourceTemplatesResult struct {
+	ResourceTemplates []ResourceTemplate `json:"resourceTemplates"`
 }
 
 type ReadResourceParams struct {

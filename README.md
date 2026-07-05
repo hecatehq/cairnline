@@ -132,7 +132,7 @@ discovery; both were checked on July 4, 2026:
   stable data shape exists, including core project/role/work/assignment
   list surfaces and assignment context/launch packet reads, so compatible
   clients can avoid scraping text output
-- MCP resources:
+- MCP resources and resource templates:
   - `cairnline://projects/{project_id}`
   - `cairnline://projects/{project_id}/work-items/{work_item_id}`
   - `cairnline://projects/{project_id}/work-items/{work_item_id}/closeout-readiness`
@@ -233,10 +233,6 @@ discovery; both were checked on July 4, 2026:
   supervise agents
 - snapshot and proposal-record imports preserve assistant ledger state without
   replaying proposal actions
-
-Planned next:
-
-- resource templates once the MCP transport grows that surface
 
 ## Run
 

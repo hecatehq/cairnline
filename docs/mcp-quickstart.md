@@ -167,6 +167,21 @@ Closeout readiness is advisory. Cairnline tells the operator whether assignments
 evidence, reviews, and handoffs look clear; the client decides what UI or
 approval step to show.
 
+### 12. Discover MCP Resources
+
+Cairnline also exposes read-only resources for clients that prefer resource
+pickers over tool calls. Discover parameterized URI shapes:
+
+```json
+{"jsonrpc":"2.0","id":12,"method":"resources/templates/list"}
+```
+
+Then read concrete resources such as the assignment launch packet:
+
+```json
+{"jsonrpc":"2.0","id":13,"method":"resources/read","params":{"uri":"cairnline://projects/PROJECT_ID/assignments/ASSIGNMENT_ID/launch-packet"}}
+```
+
 ## MCP Client Configuration
 
 Use a durable database for normal local use:
@@ -207,4 +222,3 @@ Cairnline records intent and provenance. The consuming host still owns:
 - workspace checkout, branch, and worktree creation;
 - conversion from desired-agent and skill hints into host-specific agent
   settings.
-
