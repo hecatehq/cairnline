@@ -10,8 +10,16 @@ import (
 	"github.com/hecatehq/cairnline/internal/mcp"
 )
 
-func RegisterTools(server *mcp.Server, service *core.Service) {
+func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: mcp.BoolPtr(true)}
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "coordination.capabilities",
+		Title:       "Coordination capabilities",
+		Description: "Describe Cairnline's portable coordination contract, supported execution modes, and host-owned execution boundaries.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+		Annotations: readOnly,
+	}, coordinationCapabilities(version))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "projects.list",
@@ -1265,6 +1273,88 @@ func RegisterTools(server *mcp.Server, service *core.Service) {
 			"required":["project_id","candidate_id"]
 		}`),
 	}, deleteMemoryCandidate(service))
+}
+
+type coordinationCapabilitiesContent struct {
+	ServerName             string   `json:"server_name"`
+	ServerVersion          string   `json:"server_version"`
+	Product                string   `json:"product"`
+	CoreRule               string   `json:"core_rule"`
+	ExecutionModes         []string `json:"execution_modes"`
+	AssignmentStatuses     []string `json:"assignment_statuses"`
+	DesiredAgentKindHints  []string `json:"desired_agent_kind_hints"`
+	SkillMetadataPaths     []string `json:"skill_metadata_paths"`
+	AgentHostOwns          []string `json:"agent_host_owns"`
+	RecommendedMCPPullFlow []string `json:"recommended_mcp_pull_flow"`
+}
+
+func coordinationCapabilities(version string) mcp.ToolHandler {
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		capabilities := coordinationCapabilitiesContent{
+			ServerName:    "cairnline",
+			ServerVersion: strings.TrimSpace(version),
+			Product:       "local-first project coordination server for operators and AI agents",
+			CoreRule:      "Assignment is coordination. Execution is capability-dependent.",
+			ExecutionModes: []string{
+				core.ExecutionManual,
+				core.ExecutionMCPPull,
+				core.ExecutionExternalAdapter,
+				core.ExecutionOrchestrated,
+			},
+			AssignmentStatuses: []string{
+				core.AssignmentQueued,
+				core.AssignmentClaimed,
+				core.AssignmentRunning,
+				core.AssignmentReview,
+				core.AssignmentCompleted,
+				core.AssignmentFailed,
+				core.AssignmentCancelled,
+			},
+			DesiredAgentKindHints: []string{
+				core.DesiredAgentAny,
+				"human",
+				"codex",
+				"claude",
+				"cursor",
+				"copilot",
+				"hecate",
+				"openai_agent",
+			},
+			SkillMetadataPaths: []string{
+				core.SkillPathAgents,
+				core.SkillPathCairnline,
+				core.SkillPathClaude,
+				core.SkillPathGemini,
+				core.SkillPathHecate,
+			},
+			AgentHostOwns: []string{
+				"agent launch and supervision",
+				"provider and model selection",
+				"tool, write, network, and sandbox permissions",
+				"secret, cookie, credential, and private-agent-memory handling",
+				"mapping desired_agent hints to host-specific agents or presets",
+			},
+			RecommendedMCPPullFlow: []string{
+				"assignments.next",
+				"assignments.claim",
+				"assignments.context",
+				"assignments.launch_packet",
+				"evidence.record",
+				"assignments.complete",
+			},
+		}
+		if capabilities.ServerVersion == "" {
+			capabilities.ServerVersion = "unknown"
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(strings.Join([]string{
+				"Cairnline coordinates project work; it does not launch or authorize agents.",
+				capabilities.CoreRule,
+				"Use assignments.next/claim/context/launch_packet for MCP-pull agents, then record evidence and complete the assignment.",
+			}, "\n")),
+			StructuredContent: capabilities,
+		}, nil
+	}
 }
 
 func listProjects(service *core.Service) mcp.ToolHandler {

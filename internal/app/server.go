@@ -11,7 +11,7 @@ func NewServer(service *core.Service, version string) *mcp.Server {
 		version,
 		"Local-first project coordination server for MCP-capable agents.",
 	)
-	RegisterTools(server, service)
+	RegisterTools(server, service, version)
 	RegisterResources(server, service)
 	return server
 }
