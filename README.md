@@ -260,6 +260,12 @@ go run ./cmd/cairnline -db ./cairnline.db
 
 The server speaks MCP over newline-delimited JSON-RPC on stdin/stdout.
 
+For a first standalone workflow, see the
+[MCP quickstart](docs/mcp-quickstart.md). It walks through creating a rootless
+project, adding a role and work item, queueing an assignment, claiming it from
+an agent, recording evidence, and completing the assignment without any
+Hecate-specific runtime.
+
 ## Embedded Go API
 
 Applications can embed Cairnline directly through the root Go package. Do not
