@@ -1117,6 +1117,22 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":26,"method":"resources/templates/list"}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() resources/templates/list error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, `"uriTemplate":"cairnline://projects/{project_id}"`) ||
+		!strings.Contains(got, `"uriTemplate":"cairnline://projects/{project_id}/work-items/{work_item_id}"`) ||
+		!strings.Contains(got, `"uriTemplate":"cairnline://projects/{project_id}/work-items/{work_item_id}/closeout-readiness"`) ||
+		!strings.Contains(got, `"uriTemplate":"cairnline://projects/{project_id}/assignments/{assignment_id}"`) ||
+		!strings.Contains(got, `"uriTemplate":"cairnline://projects/{project_id}/assignments/{assignment_id}/launch-packet"`) ||
+		!strings.Contains(got, `"uriTemplate":"cairnline://projects/{project_id}/memory-candidates/{memory_candidate_id}"`) {
+		t.Fatalf("resources/templates/list response = %s, want project, work item, closeout, assignment, launch packet, and memory candidate templates", got)
+	}
+
+	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":21,"method":"resources/read","params":{"uri":"` + projectURI + `"}}` + "\n",
 	)
 	output.Reset()
