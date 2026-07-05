@@ -46,6 +46,17 @@ agent records evidence
 agent completes assignment
 ```
 
+Before creating records, hosts can ask Cairnline to describe its portable
+contract:
+
+```json
+{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"coordination.capabilities","arguments":{}}}
+```
+
+The response includes `structuredContent` with supported `execution_modes`,
+`assignment_statuses`, skill metadata paths, the recommended MCP-pull flow, and
+the runtime responsibilities that remain owned by the consuming agent host.
+
 Generated IDs are returned in tool response text. Copy the `proj_...`,
 `role_...`, `work_...`, and `asgn_...` IDs into later calls.
 

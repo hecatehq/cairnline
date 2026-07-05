@@ -213,6 +213,60 @@ func TestMCPTools_ProjectListStructuredContent(t *testing.T) {
 	}
 }
 
+func TestMCPTools_CoordinationCapabilities(t *testing.T) {
+	service := core.NewService(core.NewMemoryStore())
+	server := NewServer(service, "v0.1.2-test")
+
+	input := strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n",
+	)
+	var output bytes.Buffer
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve(tools/list) error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, `"name":"coordination.capabilities"`) || !strings.Contains(got, "host-owned execution boundaries") {
+		t.Fatalf("tools/list response = %s, want coordination.capabilities metadata", got)
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"coordination.capabilities","arguments":{}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve(coordination.capabilities) error = %v", err)
+	}
+	if got := output.String(); !strings.Contains(got, "Cairnline coordinates project work; it does not launch or authorize agents.") ||
+		!strings.Contains(got, "Assignment is coordination. Execution is capability-dependent.") {
+		t.Fatalf("coordination.capabilities text = %s, want coordination boundary", got)
+	}
+	var response struct {
+		Result struct {
+			StructuredContent coordinationCapabilitiesContent `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("decode coordination.capabilities response: %v\n%s", err, output.String())
+	}
+	capabilities := response.Result.StructuredContent
+	if capabilities.ServerName != "cairnline" || capabilities.ServerVersion != "v0.1.2-test" {
+		t.Fatalf("server identity = %q/%q, want cairnline/v0.1.2-test", capabilities.ServerName, capabilities.ServerVersion)
+	}
+	if !containsString(capabilities.ExecutionModes, core.ExecutionMCPPull) || !containsString(capabilities.ExecutionModes, core.ExecutionExternalAdapter) {
+		t.Fatalf("execution modes = %+v, want portable execution ladder", capabilities.ExecutionModes)
+	}
+	if !containsString(capabilities.AgentHostOwns, "agent launch and supervision") ||
+		!containsString(capabilities.AgentHostOwns, "provider and model selection") ||
+		!containsString(capabilities.AgentHostOwns, "mapping desired_agent hints to host-specific agents or presets") {
+		t.Fatalf("agent host ownership = %+v, want launch/runtime boundaries", capabilities.AgentHostOwns)
+	}
+	if !containsString(capabilities.SkillMetadataPaths, core.SkillPathAgents) || !containsString(capabilities.SkillMetadataPaths, core.SkillPathClaude) {
+		t.Fatalf("skill metadata paths = %+v, want portable and host-compatible metadata paths", capabilities.SkillMetadataPaths)
+	}
+	if len(capabilities.RecommendedMCPPullFlow) == 0 || capabilities.RecommendedMCPPullFlow[0] != "assignments.next" {
+		t.Fatalf("mcp pull flow = %+v, want assignments.next first", capabilities.RecommendedMCPPullFlow)
+	}
+}
+
 func TestMCPTools_CoordinationListsStructuredContent(t *testing.T) {
 	ctx := context.Background()
 	service := core.NewService(core.NewMemoryStore())
@@ -2035,4 +2089,13 @@ func readSingleResourceResponse(t *testing.T, raw []byte) resourceTextContent {
 		t.Fatalf("resource contents = %+v, want one", response.Result.Contents)
 	}
 	return response.Result.Contents[0]
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

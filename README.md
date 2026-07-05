@@ -130,8 +130,8 @@ discovery; both were checked on July 4, 2026:
 - stdio MCP server with JSON-RPC framing
 - MCP read tools return human-readable text plus `structuredContent` where a
   stable data shape exists, including core project/role/work/assignment
-  list surfaces and assignment context/launch packet reads, so compatible
-  clients can avoid scraping text output
+  list surfaces, coordination capabilities, and assignment context/launch
+  packet reads, so compatible clients can avoid scraping text output
 - MCP resources and resource templates:
   - `cairnline://projects/{project_id}`
   - `cairnline://projects/{project_id}/work-items/{work_item_id}`
@@ -140,6 +140,7 @@ discovery; both were checked on July 4, 2026:
   - `cairnline://projects/{project_id}/assignments/{assignment_id}/launch-packet`
   - `cairnline://projects/{project_id}/memory-candidates/{memory_candidate_id}`
 - MCP tools:
+  - `coordination.capabilities`
   - `projects.list`
   - `projects.get`
   - `projects.create`
