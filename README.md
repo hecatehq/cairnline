@@ -243,7 +243,7 @@ Planned next:
 Install a release binary on macOS or Linux:
 
 ```sh
-version=v0.1.0 # replace with the release tag you want
+version=v0.1.0-alpha.1 # replace with the release tag you want
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 case "$arch" in
@@ -256,9 +256,10 @@ mkdir -p "$HOME/.local/bin"
 install -m 0755 cairnline "$HOME/.local/bin/cairnline"
 ```
 
-Each release also publishes `checksums.txt` for the archives. Release binaries
-are built for `darwin/amd64`, `darwin/arm64`, `linux/amd64`, and
-`linux/arm64`.
+Each release also publishes `checksums.txt` for the archives. Prerelease tags
+such as `v0.1.0-alpha.1` are published as GitHub prereleases while the MCP
+contract is still settling. Release binaries are built for `darwin/amd64`,
+`darwin/arm64`, `linux/amd64`, and `linux/arm64`.
 
 Maintainers cut binary releases by pushing a `v*` tag. The release workflow
 runs tests, vet, race tests, builds the archives, and attaches them to the
