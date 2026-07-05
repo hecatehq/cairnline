@@ -15,6 +15,37 @@ import (
 	"time"
 )
 
+func TestCommand_VersionFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "default", args: []string{"run", ".", "-version"}, want: "cairnline 0.0.0-dev\n"},
+		{name: "stamped", args: []string{"run", "-ldflags", "-X main.version=v0.1.2-test", ".", "-version"}, want: "cairnline v0.1.2-test\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, "go", tt.args...)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			output, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("go %s error = %v stderr=%s", strings.Join(tt.args, " "), err, stderr.String())
+			}
+			if got := string(output); got != tt.want {
+				t.Fatalf("version output = %q, want %q", got, tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
 func TestCommand_StandaloneMCPPullSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()

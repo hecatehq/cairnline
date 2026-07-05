@@ -21,6 +21,7 @@ Or install the command and run it from anywhere:
 
 ```sh
 go install github.com/hecatehq/cairnline/cmd/cairnline@latest
+cairnline -version
 cairnline -db "$HOME/.local/share/cairnline/cairnline.db"
 ```
 

@@ -250,6 +250,7 @@ curl -L "https://github.com/hecatehq/cairnline/releases/download/${version}/cair
 tar -xzf cairnline.tar.gz cairnline
 mkdir -p "$HOME/.local/bin"
 install -m 0755 cairnline "$HOME/.local/bin/cairnline"
+"$HOME/.local/bin/cairnline" -version
 ```
 
 Each release also publishes `checksums.txt` for the archives. Prerelease tags

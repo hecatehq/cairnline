@@ -15,7 +15,13 @@ var version = "0.0.0-dev"
 
 func main() {
 	dbPath := flag.String("db", "", "path to a SQLite database file; empty uses in-memory state")
+	showVersion := flag.Bool("version", false, "print the Cairnline version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Fprintf(os.Stdout, "cairnline %s\n", version)
+		return
+	}
 
 	ctx := context.Background()
 	store := core.Store(core.NewMemoryStore())
