@@ -240,7 +240,31 @@ Planned next:
 
 ## Run
 
-Install the command from source:
+Install a release binary on macOS or Linux:
+
+```sh
+version=v0.1.0 # replace with the release tag you want
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$arch" in
+  x86_64) arch=amd64 ;;
+  aarch64) arch=arm64 ;;
+esac
+curl -L "https://github.com/hecatehq/cairnline/releases/download/${version}/cairnline_${version}_${os}_${arch}.tar.gz" -o cairnline.tar.gz
+tar -xzf cairnline.tar.gz cairnline
+mkdir -p "$HOME/.local/bin"
+install -m 0755 cairnline "$HOME/.local/bin/cairnline"
+```
+
+Each release also publishes `checksums.txt` for the archives. Release binaries
+are built for `darwin/amd64`, `darwin/arm64`, `linux/amd64`, and
+`linux/arm64`.
+
+Maintainers cut binary releases by pushing a `v*` tag. The release workflow
+runs tests, vet, race tests, builds the archives, and attaches them to the
+GitHub release.
+
+Or install the command from source:
 
 ```sh
 go install github.com/hecatehq/cairnline/cmd/cairnline@latest
