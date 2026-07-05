@@ -19,6 +19,7 @@ targets=(
   "darwin/arm64"
   "linux/amd64"
   "linux/arm64"
+  "windows/amd64"
 )
 
 for target in "${targets[@]}"; do
@@ -26,16 +27,20 @@ for target in "${targets[@]}"; do
   goarch="${target#*/}"
   name="cairnline_${version}_${goos}_${goarch}"
   work="${tmp}/${name}"
+  binary="cairnline"
+  if [[ "${goos}" == "windows" ]]; then
+    binary="cairnline.exe"
+  fi
   mkdir -p "${work}"
 
   CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build \
     -trimpath \
     -ldflags "-s -w -X main.version=${version}" \
-    -o "${work}/cairnline" \
+    -o "${work}/${binary}" \
     "${root}/cmd/cairnline"
 
   cp "${root}/README.md" "${root}/LICENSE" "${work}/"
-  tar -C "${work}" -czf "${dist}/${name}.tar.gz" cairnline README.md LICENSE
+  tar -C "${work}" -czf "${dist}/${name}.tar.gz" "${binary}" README.md LICENSE
 done
 
 (cd "${dist}" && shasum -a 256 cairnline_*.tar.gz > checksums.txt)

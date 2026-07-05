@@ -239,7 +239,7 @@ discovery; both were checked on July 4, 2026:
 Install a release binary on macOS or Linux:
 
 ```sh
-version=v0.1.0-alpha.2 # replace with the release tag you want
+version=v0.1.0-alpha.4 # replace with the release tag you want
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 case "$arch" in
@@ -253,10 +253,17 @@ install -m 0755 cairnline "$HOME/.local/bin/cairnline"
 "$HOME/.local/bin/cairnline" -version
 ```
 
+On Windows, download the `cairnline_${version}_windows_amd64.tar.gz` archive
+from the same release, extract `cairnline.exe`, and run:
+
+```powershell
+.\cairnline.exe -version
+```
+
 Each release also publishes `checksums.txt` for the archives. Prerelease tags
-such as `v0.1.0-alpha.2` are published as GitHub prereleases while the MCP
+such as `v0.1.0-alpha.4` are published as GitHub prereleases while the MCP
 contract is still settling. Release binaries are built for `darwin/amd64`,
-`darwin/arm64`, `linux/amd64`, and `linux/arm64`.
+`darwin/arm64`, `linux/amd64`, `linux/arm64`, and `windows/amd64`.
 
 Maintainers cut binary releases by pushing a `v*` tag. The release workflow
 runs tests, vet, race tests, builds the archives, and attaches them to the
