@@ -11,7 +11,7 @@ import (
 	"github.com/hecatehq/cairnline/internal/sqlitestore"
 )
 
-const version = "0.0.0-dev"
+var version = "0.0.0-dev"
 
 func main() {
 	dbPath := flag.String("db", "", "path to a SQLite database file; empty uses in-memory state")
