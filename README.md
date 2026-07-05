@@ -11,6 +11,10 @@ be launched or supervised.
 Initial status: early implementation. Cairnline is usable as an experimental
 local MCP server, but its contracts are not stable yet.
 
+For host authors, see [Agent Host Integration](docs/agent-host-integration.md)
+for how MCP-capable clients should map Cairnline roles, assignments,
+desired-agent hints, and skills into their own agent/runtime concepts.
+
 ## Goals
 
 - Work for rootless planning/research/design projects and workspace-backed code
