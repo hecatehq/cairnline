@@ -1831,7 +1831,7 @@ func decodeJSON(raw string, target any) error {
 	return nil
 }
 
-// encodeExecutionRef stores an empty ref as '' so the release path — which
+// encodeExecutionRef stores an empty ref as the empty string so the release path — which
 // resets execution_ref with plain SQL, no Go encoding — and structured writes
 // agree on what "no execution" looks like in the column.
 func encodeExecutionRef(ref core.ExecutionRef) (string, error) {
@@ -1841,22 +1841,21 @@ func encodeExecutionRef(ref core.ExecutionRef) (string, error) {
 	return encodeJSON(ref)
 }
 
-// decodeExecutionRef tolerates rows written before the ref was structured,
-// where the column held one opaque host string; those decode as a run id,
-// matching core.ExecutionRef's legacy JSON tolerance.
+// decodeExecutionRef reads the JSON-object execution_ref column. Rows written
+// before the ref was structured held one opaque host string; those fail
+// decode on purpose — this contract broke in alpha, and a pre-structured
+// store must be rebuilt or re-seeded from the host's authoritative data
+// rather than silently reinterpreted.
 func decodeExecutionRef(raw string) (core.ExecutionRef, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return core.ExecutionRef{}, nil
 	}
-	if trimmed[0] == '{' || trimmed[0] == '"' {
-		var ref core.ExecutionRef
-		if err := json.Unmarshal([]byte(trimmed), &ref); err != nil {
-			return core.ExecutionRef{}, fmt.Errorf("decode sqlite execution_ref: %w", err)
-		}
-		return ref, nil
+	var ref core.ExecutionRef
+	if err := json.Unmarshal([]byte(trimmed), &ref); err != nil {
+		return core.ExecutionRef{}, fmt.Errorf("decode sqlite execution_ref: pre-structured execution refs are unsupported, rebuild or re-seed this store from the host's authoritative data: %w", err)
 	}
-	return core.ExecutionRef{RunID: trimmed}, nil
+	return ref, nil
 }
 
 func encodeTime(value time.Time) string {

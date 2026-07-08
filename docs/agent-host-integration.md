@@ -99,7 +99,13 @@ they exist so a coordination row survives migration between hosts without
 losing which execution it referred to. A host maps its own identifiers onto
 these slots — a task orchestrator fills `task_id`/`run_id`, a chat-first host
 fills `session_id`, and any host can attach `trace_id` for observability.
-Legacy bare-string refs are still accepted and decode as `run_id`.
+
+Breaking (alpha): the pre-structured bare-string `execution_ref` is not
+accepted anywhere — MCP arguments fail with an invalid-arguments error, and
+stored rows or snapshots that still hold string refs fail decode with an error
+telling the operator to rebuild or re-seed the store from the host's
+authoritative data. Cairnline contracts are unstable alpha; no compatibility
+shim is kept.
 
 When execution pauses on a host-side human approval gate, set the assignment
 status to `awaiting_approval` (optionally with `pending_approvals` in the ref)

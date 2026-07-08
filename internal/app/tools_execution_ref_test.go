@@ -57,21 +57,30 @@ func TestMCPTools_StructuredExecutionRefAndAwaitingApproval(t *testing.T) {
 		t.Fatalf("assignment after tool call = %+v, want awaiting_approval with structured ref", got)
 	}
 
-	// Legacy hosts that still send a bare string keep working; the string
-	// decodes as a run id.
+	// A bare-string execution_ref is the pre-structured contract; it fails
+	// argument decode as a tool error and leaves the assignment untouched.
 	input = strings.NewReader(
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignment.ID + `","status":"running","execution_ref":"legacy-run-9"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
-		t.Fatalf("Serve() legacy update_status error = %v", err)
+		t.Fatalf("Serve() bare-string update_status error = %v", err)
+	}
+	if !strings.Contains(output.String(), "invalid arguments") {
+		t.Fatalf("bare-string execution_ref response = %s, want invalid-arguments tool error", output.String())
 	}
 	got, err = service.GetAssignment(ctx, project.ID, assignment.ID)
 	if err != nil {
-		t.Fatalf("GetAssignment() after legacy ref error = %v", err)
+		t.Fatalf("GetAssignment() after rejected ref error = %v", err)
 	}
-	if got.Status != core.AssignmentRunning || got.ExecutionRef != (core.ExecutionRef{RunID: "legacy-run-9"}) {
-		t.Fatalf("assignment after legacy ref = %+v, want running with run id legacy-run-9", got)
+	if got.Status != core.AssignmentAwaitingApproval || got.ExecutionRef != want {
+		t.Fatalf("assignment after rejected ref = %+v, want prior awaiting_approval state preserved", got)
+	}
+
+	// Resume with a structured ref so the context read below sees running
+	// state driven by the supported shape.
+	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, core.AssignmentRunning, core.ExecutionRef{RunID: "run-9"}); err != nil {
+		t.Fatalf("UpdateAssignmentStatus(resume) error = %v", err)
 	}
 
 	input = strings.NewReader(
@@ -96,7 +105,7 @@ func TestMCPTools_StructuredExecutionRefAndAwaitingApproval(t *testing.T) {
 	if len(packet.Memory) != 1 || packet.Memory[0].Title != "Timeout invariant" || packet.Memory[0].Body != "Never lower the gateway timeout." {
 		t.Fatalf("structured context memory = %+v, want the enabled memory entry with body", packet.Memory)
 	}
-	if packet.Assignment.ExecutionRef != (core.ExecutionRef{RunID: "legacy-run-9"}) {
+	if packet.Assignment.ExecutionRef != (core.ExecutionRef{RunID: "run-9"}) {
 		t.Fatalf("structured context assignment ref = %+v, want structured execution ref", packet.Assignment.ExecutionRef)
 	}
 }

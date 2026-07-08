@@ -2632,12 +2632,12 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 
 func updateAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID         string   `json:"project_id"`
-		AssignmentID      string   `json:"assignment_id"`
-		WorkItemID        string   `json:"work_item_id"`
-		RoleID            string   `json:"role_id"`
-		RootID            string   `json:"root_id"`
-		ExecutionMode     string   `json:"execution_mode"`
+		ProjectID         string            `json:"project_id"`
+		AssignmentID      string            `json:"assignment_id"`
+		WorkItemID        string            `json:"work_item_id"`
+		RoleID            string            `json:"role_id"`
+		RootID            string            `json:"root_id"`
+		ExecutionMode     string            `json:"execution_mode"`
 		DesiredAgentKind  string            `json:"desired_agent_kind"`
 		SkillIDs          []string          `json:"skill_ids"`
 		Status            string            `json:"status"`

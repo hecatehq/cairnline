@@ -158,7 +158,7 @@ func TestCommand_StandaloneMCPPullSmoke(t *testing.T) {
 		"project_id":    projectID,
 		"assignment_id": assignmentID,
 		"status":        "completed",
-		"execution_ref": "standalone-smoke-run",
+		"execution_ref": map[string]any{"run_id": "standalone-smoke-run"},
 	})
 	if !strings.Contains(completeText, "Updated assignment "+assignmentID+": completed") {
 		t.Fatalf("complete text = %q, want completed assignment", completeText)

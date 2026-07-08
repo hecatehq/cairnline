@@ -163,8 +163,10 @@ Cairnline:
 - `pending_approvals`: count of host-side approval gates currently blocking the
   execution.
 
-A bare string is still accepted for compatibility with older clients and
-decodes as `run_id`.
+Breaking (alpha): `execution_ref` must be an object. The pre-structured
+bare-string form is rejected with an invalid-arguments error, and stores that
+still hold string refs must be rebuilt or re-seeded from the host's
+authoritative data.
 
 When the host pauses the execution on a human approval gate, report it:
 
