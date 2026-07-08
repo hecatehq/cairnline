@@ -29,13 +29,16 @@ func TestExecutionRef_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestExecutionRef_UnmarshalLegacyString(t *testing.T) {
+func TestExecutionRef_RejectsBareStringWire(t *testing.T) {
+	// The pre-structured contract stored one opaque string. It is not
+	// silently reinterpreted: decode fails and the ref stays zero, so a
+	// caller sees an error instead of a fabricated ref.
 	var decoded ExecutionRef
-	if err := json.Unmarshal([]byte(`" run-legacy-1 "`), &decoded); err != nil {
-		t.Fatalf("Unmarshal(legacy string) error = %v", err)
+	if err := json.Unmarshal([]byte(`"run-legacy-1"`), &decoded); err == nil {
+		t.Fatalf("Unmarshal(bare string) error = nil, want decode failure")
 	}
-	if decoded != (ExecutionRef{RunID: "run-legacy-1"}) {
-		t.Fatalf("legacy decode = %+v, want run id run-legacy-1", decoded)
+	if !decoded.Empty() {
+		t.Fatalf("decoded ref after failure = %+v, want zero ref", decoded)
 	}
 }
 

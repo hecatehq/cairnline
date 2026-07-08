@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hecatehq/cairnline/internal/core"
@@ -75,7 +76,7 @@ func TestStore_AssignmentExecutionRefRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStore_AssignmentLegacyExecutionRefDecodes(t *testing.T) {
+func TestStore_AssignmentPreStructuredExecutionRefFailsDecode(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "cairnline.db")
 	store, err := Open(ctx, path)
@@ -86,14 +87,14 @@ func TestStore_AssignmentLegacyExecutionRefDecodes(t *testing.T) {
 	project, assignment := seedExecutionRefTestAssignment(t, ctx, service)
 
 	// Rows written before the structured ref stored one opaque host string.
+	// They fail decode with an actionable error instead of being silently
+	// reinterpreted: pre-structured stores must be rebuilt or re-seeded.
 	if _, err := store.db.ExecContext(ctx, `UPDATE assignments SET execution_ref = ? WHERE project_id = ? AND id = ?`, "legacy-run-7", project.ID, assignment.ID); err != nil {
 		t.Fatalf("seed legacy execution_ref: %v", err)
 	}
-	got, err := store.GetAssignment(ctx, project.ID, assignment.ID)
-	if err != nil {
-		t.Fatalf("GetAssignment() error = %v", err)
-	}
-	if got.ExecutionRef != (core.ExecutionRef{RunID: "legacy-run-7"}) {
-		t.Fatalf("legacy execution ref = %+v, want run id legacy-run-7", got.ExecutionRef)
+	if _, err := store.GetAssignment(ctx, project.ID, assignment.ID); err == nil {
+		t.Fatalf("GetAssignment() error = nil, want pre-structured execution_ref decode failure")
+	} else if !strings.Contains(err.Error(), "rebuild or re-seed") {
+		t.Fatalf("GetAssignment() error = %v, want actionable rebuild/re-seed message", err)
 	}
 }

@@ -673,7 +673,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("CreateWorkItem(updated) error = %v", err)
 	}
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_mode":"mcp_pull","desired_agent_kind":"codex","skill_ids":["review","backend","backend"],"status":"queued","execution_ref":"chat-1","context_snapshot_id":"ctx-1"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_mode":"mcp_pull","desired_agent_kind":"codex","skill_ids":["review","backend","backend"],"status":"queued","execution_ref":{"kind":"chat_session","session_id":"chat-1"},"context_snapshot_id":"ctx-1"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -811,7 +811,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","status":"running","execution_ref":"run-1"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","status":"running","execution_ref":{"run_id":"run-1"}}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -1003,7 +1003,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","execution_ref":"run-1"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","execution_ref":{"run_id":"run-1"}}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

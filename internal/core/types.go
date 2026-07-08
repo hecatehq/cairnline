@@ -1,11 +1,6 @@
 package core
 
-import (
-	"bytes"
-	"encoding/json"
-	"strings"
-	"time"
-)
+import "time"
 
 type Project struct {
 	ID             string    `json:"id"`
@@ -360,13 +355,13 @@ type ProjectActivityBuckets struct {
 }
 
 type ProjectActivityItem struct {
-	Bucket           string    `json:"bucket"`
-	AssignmentID     string    `json:"assignment_id"`
-	WorkItemID       string    `json:"work_item_id"`
-	WorkItemTitle    string    `json:"work_item_title,omitempty"`
-	RoleID           string    `json:"role_id,omitempty"`
-	RoleName         string    `json:"role_name,omitempty"`
-	RootID           string    `json:"root_id,omitempty"`
+	Bucket           string       `json:"bucket"`
+	AssignmentID     string       `json:"assignment_id"`
+	WorkItemID       string       `json:"work_item_id"`
+	WorkItemTitle    string       `json:"work_item_title,omitempty"`
+	RoleID           string       `json:"role_id,omitempty"`
+	RoleName         string       `json:"role_name,omitempty"`
+	RootID           string       `json:"root_id,omitempty"`
 	Status           string       `json:"status"`
 	ExecutionMode    string       `json:"execution_mode,omitempty"`
 	DesiredAgentKind string       `json:"desired_agent_kind,omitempty"`
@@ -419,29 +414,6 @@ type ExecutionRef struct {
 
 func (ref ExecutionRef) Empty() bool {
 	return ref == ExecutionRef{}
-}
-
-// UnmarshalJSON tolerates the pre-structured wire shape, where the execution
-// ref was a single opaque host string. A legacy string decodes as a run id —
-// the closest meaning of the old "local run or job identifier" contract — so
-// old snapshots, stored rows, and tool callers keep working.
-func (ref *ExecutionRef) UnmarshalJSON(data []byte) error {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) > 0 && trimmed[0] == '"' {
-		var legacy string
-		if err := json.Unmarshal(trimmed, &legacy); err != nil {
-			return err
-		}
-		*ref = ExecutionRef{RunID: strings.TrimSpace(legacy)}
-		return nil
-	}
-	type wire ExecutionRef
-	var decoded wire
-	if err := json.Unmarshal(trimmed, &decoded); err != nil {
-		return err
-	}
-	*ref = ExecutionRef(decoded)
-	return nil
 }
 
 type Assignment struct {
