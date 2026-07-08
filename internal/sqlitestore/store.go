@@ -804,8 +804,12 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
+	executionRef, err := encodeExecutionRef(assignment.ExecutionRef)
+	if err != nil {
+		return core.Assignment{}, err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
+		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -823,8 +827,12 @@ func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
+	executionRef, err := encodeExecutionRef(assignment.ExecutionRef)
+	if err != nil {
+		return core.Assignment{}, err
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ? WHERE project_id = ? AND id = ?`,
-		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, assignment.ExecutionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
+		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -1578,14 +1586,17 @@ func scanRole(row scanner) (core.Role, error) {
 
 func scanAssignment(row scanner) (core.Assignment, error) {
 	var item core.Assignment
-	var desiredAgentJSON, createdAt, updatedAt, startedAt, completedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &item.ExecutionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
+	var desiredAgentJSON, executionRef, createdAt, updatedAt, startedAt, completedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &executionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
 		return core.Assignment{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(desiredAgentJSON, &item.DesiredAgent); err != nil {
 		return core.Assignment{}, err
 	}
 	var err error
+	if item.ExecutionRef, err = decodeExecutionRef(executionRef); err != nil {
+		return core.Assignment{}, err
+	}
 	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
 		return core.Assignment{}, err
 	}
@@ -1818,6 +1829,34 @@ func decodeJSON(raw string, target any) error {
 		return fmt.Errorf("decode sqlite json: %w", err)
 	}
 	return nil
+}
+
+// encodeExecutionRef stores an empty ref as '' so the release path — which
+// resets execution_ref with plain SQL, no Go encoding — and structured writes
+// agree on what "no execution" looks like in the column.
+func encodeExecutionRef(ref core.ExecutionRef) (string, error) {
+	if ref.Empty() {
+		return "", nil
+	}
+	return encodeJSON(ref)
+}
+
+// decodeExecutionRef tolerates rows written before the ref was structured,
+// where the column held one opaque host string; those decode as a run id,
+// matching core.ExecutionRef's legacy JSON tolerance.
+func decodeExecutionRef(raw string) (core.ExecutionRef, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return core.ExecutionRef{}, nil
+	}
+	if trimmed[0] == '{' || trimmed[0] == '"' {
+		var ref core.ExecutionRef
+		if err := json.Unmarshal([]byte(trimmed), &ref); err != nil {
+			return core.ExecutionRef{}, fmt.Errorf("decode sqlite execution_ref: %w", err)
+		}
+		return ref, nil
+	}
+	return core.ExecutionRef{RunID: trimmed}, nil
 }
 
 func encodeTime(value time.Time) string {

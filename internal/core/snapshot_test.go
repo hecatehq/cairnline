@@ -152,7 +152,7 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 	}
 	assignment.Status = AssignmentCompleted
 	assignment.ClaimedBy = "agent:test"
-	assignment.ExecutionRef = "run_snapshot"
+	assignment.ExecutionRef = ExecutionRef{Kind: "task_run", TaskID: "task_snapshot", RunID: "run_snapshot", SessionID: "sess_snapshot", TraceID: "trace_snapshot", PendingApprovals: 2}
 	assignment.StartedAt = base.Add(2 * time.Minute)
 	assignment.CompletedAt = base.Add(4 * time.Minute)
 	assignment.UpdatedAt = assignment.CompletedAt

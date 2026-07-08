@@ -1483,7 +1483,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 			Kind:     "codex",
 			SkillIDs: []string{"review", "backend", "backend"},
 		},
-		ExecutionRef:      "chat-1",
+		ExecutionRef:      ExecutionRef{SessionID: "chat-1"},
 		ContextSnapshotID: "ctx-1",
 	})
 	if err != nil {
@@ -1495,8 +1495,8 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if updatedAssignment.CreatedAt != assignment.CreatedAt {
 		t.Fatalf("updated assignment created_at = %s, want original %s", updatedAssignment.CreatedAt, assignment.CreatedAt)
 	}
-	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" || updatedAssignment.ExecutionRef != "chat-1" || updatedAssignment.ContextSnapshotID != "ctx-1" {
-		t.Fatalf("updated assignment desired/context = %+v/%q/%q, want normalized desired agent and refs", updatedAssignment.DesiredAgent, updatedAssignment.ExecutionRef, updatedAssignment.ContextSnapshotID)
+	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" || updatedAssignment.ExecutionRef != (ExecutionRef{SessionID: "chat-1"}) || updatedAssignment.ContextSnapshotID != "ctx-1" {
+		t.Fatalf("updated assignment desired/context = %+v/%q/%q, want normalized desired agent and refs", updatedAssignment.DesiredAgent, updatedAssignment.ExecutionRef.SessionID, updatedAssignment.ContextSnapshotID)
 	}
 	if _, err := service.UpdateAssignment(ctx, Assignment{
 		ProjectID:     project.ID,
@@ -1521,7 +1521,7 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	work = updatedWork
 	role = implementer
 	assignment = updatedAssignment
-	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, "run-queued"); !errors.Is(err, ErrConflict) {
+	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, ExecutionRef{RunID: "run-queued"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("UpdateAssignmentStatus() before claim error = %v, want ErrConflict", err)
 	}
 
@@ -1532,11 +1532,11 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if claimed.Status != AssignmentClaimed || claimed.ClaimedBy != "agent-a" {
 		t.Fatalf("claimed assignment = %+v, want claimed by agent-a", claimed)
 	}
-	running, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, "run-123")
+	running, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, ExecutionRef{RunID: "run-123"})
 	if err != nil {
 		t.Fatalf("UpdateAssignmentStatus() error = %v", err)
 	}
-	if running.Status != AssignmentRunning || running.ExecutionRef != "run-123" {
+	if running.Status != AssignmentRunning || running.ExecutionRef.RunID != "run-123" {
 		t.Fatalf("running assignment = %+v, want running with execution ref", running)
 	}
 	if running.StartedAt.IsZero() || !running.CompletedAt.IsZero() {
@@ -1550,13 +1550,13 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		ExecutionMode:     ExecutionOrchestrated,
 		Status:            AssignmentRunning,
 		DesiredAgent:      DesiredAgent{Kind: "hecate", SkillIDs: []string{"review"}},
-		ExecutionRef:      "run-456",
+		ExecutionRef:      ExecutionRef{RunID: "run-456"},
 		ContextSnapshotID: "ctx-running",
 	})
 	if err != nil {
 		t.Fatalf("UpdateAssignment(running) error = %v", err)
 	}
-	if runningUpdated.Status != AssignmentRunning || runningUpdated.ClaimedBy != "agent-a" || runningUpdated.ExecutionMode != ExecutionOrchestrated || runningUpdated.ExecutionRef != "run-456" || runningUpdated.ContextSnapshotID != "ctx-running" {
+	if runningUpdated.Status != AssignmentRunning || runningUpdated.ClaimedBy != "agent-a" || runningUpdated.ExecutionMode != ExecutionOrchestrated || runningUpdated.ExecutionRef.RunID != "run-456" || runningUpdated.ContextSnapshotID != "ctx-running" {
 		t.Fatalf("running updated assignment = %+v, want metadata update preserving claim", runningUpdated)
 	}
 	if !runningUpdated.StartedAt.Equal(running.StartedAt) || !runningUpdated.CompletedAt.IsZero() {
@@ -1763,11 +1763,11 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 		t.Fatalf("launch packet reviews = %+v, want approved and risk reviews", launchPacket.Reviews)
 	}
 
-	completed, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-123")
+	completed, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, ExecutionRef{RunID: "run-123"})
 	if err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
-	if completed.Status != AssignmentCompleted || completed.ExecutionRef != "run-123" {
+	if completed.Status != AssignmentCompleted || completed.ExecutionRef.RunID != "run-123" {
 		t.Fatalf("completed assignment = %+v, want completed with execution ref", completed)
 	}
 	if !completed.StartedAt.Equal(running.StartedAt) || completed.CompletedAt.IsZero() {
@@ -1958,7 +1958,7 @@ func TestService_WorkItemCloseoutReadiness(t *testing.T) {
 	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
 		t.Fatalf("ClaimAssignment() error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-1"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, ExecutionRef{RunID: "run-1"}); err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
 
@@ -2111,7 +2111,7 @@ func TestService_WorkItemCloseoutReadinessReviewFollowUp(t *testing.T) {
 	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
 		t.Fatalf("ClaimAssignment() error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, "run-1"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentCompleted, ExecutionRef{RunID: "run-1"}); err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
 	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Title: "Evidence", Locator: "file://report.md"}); err != nil {
@@ -2190,7 +2190,7 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(failed) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, failedAssignment.ID, AssignmentFailed, "run-failed"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, failedAssignment.ID, AssignmentFailed, ExecutionRef{RunID: "run-failed"}); err != nil {
 		t.Fatalf("CompleteAssignment(failed) error = %v", err)
 	}
 	missingEvidenceWork, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Needs evidence"})
@@ -2201,7 +2201,7 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(missing evidence) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, missingEvidenceAssignment.ID, AssignmentCompleted, "run-missing"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, missingEvidenceAssignment.ID, AssignmentCompleted, ExecutionRef{RunID: "run-missing"}); err != nil {
 		t.Fatalf("CompleteAssignment(missing evidence) error = %v", err)
 	}
 	openHandoff, err := service.CreateHandoff(ctx, Handoff{
@@ -2222,7 +2222,7 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(review) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, reviewAssignment.ID, AssignmentCompleted, "run-review"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, reviewAssignment.ID, AssignmentCompleted, ExecutionRef{RunID: "run-review"}); err != nil {
 		t.Fatalf("CompleteAssignment(review) error = %v", err)
 	}
 	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: reviewWork.ID, AssignmentID: reviewAssignment.ID, Title: "Review evidence", Locator: "file://review.md"}); err != nil {
@@ -2248,7 +2248,7 @@ func TestService_ProjectOperationsBrief(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(closeout) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, closeoutAssignment.ID, AssignmentCompleted, "run-ready"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, closeoutAssignment.ID, AssignmentCompleted, ExecutionRef{RunID: "run-ready"}); err != nil {
 		t.Fatalf("CompleteAssignment(closeout) error = %v", err)
 	}
 	if _, err := service.CreateEvidence(ctx, Evidence{ProjectID: project.ID, WorkItemID: closeoutWork.ID, AssignmentID: closeoutAssignment.ID, Title: "Ready evidence", Locator: "file://ready.md"}); err != nil {
@@ -2409,7 +2409,7 @@ func TestService_ProjectHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment(completed) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, "run-complete"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, ExecutionRef{RunID: "run-complete"}); err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
 	review, err := service.CreateReview(ctx, Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: completed.ID, Title: "Needs follow-up", Body: "Please follow up.", Verdict: ReviewVerdictChangesRequested})
@@ -2510,7 +2510,7 @@ func TestService_AssistantProposalApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAssignment() error = %v", err)
 	}
-	if assignment.Status != AssignmentQueued || assignment.ExecutionRef != "" || assignment.ClaimedBy != "" {
+	if assignment.Status != AssignmentQueued || !assignment.ExecutionRef.Empty() || assignment.ClaimedBy != "" {
 		t.Fatalf("assignment = %+v, want queued coordination record without execution binding", assignment)
 	}
 	candidates, err := service.ListMemoryCandidates(ctx, MemoryCandidateFilter{ProjectID: project.ID})
@@ -2851,7 +2851,7 @@ func TestService_AssistantProposalRejectsExecutionBoundAssignment(t *testing.T) 
 				WorkItemID:    "work_missing",
 				RoleID:        "role_missing",
 				Status:        AssignmentRunning,
-				ExecutionRef:  "run_unsafe",
+				ExecutionRef:  ExecutionRef{RunID: "run_unsafe"},
 				ExecutionMode: ExecutionMCPPull,
 			},
 		}},
@@ -2894,21 +2894,21 @@ func TestService_ProjectActivity(t *testing.T) {
 	if _, err := service.ClaimAssignment(ctx, project.ID, running.ID, "agent-b"); err != nil {
 		t.Fatalf("ClaimAssignment(running) error = %v", err)
 	}
-	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, running.ID, AssignmentRunning, "run-1"); err != nil {
+	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, running.ID, AssignmentRunning, ExecutionRef{RunID: "run-1"}); err != nil {
 		t.Fatalf("UpdateAssignmentStatus(running) error = %v", err)
 	}
 	completed, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
 	if err != nil {
 		t.Fatalf("CreateAssignment(completed) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, "run-2"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, completed.ID, AssignmentCompleted, ExecutionRef{RunID: "run-2"}); err != nil {
 		t.Fatalf("CompleteAssignment(completed) error = %v", err)
 	}
 	failed, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
 	if err != nil {
 		t.Fatalf("CreateAssignment(failed) error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, failed.ID, AssignmentFailed, "run-3"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, failed.ID, AssignmentFailed, ExecutionRef{RunID: "run-3"}); err != nil {
 		t.Fatalf("CompleteAssignment(failed) error = %v", err)
 	}
 
@@ -3563,7 +3563,7 @@ func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 		ExecutionMode:     ExecutionMCPPull,
 		Status:            AssignmentClaimed,
 		ClaimedBy:         claimed.ClaimedBy,
-		ExecutionRef:      "run-pre-dispatch",
+		ExecutionRef:      ExecutionRef{RunID: "run-pre-dispatch"},
 		ContextSnapshotID: "ctx-pre-dispatch",
 		StartedAt:         startedAt,
 		CompletedAt:       completedAt,
@@ -3578,7 +3578,7 @@ func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReleaseAssignment() error = %v", err)
 	}
-	if released.Status != AssignmentQueued || released.ClaimedBy != "" || released.ExecutionRef != "" || released.ContextSnapshotID != "" || !released.StartedAt.IsZero() || !released.CompletedAt.IsZero() {
+	if released.Status != AssignmentQueued || released.ClaimedBy != "" || !released.ExecutionRef.Empty() || released.ContextSnapshotID != "" || !released.StartedAt.IsZero() || !released.CompletedAt.IsZero() {
 		t.Fatalf("released assignment = %+v, want queued with claim/runtime refs cleared", released)
 	}
 	reclaimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-b")
@@ -3588,14 +3588,14 @@ func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 	if reclaimed.Status != AssignmentClaimed || reclaimed.ClaimedBy != "agent-b" {
 		t.Fatalf("reclaimed assignment = %+v, want claimed by agent-b", reclaimed)
 	}
-	running, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, "run-started")
+	running, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, ExecutionRef{RunID: "run-started"})
 	if err != nil {
 		t.Fatalf("UpdateAssignmentStatus(running) error = %v", err)
 	}
 	if _, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-b"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("ReleaseAssignment(running) error = %v, want ErrConflict", err)
 	}
-	if running.Status != AssignmentRunning || running.ExecutionRef != "run-started" {
+	if running.Status != AssignmentRunning || running.ExecutionRef.RunID != "run-started" {
 		t.Fatalf("running assignment = %+v, want running state preserved", running)
 	}
 }

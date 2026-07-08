@@ -650,7 +650,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				"agent_kind":{"type":"string"},
 				"skill_ids":{"type":"array","items":{"type":"string"}},
 				"execution_modes":{"type":"array","items":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]}},
-				"status":{"type":"string","enum":["queued","claimed","running","awaiting_review","completed","failed","cancelled"]},
+				"status":{"type":"string","enum":["queued","claimed","running","awaiting_approval","awaiting_review","completed","failed","cancelled"]},
 				"limit":{"type":"integer","minimum":1}
 			},
 			"required":["project_id"]
@@ -692,8 +692,18 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
 				"desired_agent_kind":{"type":"string"},
 				"skill_ids":{"type":"array","items":{"type":"string"}},
-				"status":{"type":"string","enum":["queued","claimed","running","awaiting_review","completed","failed","cancelled"]},
-				"execution_ref":{"type":"string"},
+				"status":{"type":"string","enum":["queued","claimed","running","awaiting_approval","awaiting_review","completed","failed","cancelled"]},
+				"execution_ref":{
+					"type":"object",
+					"properties":{
+						"kind":{"type":"string"},
+						"task_id":{"type":"string"},
+						"run_id":{"type":"string"},
+						"session_id":{"type":"string"},
+						"trace_id":{"type":"string"},
+						"pending_approvals":{"type":"integer","minimum":0}
+					}
+				},
 				"context_snapshot_id":{"type":"string"}
 			},
 			"required":["project_id","assignment_id","work_item_id","role_id"]
@@ -733,14 +743,24 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.update_status",
 		Title:       "Update assignment progress status",
-		Description: "Mark a claimed assignment running or awaiting review.",
+		Description: "Mark a claimed assignment running, awaiting approval, or awaiting review.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
-				"status":{"type":"string","enum":["running","awaiting_review"]},
-				"execution_ref":{"type":"string"}
+				"status":{"type":"string","enum":["running","awaiting_approval","awaiting_review"]},
+				"execution_ref":{
+					"type":"object",
+					"properties":{
+						"kind":{"type":"string"},
+						"task_id":{"type":"string"},
+						"run_id":{"type":"string"},
+						"session_id":{"type":"string"},
+						"trace_id":{"type":"string"},
+						"pending_approvals":{"type":"integer","minimum":0}
+					}
+				}
 			},
 			"required":["project_id","assignment_id","status"]
 		}`),
@@ -786,7 +806,17 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
 				"status":{"type":"string","enum":["completed","failed","cancelled","awaiting_review"]},
-				"execution_ref":{"type":"string"}
+				"execution_ref":{
+					"type":"object",
+					"properties":{
+						"kind":{"type":"string"},
+						"task_id":{"type":"string"},
+						"run_id":{"type":"string"},
+						"session_id":{"type":"string"},
+						"trace_id":{"type":"string"},
+						"pending_approvals":{"type":"integer","minimum":0}
+					}
+				}
 			},
 			"required":["project_id","assignment_id"]
 		}`),
@@ -2608,11 +2638,11 @@ func updateAssignment(service *core.Service) mcp.ToolHandler {
 		RoleID            string   `json:"role_id"`
 		RootID            string   `json:"root_id"`
 		ExecutionMode     string   `json:"execution_mode"`
-		DesiredAgentKind  string   `json:"desired_agent_kind"`
-		SkillIDs          []string `json:"skill_ids"`
-		Status            string   `json:"status"`
-		ExecutionRef      string   `json:"execution_ref"`
-		ContextSnapshotID string   `json:"context_snapshot_id"`
+		DesiredAgentKind  string            `json:"desired_agent_kind"`
+		SkillIDs          []string          `json:"skill_ids"`
+		Status            string            `json:"status"`
+		ExecutionRef      core.ExecutionRef `json:"execution_ref"`
+		ContextSnapshotID string            `json:"context_snapshot_id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2695,10 +2725,10 @@ func releaseAssignment(service *core.Service) mcp.ToolHandler {
 
 func updateAssignmentStatus(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID    string `json:"project_id"`
-		AssignmentID string `json:"assignment_id"`
-		Status       string `json:"status"`
-		ExecutionRef string `json:"execution_ref"`
+		ProjectID    string            `json:"project_id"`
+		AssignmentID string            `json:"assignment_id"`
+		Status       string            `json:"status"`
+		ExecutionRef core.ExecutionRef `json:"execution_ref"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -2759,10 +2789,10 @@ func assignmentLaunchPacket(service *core.Service) mcp.ToolHandler {
 
 func completeAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID    string `json:"project_id"`
-		AssignmentID string `json:"assignment_id"`
-		Status       string `json:"status"`
-		ExecutionRef string `json:"execution_ref"`
+		ProjectID    string            `json:"project_id"`
+		AssignmentID string            `json:"assignment_id"`
+		Status       string            `json:"status"`
+		ExecutionRef core.ExecutionRef `json:"execution_ref"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
@@ -3623,6 +3653,12 @@ func formatAssignmentContext(item core.AssignmentContext) string {
 	if len(item.Assignment.DesiredAgent.SkillIDs) > 0 {
 		fmt.Fprintf(&b, "Skill IDs: %s\n", strings.Join(item.Assignment.DesiredAgent.SkillIDs, ", "))
 	}
+	if len(item.Memory) > 0 {
+		fmt.Fprintf(&b, "Memory entries: %d\n", len(item.Memory))
+		for _, entry := range item.Memory {
+			fmt.Fprintf(&b, "Memory: %s\n", entry.Title)
+		}
+	}
 	for _, warning := range item.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n", warning)
 	}
@@ -4101,13 +4137,14 @@ func formatProjectOperationsBrief(brief core.ProjectOperationsBrief) string {
 func formatProjectActivity(activity core.ProjectActivity) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Project activity %s\n", activity.ProjectID)
-	fmt.Fprintf(&b, "Counts: assignments=%d active=%d blocked=%d queued=%d claimed=%d running=%d awaiting_review=%d completed=%d failed=%d cancelled=%d other=%d\n",
+	fmt.Fprintf(&b, "Counts: assignments=%d active=%d blocked=%d queued=%d claimed=%d running=%d awaiting_approval=%d awaiting_review=%d completed=%d failed=%d cancelled=%d other=%d\n",
 		activity.Counts.Assignments,
 		activity.Counts.Active,
 		activity.Counts.Blocked,
 		activity.Counts.Queued,
 		activity.Counts.Claimed,
 		activity.Counts.Running,
+		activity.Counts.AwaitingApproval,
 		activity.Counts.AwaitingReview,
 		activity.Counts.Completed,
 		activity.Counts.Failed,

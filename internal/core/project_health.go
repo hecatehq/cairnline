@@ -242,6 +242,8 @@ func projectOperationHealthAction(item ProjectOperationItem) (string, string) {
 			return "claim_assignment", "Start assignment"
 		case AssignmentClaimed, AssignmentRunning, AssignmentReview:
 			return "inspect_assignment", "Inspect assignment"
+		case AssignmentAwaitingApproval:
+			return "inspect_assignment", "Resolve pending approval"
 		default:
 			return "resolve_assignment", "Resolve assignment"
 		}

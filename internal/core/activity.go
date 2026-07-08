@@ -89,7 +89,10 @@ func projectActivityBucket(status string) string {
 	switch strings.TrimSpace(status) {
 	case AssignmentClaimed, AssignmentRunning, AssignmentReview:
 		return ProjectActivityBucketActive
-	case AssignmentQueued, AssignmentFailed, AssignmentCancelled:
+	// awaiting_approval buckets as blocked, not active: the execution is
+	// paused until a host-side approval resolves, which is exactly the
+	// operator-attention signal the blocked bucket exists for.
+	case AssignmentQueued, AssignmentAwaitingApproval, AssignmentFailed, AssignmentCancelled:
 		return ProjectActivityBucketBlocked
 	case AssignmentCompleted:
 		return ProjectActivityBucketCompleted
@@ -106,6 +109,8 @@ func countProjectActivityStatus(counts *ProjectActivityCounts, status string) {
 		counts.Claimed++
 	case AssignmentRunning:
 		counts.Running++
+	case AssignmentAwaitingApproval:
+		counts.AwaitingApproval++
 	case AssignmentReview:
 		counts.AwaitingReview++
 	case AssignmentCompleted:

@@ -814,7 +814,7 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 		ExecutionMode:     executionMode,
 		Status:            AssignmentQueued,
 		DesiredAgent:      desiredAgent,
-		ExecutionRef:      strings.TrimSpace(input.ExecutionRef),
+		ExecutionRef:      normalizeExecutionRef(input.ExecutionRef),
 		ContextSnapshotID: strings.TrimSpace(input.ContextSnapshotID),
 		CreatedAt:         createdAt,
 		UpdatedAt:         updatedAt,
@@ -888,7 +888,7 @@ func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assig
 		Status:            status,
 		DesiredAgent:      normalizeDesiredAgent(input.DesiredAgent),
 		ClaimedBy:         claimedBy,
-		ExecutionRef:      strings.TrimSpace(input.ExecutionRef),
+		ExecutionRef:      normalizeExecutionRef(input.ExecutionRef),
 		ContextSnapshotID: strings.TrimSpace(input.ContextSnapshotID),
 		CreatedAt:         existing.CreatedAt,
 		UpdatedAt:         s.now(),
@@ -954,7 +954,7 @@ func (s *Service) DeleteAssignment(ctx context.Context, projectID, id string) er
 	return s.store.DeleteAssignment(ctx, projectID, id)
 }
 
-func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, status, executionRef string) (Assignment, error) {
+func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, status string, executionRef ExecutionRef) (Assignment, error) {
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)
 	status = strings.TrimSpace(status)
@@ -965,7 +965,7 @@ func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, sta
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
 	}
 	if !isProgressAssignmentStatus(status) {
-		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment status must be running or awaiting_review"))
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment status must be running, awaiting_approval, or awaiting_review"))
 	}
 	item, err := s.store.GetAssignment(ctx, projectID, id)
 	if err != nil {
@@ -982,8 +982,8 @@ func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, sta
 	if item.StartedAt.IsZero() {
 		item.StartedAt = now
 	}
-	if trimmed := strings.TrimSpace(executionRef); trimmed != "" {
-		item.ExecutionRef = trimmed
+	if ref := normalizeExecutionRef(executionRef); !ref.Empty() {
+		item.ExecutionRef = ref
 	}
 	item.UpdatedAt = now
 	return s.store.UpdateAssignment(ctx, item)
@@ -1023,12 +1023,19 @@ func (s *Service) AssignmentContext(ctx context.Context, projectID, id string) (
 			role = &foundRole
 		}
 	}
+	// Enabled entries only: disabled memory is retained for audit, not for
+	// steering new executions, so it stays out of launch-facing reads.
+	memoryEntries, err := s.store.ListMemoryEntries(ctx, projectID, false)
+	if err != nil {
+		return AssignmentContext{}, err
+	}
 	return AssignmentContext{
 		ID:         newID("ctx"),
 		Project:    project,
 		WorkItem:   workItem,
 		Role:       role,
 		Assignment: assignment,
+		Memory:     memoryEntries,
 		Warnings:   warnings,
 		CreatedAt:  s.now(),
 	}, nil
@@ -1090,7 +1097,7 @@ func (s *Service) AssignmentLaunchPacket(ctx context.Context, projectID, id stri
 	}, nil
 }
 
-func (s *Service) CompleteAssignment(ctx context.Context, projectID, id, status, executionRef string) (Assignment, error) {
+func (s *Service) CompleteAssignment(ctx context.Context, projectID, id, status string, executionRef ExecutionRef) (Assignment, error) {
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)
 	if projectID == "" {
@@ -1121,8 +1128,8 @@ func (s *Service) CompleteAssignment(ctx context.Context, projectID, id, status,
 	if isTerminalAssignmentStatus(status) && item.CompletedAt.IsZero() {
 		item.CompletedAt = now
 	}
-	if trimmed := strings.TrimSpace(executionRef); trimmed != "" {
-		item.ExecutionRef = trimmed
+	if ref := normalizeExecutionRef(executionRef); !ref.Empty() {
+		item.ExecutionRef = ref
 	}
 	item.UpdatedAt = now
 	return s.store.UpdateAssignment(ctx, item)
@@ -2787,7 +2794,7 @@ func isCompletionAssignmentStatus(status string) bool {
 
 func isAssignmentStatus(status string) bool {
 	switch status {
-	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentReview, AssignmentCompleted, AssignmentFailed, AssignmentCancelled:
+	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentAwaitingApproval, AssignmentReview, AssignmentCompleted, AssignmentFailed, AssignmentCancelled:
 		return true
 	default:
 		return false
@@ -2805,11 +2812,26 @@ func isTerminalAssignmentStatus(status string) bool {
 
 func isProgressAssignmentStatus(status string) bool {
 	switch status {
-	case AssignmentRunning, AssignmentReview:
+	case AssignmentRunning, AssignmentAwaitingApproval, AssignmentReview:
 		return true
 	default:
 		return false
 	}
+}
+
+func normalizeExecutionRef(ref ExecutionRef) ExecutionRef {
+	out := ExecutionRef{
+		Kind:             strings.TrimSpace(ref.Kind),
+		TaskID:           strings.TrimSpace(ref.TaskID),
+		RunID:            strings.TrimSpace(ref.RunID),
+		SessionID:        strings.TrimSpace(ref.SessionID),
+		TraceID:          strings.TrimSpace(ref.TraceID),
+		PendingApprovals: ref.PendingApprovals,
+	}
+	if out.PendingApprovals < 0 {
+		out.PendingApprovals = 0
+	}
+	return out
 }
 
 func normalizeDesiredAgent(input DesiredAgent) DesiredAgent {

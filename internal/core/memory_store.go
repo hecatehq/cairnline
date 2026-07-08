@@ -479,7 +479,7 @@ func (s *MemoryStore) ReleaseAssignment(ctx context.Context, projectID, id, clai
 	}
 	item.Status = AssignmentQueued
 	item.ClaimedBy = ""
-	item.ExecutionRef = ""
+	item.ExecutionRef = ExecutionRef{}
 	item.ContextSnapshotID = ""
 	item.StartedAt = time.Time{}
 	item.CompletedAt = time.Time{}
