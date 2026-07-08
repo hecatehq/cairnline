@@ -161,7 +161,7 @@ func assignmentCloseoutStatus(assignment Assignment) string {
 
 func isActiveCloseoutAssignmentStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentReview:
+	case AssignmentQueued, AssignmentClaimed, AssignmentRunning, AssignmentAwaitingApproval, AssignmentReview:
 		return true
 	default:
 		return false

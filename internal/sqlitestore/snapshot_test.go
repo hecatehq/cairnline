@@ -139,7 +139,7 @@ func sqliteSnapshotFixture() core.Snapshot {
 			Status:            core.AssignmentCompleted,
 			DesiredAgent:      core.DesiredAgent{Kind: core.DesiredAgentAny, SkillIDs: []string{"sqlite-skill"}},
 			ClaimedBy:         "agent:sqlite",
-			ExecutionRef:      "run_sqlite",
+			ExecutionRef:      core.ExecutionRef{Kind: "task_run", TaskID: "task_sqlite", RunID: "run_sqlite", TraceID: "trace_sqlite", PendingApprovals: 1},
 			ContextSnapshotID: "ctx_sqlite",
 			CreatedAt:         base.Add(5 * time.Minute),
 			UpdatedAt:         base.Add(8 * time.Minute),

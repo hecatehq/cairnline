@@ -198,6 +198,17 @@ func projectAssignmentOperationItem(workItem WorkItem, assignment Assignment) (P
 			AssignmentID: assignment.ID,
 			UpdatedAt:    assignment.UpdatedAt,
 		}, true
+	case AssignmentAwaitingApproval:
+		return ProjectOperationItem{
+			Kind:         ProjectOperationKindAssignment,
+			Severity:     ProjectOperationSeverityBlocked,
+			Status:       status,
+			Title:        "Resolve pending approval for " + workItem.Title,
+			Detail:       "The assignment is paused until a pending approval is resolved on the executing host.",
+			WorkItemID:   workItem.ID,
+			AssignmentID: assignment.ID,
+			UpdatedAt:    assignment.UpdatedAt,
+		}, true
 	case AssignmentFailed, AssignmentCancelled:
 		return ProjectOperationItem{
 			Kind:         ProjectOperationKindAssignment,

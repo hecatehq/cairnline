@@ -55,6 +55,7 @@ type ProjectActivityBuckets = core.ProjectActivityBuckets
 type ProjectActivityItem = core.ProjectActivityItem
 type ReviewFollowUpReadiness = core.ReviewFollowUpReadiness
 type DesiredAgent = core.DesiredAgent
+type ExecutionRef = core.ExecutionRef
 type Assignment = core.Assignment
 type AssignmentCompatibilityFilter = core.AssignmentCompatibilityFilter
 type AssignmentContext = core.AssignmentContext
@@ -82,13 +83,14 @@ const (
 	ExecutionExternalAdapter = core.ExecutionExternalAdapter
 	ExecutionOrchestrated    = core.ExecutionOrchestrated
 
-	AssignmentQueued    = core.AssignmentQueued
-	AssignmentClaimed   = core.AssignmentClaimed
-	AssignmentRunning   = core.AssignmentRunning
-	AssignmentReview    = core.AssignmentReview
-	AssignmentCompleted = core.AssignmentCompleted
-	AssignmentFailed    = core.AssignmentFailed
-	AssignmentCancelled = core.AssignmentCancelled
+	AssignmentQueued           = core.AssignmentQueued
+	AssignmentClaimed          = core.AssignmentClaimed
+	AssignmentRunning          = core.AssignmentRunning
+	AssignmentAwaitingApproval = core.AssignmentAwaitingApproval
+	AssignmentReview           = core.AssignmentReview
+	AssignmentCompleted        = core.AssignmentCompleted
+	AssignmentFailed           = core.AssignmentFailed
+	AssignmentCancelled        = core.AssignmentCancelled
 
 	DesiredAgentAny = core.DesiredAgentAny
 

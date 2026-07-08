@@ -202,7 +202,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMemoryEntry() error = %v", err)
 	}
-	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, core.AssignmentCompleted, "run-1"); err != nil {
+	if _, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, core.AssignmentCompleted, core.ExecutionRef{RunID: "run-1"}); err != nil {
 		t.Fatalf("CompleteAssignment() error = %v", err)
 	}
 	if err := store.Close(); err != nil {
@@ -251,7 +251,7 @@ func TestStore_PersistsAssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAssignments() error = %v", err)
 	}
-	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].Status != core.AssignmentCompleted || assignments[0].ExecutionRef != "run-1" {
+	if len(assignments) != 1 || assignments[0].ID != assignment.ID || assignments[0].Status != core.AssignmentCompleted || assignments[0].ExecutionRef.RunID != "run-1" {
 		t.Fatalf("assignments = %+v, want completed assignment", assignments)
 	}
 	if assignments[0].StartedAt.IsZero() || assignments[0].CompletedAt.IsZero() {
@@ -413,7 +413,7 @@ func TestStore_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 		ExecutionMode:     core.ExecutionMCPPull,
 		Status:            core.AssignmentClaimed,
 		ClaimedBy:         "agent-a",
-		ExecutionRef:      "run-pre-dispatch",
+		ExecutionRef:      core.ExecutionRef{RunID: "run-pre-dispatch"},
 		ContextSnapshotID: "ctx-pre-dispatch",
 		StartedAt:         startedAt,
 		CompletedAt:       startedAt.Add(time.Minute),
@@ -427,7 +427,7 @@ func TestStore_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReleaseAssignment() error = %v", err)
 	}
-	if released.Status != core.AssignmentQueued || released.ClaimedBy != "" || released.ExecutionRef != "" || released.ContextSnapshotID != "" || !released.StartedAt.IsZero() || !released.CompletedAt.IsZero() {
+	if released.Status != core.AssignmentQueued || released.ClaimedBy != "" || !released.ExecutionRef.Empty() || released.ContextSnapshotID != "" || !released.StartedAt.IsZero() || !released.CompletedAt.IsZero() {
 		t.Fatalf("released assignment = %+v, want queued with claim/runtime refs cleared", released)
 	}
 	reclaimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-b")

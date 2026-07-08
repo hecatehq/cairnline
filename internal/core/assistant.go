@@ -360,7 +360,7 @@ func validateAssistantAssignment(assignment *Assignment) error {
 		return errors.Join(ErrInvalid, errors.New("assistant-created assignments must be queued"))
 	}
 	if strings.TrimSpace(assignment.ClaimedBy) != "" ||
-		strings.TrimSpace(assignment.ExecutionRef) != "" ||
+		!assignment.ExecutionRef.Empty() ||
 		strings.TrimSpace(assignment.ContextSnapshotID) != "" {
 		return errors.Join(ErrInvalid, errors.New("assistant-created assignments cannot bind execution state"))
 	}

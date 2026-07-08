@@ -138,18 +138,44 @@ does not grant tools, writes, network access, credentials, or model access.
 {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"assignments.context","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID"}}}
 ```
 
-Use this context to build the host-specific prompt or work packet. Skill
+Use this context to build the host-specific prompt or work packet. The context
+includes the project's enabled durable memory entries (`memory`), so a portable
+host does not need a side channel to recover promoted project memory. Skill
 metadata and source locators are provenance hints; Cairnline does not inject
 `SKILL.md` bodies or fetch source locators.
 
 ### 8. Mark It Running
 
 ```json
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"running","execution_ref":"local-run-1"}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"running","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
 ```
 
-`execution_ref` is an opaque reference owned by the host, such as a local run
-id, chat id, shell session id, PR number, or ticket id.
+`execution_ref` is a structured, host-neutral reference to the execution the
+host attached to this assignment. All fields are optional and opaque to
+Cairnline:
+
+- `kind`: host execution shape, for example `task_run`, `chat_session`, or
+  `external_adapter`;
+- `task_id`: host-scoped id of the queued/background unit of work;
+- `run_id`: host-scoped id of a single execution attempt;
+- `session_id`: host-scoped id of an interactive session driving the work;
+- `trace_id`: host observability link, for example an OpenTelemetry trace id;
+- `pending_approvals`: count of host-side approval gates currently blocking the
+  execution.
+
+A bare string is still accepted for compatibility with older clients and
+decodes as `run_id`.
+
+When the host pauses the execution on a human approval gate, report it:
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"awaiting_approval","execution_ref":{"kind":"task_run","run_id":"local-run-1","pending_approvals":1}}}}
+```
+
+`awaiting_approval` is a first-class assignment status so portable readers can
+distinguish "blocked on a human decision" from "actively executing" without
+host-specific overlays. Set the status back to `running` once the approval
+resolves. The approval object itself stays host-owned.
 
 ### 9. Record Evidence
 
@@ -163,7 +189,7 @@ rendering locators as links or opening them.
 ### 10. Complete The Assignment
 
 ```json
-{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"completed","execution_ref":"local-run-1"}}}
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"completed","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
 ```
 
 Use `status:"failed"` when the agent cannot complete the work. The work item

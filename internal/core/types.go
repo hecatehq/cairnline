@@ -1,6 +1,11 @@
 package core
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"time"
+)
 
 type Project struct {
 	ID             string    `json:"id"`
@@ -332,17 +337,18 @@ type ProjectActivity struct {
 }
 
 type ProjectActivityCounts struct {
-	Assignments    int `json:"assignments"`
-	Queued         int `json:"queued"`
-	Claimed        int `json:"claimed"`
-	Running        int `json:"running"`
-	AwaitingReview int `json:"awaiting_review"`
-	Completed      int `json:"completed"`
-	Failed         int `json:"failed"`
-	Cancelled      int `json:"cancelled"`
-	Other          int `json:"other"`
-	Active         int `json:"active"`
-	Blocked        int `json:"blocked"`
+	Assignments      int `json:"assignments"`
+	Queued           int `json:"queued"`
+	Claimed          int `json:"claimed"`
+	Running          int `json:"running"`
+	AwaitingApproval int `json:"awaiting_approval"`
+	AwaitingReview   int `json:"awaiting_review"`
+	Completed        int `json:"completed"`
+	Failed           int `json:"failed"`
+	Cancelled        int `json:"cancelled"`
+	Other            int `json:"other"`
+	Active           int `json:"active"`
+	Blocked          int `json:"blocked"`
 }
 
 type ProjectActivityBuckets struct {
@@ -361,12 +367,12 @@ type ProjectActivityItem struct {
 	RoleID           string    `json:"role_id,omitempty"`
 	RoleName         string    `json:"role_name,omitempty"`
 	RootID           string    `json:"root_id,omitempty"`
-	Status           string    `json:"status"`
-	ExecutionMode    string    `json:"execution_mode,omitempty"`
-	DesiredAgentKind string    `json:"desired_agent_kind,omitempty"`
-	ExecutionRef     string    `json:"execution_ref,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	Status           string       `json:"status"`
+	ExecutionMode    string       `json:"execution_mode,omitempty"`
+	DesiredAgentKind string       `json:"desired_agent_kind,omitempty"`
+	ExecutionRef     ExecutionRef `json:"execution_ref,omitzero"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }
 
 type ReviewFollowUpReadiness struct {
@@ -384,6 +390,60 @@ type DesiredAgent struct {
 	SkillIDs []string `json:"skill_ids,omitempty"`
 }
 
+// ExecutionRef is the host-neutral identity of the execution attached to an
+// assignment. Cairnline never dereferences these values; they exist so a
+// coordination row survives migration between hosts without losing which
+// execution it referred to. Field names are deliberately generic — any agent
+// host (an orchestrator, a chat runtime, a bare CLI harness) maps its own
+// identifiers onto these slots rather than Cairnline adopting one host's
+// vocabulary.
+type ExecutionRef struct {
+	// Kind names the host execution shape (for example "task_run",
+	// "chat_session", "external_adapter"). Opaque to Cairnline.
+	Kind string `json:"kind,omitempty"`
+	// TaskID is the host-scoped id of the queued/background unit of work.
+	TaskID string `json:"task_id,omitempty"`
+	// RunID is the host-scoped id of a single execution attempt.
+	RunID string `json:"run_id,omitempty"`
+	// SessionID is the host-scoped id of an interactive session driving the
+	// assignment (a chat session, a terminal session, ...).
+	SessionID string `json:"session_id,omitempty"`
+	// TraceID links the execution to host observability (for example an
+	// OpenTelemetry trace id).
+	TraceID string `json:"trace_id,omitempty"`
+	// PendingApprovals counts host-side approval gates currently blocking
+	// the execution. A value greater than zero usually pairs with the
+	// awaiting_approval assignment status.
+	PendingApprovals int `json:"pending_approvals,omitempty"`
+}
+
+func (ref ExecutionRef) Empty() bool {
+	return ref == ExecutionRef{}
+}
+
+// UnmarshalJSON tolerates the pre-structured wire shape, where the execution
+// ref was a single opaque host string. A legacy string decodes as a run id —
+// the closest meaning of the old "local run or job identifier" contract — so
+// old snapshots, stored rows, and tool callers keep working.
+func (ref *ExecutionRef) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var legacy string
+		if err := json.Unmarshal(trimmed, &legacy); err != nil {
+			return err
+		}
+		*ref = ExecutionRef{RunID: strings.TrimSpace(legacy)}
+		return nil
+	}
+	type wire ExecutionRef
+	var decoded wire
+	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+		return err
+	}
+	*ref = ExecutionRef(decoded)
+	return nil
+}
+
 type Assignment struct {
 	ID                string       `json:"id"`
 	ProjectID         string       `json:"project_id"`
@@ -394,7 +454,7 @@ type Assignment struct {
 	Status            string       `json:"status"`
 	DesiredAgent      DesiredAgent `json:"desired_agent,omitempty"`
 	ClaimedBy         string       `json:"claimed_by,omitempty"`
-	ExecutionRef      string       `json:"execution_ref,omitempty"`
+	ExecutionRef      ExecutionRef `json:"execution_ref,omitzero"`
 	ContextSnapshotID string       `json:"context_snapshot_id,omitempty"`
 	CreatedAt         time.Time    `json:"created_at"`
 	UpdatedAt         time.Time    `json:"updated_at"`
@@ -417,8 +477,12 @@ type AssignmentContext struct {
 	WorkItem   WorkItem   `json:"work_item"`
 	Role       *Role      `json:"role,omitempty"`
 	Assignment Assignment `json:"assignment"`
-	Warnings   []string   `json:"warnings,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	// Memory carries the project's enabled durable memory entries so the
+	// portable context read is launch-usable on its own; hosts must not need
+	// a side channel to recover promoted project memory.
+	Memory    []MemoryEntry `json:"memory,omitempty"`
+	Warnings  []string      `json:"warnings,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 type AssignmentLaunchPacket struct {
@@ -575,13 +639,21 @@ const (
 	ExecutionExternalAdapter = "external_adapter"
 	ExecutionOrchestrated    = "orchestrated"
 
-	AssignmentQueued    = "queued"
-	AssignmentClaimed   = "claimed"
-	AssignmentRunning   = "running"
-	AssignmentReview    = "awaiting_review"
-	AssignmentCompleted = "completed"
-	AssignmentFailed    = "failed"
-	AssignmentCancelled = "cancelled"
+	AssignmentQueued  = "queued"
+	AssignmentClaimed = "claimed"
+	AssignmentRunning = "running"
+	// AssignmentAwaitingApproval is a first-class status rather than a
+	// sidecar boolean on the assignment: the vocabulary already models
+	// human-gated pauses as statuses (awaiting_review), every portable
+	// reader buckets and filters on status alone, and a "running" row with a
+	// hidden blocked flag would read as actively executing to any host that
+	// only understands the status column. The approval itself stays
+	// host-owned; ExecutionRef.PendingApprovals carries the count.
+	AssignmentAwaitingApproval = "awaiting_approval"
+	AssignmentReview           = "awaiting_review"
+	AssignmentCompleted        = "completed"
+	AssignmentFailed           = "failed"
+	AssignmentCancelled        = "cancelled"
 
 	DesiredAgentAny = "any"
 

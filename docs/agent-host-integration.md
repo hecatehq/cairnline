@@ -81,13 +81,32 @@ assignments.complete
    the server contract and boundaries.
 2. Poll `assignments.next` with the host's available kind and skill ids.
 3. Claim one assignment with `assignments.claim`.
-4. Read `assignments.context` and/or `assignments.launch_packet`.
+4. Read `assignments.context` and/or `assignments.launch_packet`. Both include
+   the project's enabled durable memory entries.
 5. Build the host-native prompt/run packet from the structured metadata.
 6. Record evidence as the run produces useful proof.
 7. Complete, fail, or cancel the assignment explicitly.
 
 If the host crashes after claim, it should either resume by `execution_ref` or
 release the claim when it knows work will not continue.
+
+## Execution Ref And Approval Signal
+
+`execution_ref` is a structured, host-neutral record of the execution a host
+attached to an assignment: `kind`, `task_id`, `run_id`, `session_id`,
+`trace_id`, and `pending_approvals`. Cairnline never dereferences these values;
+they exist so a coordination row survives migration between hosts without
+losing which execution it referred to. A host maps its own identifiers onto
+these slots — a task orchestrator fills `task_id`/`run_id`, a chat-first host
+fills `session_id`, and any host can attach `trace_id` for observability.
+Legacy bare-string refs are still accepted and decode as `run_id`.
+
+When execution pauses on a host-side human approval gate, set the assignment
+status to `awaiting_approval` (optionally with `pending_approvals` in the ref)
+and return it to `running` once the gate resolves. The status is portable
+coordination state; the approval object, its policy, and its resolution stay
+host-owned. Portable readers treat `awaiting_approval` as blocked-on-operator,
+not as active execution.
 
 ## Role And Desired-Agent Mapping
 
