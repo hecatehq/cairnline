@@ -1,22 +1,22 @@
 {
-  // Typechecks the whole views tree (src/ browser views + verify/ Playwright
-  // harness) with `bun run typecheck`. Bun runs the .ts sources directly and the
-  // build bundles them, so this config only type-checks (noEmit); it emits
-  // nothing. DOM libs cover both the views and the in-browser page.evaluate
-  // callbacks in verify.ts; @types/node covers verify.ts's node builtins.
-  // build.ts is excluded: it relies on the Bun global, which this node-typed
-  // config does not carry.
   "compilerOptions": {
-    "target": "ESNext",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["node"],
-    "strict": true,
-    "noEmit": true,
+    "moduleResolution": "Bundler",
+    "types": ["vite/client", "vitest/globals", "node"],
     "skipLibCheck": true,
-    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "verify"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts"]
 }

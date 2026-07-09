@@ -21,6 +21,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: internal/app/views/.bun-version
+
+      # The Project Status view bundle is gitignored and built from source. Build
+      # it before any Go step so the released binaries embed the real view (not
+      # the "not built" fallback). Order matters: JS build before Go.
+      - name: Build embedded views bundle
+        working-directory: internal/app/views
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
       - name: Test
         run: go test ./...
 
