@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	cairnline "github.com/hecatehq/cairnline"
 )
 
 type ToolHandler func(context.Context, json.RawMessage) (CallToolResult, error)
@@ -203,7 +205,17 @@ func (s *Server) handleCallTool(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	result, err := tool.handler(ctx, params.Arguments)
 	if err != nil {
-		return CallToolResult{Content: TextContent(err.Error()), IsError: true}, nil
+		// Single tool-error path for every registered handler: keep the human
+		// prose in Content untouched and attach a machine-readable error code
+		// so hosts can classify the failure without parsing the message.
+		return CallToolResult{
+			Content: TextContent(err.Error()),
+			StructuredContent: ToolErrorPayload{Error: ToolErrorDetail{
+				Code:    cairnline.ClassifyErrorCode(err),
+				Message: err.Error(),
+			}},
+			IsError: true,
+		}, nil
 	}
 	return result, nil
 }

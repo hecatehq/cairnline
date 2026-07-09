@@ -222,6 +222,24 @@ Then read concrete resources such as the assignment launch packet:
 {"jsonrpc":"2.0","id":13,"method":"resources/read","params":{"uri":"cairnline://projects/PROJECT_ID/assignments/ASSIGNMENT_ID/launch-packet"}}
 ```
 
+## Tool Error Shape
+
+When a tool call fails, the result sets `isError: true`, keeps the human message
+in `content`, and adds a machine-readable code in `structuredContent`:
+
+```json
+{
+  "content": [{"type": "text", "text": "root \"x\" not found"}],
+  "structuredContent": {"error": {"code": "not_found", "message": "root \"x\" not found"}},
+  "isError": true
+}
+```
+
+Branch on `structuredContent.error.code` rather than parsing the message. The
+codes are `not_found`, `invalid`, `already_exists`, `conflict`, and `internal`;
+see the catalog and suggested host HTTP mapping in
+[Tool Error Codes](agent-host-integration.md#tool-error-codes).
+
 ## MCP Client Configuration
 
 Use a durable database for normal local use:
