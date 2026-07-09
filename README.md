@@ -413,6 +413,25 @@ For development from a checkout:
 }
 ```
 
+## MCP Apps (Interactive Views)
+
+Cairnline ships an optional read-only **Project Status** view using the MCP Apps
+extension (`io.modelcontextprotocol/ui`, SEP-1865). It is served as a
+self-contained `ui://cairnline/project-status` HTML resource and linked from the
+`projects.health`, `projects.operations_brief`, and `projects.activity` tools via
+`_meta.ui.resourceUri`.
+
+Host support is uneven today. Hosts that render MCP Apps — such as Claude
+Desktop, VS Code Copilot, and Goose — can display the interactive view. Hosts
+that do not yet render apps, including current coding-agent CLIs, are unaffected:
+they receive the exact same text and `structuredContent` tool results as before.
+The extension is only advertised when an app is registered, and adding it never
+changes tool call results.
+
+Authoring and host-integration details are in
+[`docs/agent-host-integration.md`](docs/agent-host-integration.md) and
+[`internal/app/views/README.md`](internal/app/views/README.md).
+
 ## Hecate Integration Status
 
 Cairnline is the intended portable extraction path for Hecate's Projects

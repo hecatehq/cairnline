@@ -256,6 +256,87 @@ Cairnline should still be useful without an AI agent. A simple UI or script can:
 The same coordination state can later be claimed by an MCP-capable agent host
 without changing the project model.
 
+## MCP Apps (Interactive Views)
+
+Cairnline ships optional interactive views using the MCP Apps extension
+(`io.modelcontextprotocol/ui`, SEP-1865). A view is a self-contained HTML
+document served as a `ui://` resource. A host that negotiates the extension can
+render the view for a tool result; a host that does not simply uses the tool's
+existing text and `structuredContent`. Views are additive and never change tool
+call results.
+
+### What a `ui://` app is
+
+- A resource served over standard `resources/read` with mime type
+  `text/html;profile=mcp-app` (note: no space after `;`). Its `text` is a single
+  HTML document with all CSS and JS inlined — no external requests.
+- It also appears in `resources/list`, so a host can prefetch it at connection
+  setup.
+
+Cairnline's first app is **Project Status** (`ui://cairnline/project-status`), a
+read-only view that renders `projects.health`, `projects.operations_brief`, and
+`projects.activity` results.
+
+### How a tool opts in
+
+A tool references its view through the tool descriptor's `_meta`:
+
+```json
+{
+  "name": "projects.health",
+  "_meta": { "ui": { "resourceUri": "ui://cairnline/project-status" } }
+}
+```
+
+The nested `_meta.ui.resourceUri` path is the MCP Apps linkage. When the host
+calls the tool, it may render the referenced view and deliver the tool result to
+it. A host that ignores `_meta` still gets the unchanged text/`structuredContent`
+response.
+
+### Capability negotiation
+
+The server is reactive: it advertises the extension in `initialize` capabilities
+only when at least one app is registered, declaring the supported content type:
+
+```json
+{ "capabilities": { "extensions": {
+  "io.modelcontextprotocol/ui": { "mimeTypes": ["text/html;profile=mcp-app"] }
+} } }
+```
+
+### Host <-> view bridge
+
+The host renders the view in a sandboxed iframe and drives it over JSON-RPC on
+`window.postMessage`:
+
+- The view posts `ui/initialize` and then `ui/notifications/initialized` on load.
+- The host delivers the tool result as a `ui/notifications/tool-result`
+  notification whose params are a standard `CallToolResult`; the view reads
+  `params.structuredContent`.
+
+### Sandbox / CSP posture
+
+Cairnline's views declare a strict, default-deny CSP
+(`default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'`) and
+grant no external origins; `connect-src` stays denied because postMessage needs
+no network. Hosts should still render every view in a sandboxed iframe and must
+not loosen the declared origins.
+
+### Statelessness / single view
+
+Per the MCP Apps maturity guidance, views are stateless between calls and a
+single view backs all three projection tools. The view holds no cross-turn state:
+it renders whatever tool result the host delivers.
+
+### Authoring a view (contributors)
+
+Views live in `internal/app/views` and are bundled to a single self-contained
+HTML file (`bun run build`) that is committed under `dist/` and embedded with
+`//go:embed`; the runtime and `go test` need no JS toolchain. Register a built
+view with `app.RegisterApps` and tag its tools with the `_meta.ui.resourceUri`
+helper. See `internal/app/views/README.md` for the build and headless render
+check.
+
 ## Security Checklist For Hosts
 
 Before exposing Cairnline tools to an agent, a host should decide:
@@ -269,6 +350,8 @@ Before exposing Cairnline tools to an agent, a host should decide:
 - How to recover or release claimed assignments after crashes.
 - How to show operator confirmation for memory promotion and destructive
   project changes.
+- Whether to render `ui://` app views, and if so, only inside a sandboxed
+  iframe under the view's declared default-deny CSP without loosening origins.
 
 ## Minimal Integration Target
 
