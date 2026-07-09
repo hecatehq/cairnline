@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	cairnline "github.com/hecatehq/cairnline"
 	"github.com/hecatehq/cairnline/internal/core"
 	"github.com/hecatehq/cairnline/internal/mcp"
 )
@@ -35,19 +34,19 @@ func TestMCPTools_ErrorCodesAcrossCentralPath(t *testing.T) {
 		{
 			name:      "argument decode failure is invalid",
 			request:   `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"projects.get","arguments":{"id":{"nested":true}}}}`,
-			wantCode:  cairnline.ErrorCodeInvalid,
+			wantCode:  core.ErrorCodeInvalid,
 			wantProse: "invalid arguments",
 		},
 		{
 			name:      "missing entity is not_found",
 			request:   `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"projects.get","arguments":{"id":"proj_missing"}}}`,
-			wantCode:  cairnline.ErrorCodeNotFound,
+			wantCode:  core.ErrorCodeNotFound,
 			wantProse: "not found",
 		},
 		{
 			name:      "validation failure is invalid",
 			request:   `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"work_items.create","arguments":{"project_id":"` + project.ID + `","title":""}}}`,
-			wantCode:  cairnline.ErrorCodeInvalid,
+			wantCode:  core.ErrorCodeInvalid,
 			wantProse: "",
 		},
 	}

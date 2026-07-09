@@ -9,7 +9,7 @@ import (
 	"io"
 	"sync"
 
-	cairnline "github.com/hecatehq/cairnline"
+	"github.com/hecatehq/cairnline/internal/core"
 )
 
 type ToolHandler func(context.Context, json.RawMessage) (CallToolResult, error)
@@ -22,6 +22,7 @@ type Server struct {
 	resourceProviders []ResourceProvider
 	resourceReaders   []ResourceReader
 	resourceTemplates []ResourceTemplate
+	extensions        map[string]json.RawMessage
 
 	writeMu sync.Mutex
 }
@@ -55,6 +56,21 @@ func (s *Server) RegisterResourceTemplates(templates []ResourceTemplate) {
 	s.resourceTemplates = append(s.resourceTemplates, templates...)
 }
 
+// DeclareExtension advertises a protocol extension in the server's initialize
+// capabilities under its extension id (for example "io.modelcontextprotocol/ui").
+// config is the extension's capability object, passed through verbatim; pass nil
+// to declare an extension with no configuration. Declaring an extension lets a
+// host negotiate it during initialize; Cairnline ships with none declared.
+func (s *Server) DeclareExtension(id string, config json.RawMessage) {
+	if s.extensions == nil {
+		s.extensions = make(map[string]json.RawMessage)
+	}
+	if config == nil {
+		config = json.RawMessage("{}")
+	}
+	s.extensions[id] = config
+}
+
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -77,7 +93,9 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.handleMessage(ctx, msg, out)
+			if response, ok := s.HandleMessage(ctx, msg); ok {
+				s.write(out, response)
+			}
 		}()
 	}
 	wg.Wait()
@@ -88,35 +106,32 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	return nil
 }
 
-func (s *Server) handleMessage(ctx context.Context, raw []byte, out io.Writer) {
+// HandleMessage processes a single JSON-RPC message and returns the encoded
+// response. The boolean is false for notifications, which produce no response.
+// Embedding hosts that mount Cairnline's MCP surface on their own transport call
+// HandleMessage per inbound message instead of Serve, which owns the stdio loop.
+func (s *Server) HandleMessage(ctx context.Context, raw []byte) ([]byte, bool) {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
-		s.writeResponse(out, errorResponse(nil, NewError(ErrCodeParseError, "parse error: "+err.Error())))
-		return
+		return encodeResponse(errorResponse(nil, NewError(ErrCodeParseError, "parse error: "+err.Error()))), true
 	}
 	if req.JSONRPC != "2.0" {
-		s.writeResponse(out, errorResponse(req.ID, NewError(ErrCodeInvalidRequest, "jsonrpc must be \"2.0\"")))
-		return
+		return encodeResponse(errorResponse(req.ID, NewError(ErrCodeInvalidRequest, "jsonrpc must be \"2.0\""))), true
 	}
 	result, rpcErr := s.dispatch(ctx, req)
 	if req.IsNotification() {
-		return
+		return nil, false
 	}
 	if rpcErr != nil {
-		s.writeResponse(out, errorResponse(req.ID, rpcErr))
-		return
+		return encodeResponse(errorResponse(req.ID, rpcErr)), true
 	}
-	s.writeResponse(out, successResponse(req.ID, result))
+	return encodeResponse(successResponse(req.ID, result)), true
 }
 
 func (s *Server) dispatch(ctx context.Context, req Request) (any, *RPCError) {
 	switch req.Method {
 	case "initialize":
-		return InitializeResult{
-			ProtocolVersion: DeclaredProtocolVersion,
-			Capabilities:    s.capabilities(),
-			ServerInfo:      s.info,
-		}, nil
+		return s.handleInitialize(req.Params)
 	case "notifications/initialized":
 		return struct{}{}, nil
 	case "tools/list":
@@ -136,10 +151,33 @@ func (s *Server) dispatch(ctx context.Context, req Request) (any, *RPCError) {
 	}
 }
 
+func (s *Server) handleInitialize(raw json.RawMessage) (any, *RPCError) {
+	var params InitializeParams
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, NewError(ErrCodeInvalidParams, "invalid initialize params: "+err.Error())
+		}
+	}
+	// params.Capabilities carries the client's extension declarations; parsing it
+	// keeps extension negotiation open even though Cairnline declares none yet.
+	return InitializeResult{
+		ProtocolVersion: DeclaredProtocolVersion,
+		Capabilities:    s.capabilities(),
+		ServerInfo:      s.info,
+	}, nil
+}
+
 func (s *Server) capabilities() ServerCapabilities {
 	capabilities := ServerCapabilities{Tools: &ToolsCapability{}}
 	if len(s.resourceProviders) > 0 || len(s.resourceTemplates) > 0 {
 		capabilities.Resources = &ResourcesCapability{}
+	}
+	if len(s.extensions) > 0 {
+		extensions := make(map[string]json.RawMessage, len(s.extensions))
+		for id, config := range s.extensions {
+			extensions[id] = config
+		}
+		capabilities.Extensions = extensions
 	}
 	return capabilities
 }
@@ -211,7 +249,7 @@ func (s *Server) handleCallTool(ctx context.Context, raw json.RawMessage) (any, 
 		return CallToolResult{
 			Content: TextContent(err.Error()),
 			StructuredContent: ToolErrorPayload{Error: ToolErrorDetail{
-				Code:    cairnline.ClassifyErrorCode(err),
+				Code:    core.ClassifyErrorCode(err),
 				Message: err.Error(),
 			}},
 			IsError: true,
@@ -220,14 +258,18 @@ func (s *Server) handleCallTool(ctx context.Context, raw json.RawMessage) (any, 
 	return result, nil
 }
 
-func (s *Server) writeResponse(out io.Writer, response Response) {
+func (s *Server) write(out io.Writer, payload []byte) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, _ = out.Write(append(payload, '\n'))
+}
+
+func encodeResponse(response Response) []byte {
 	raw, err := json.Marshal(response)
 	if err != nil {
 		raw, _ = json.Marshal(errorResponse(response.ID, NewError(ErrCodeInternalError, "marshal response: "+err.Error())))
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	_, _ = out.Write(append(raw, '\n'))
+	return raw
 }
 
 func successResponse(id *json.RawMessage, result any) Response {

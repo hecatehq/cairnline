@@ -118,3 +118,101 @@ func responsesByID(t *testing.T, lines []string) map[string]string {
 	}
 	return responses
 }
+
+func TestServer_InitializeDeclaresExtensions(t *testing.T) {
+	server := NewServer("test-server", "dev", "test")
+	server.DeclareExtension("io.modelcontextprotocol/ui", json.RawMessage(`{"version":"1"}`))
+
+	out := singleResponse(t, server, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"extensions":{"io.modelcontextprotocol/ui":{}}}}}`)
+	if !strings.Contains(out, `"extensions":{`) || !strings.Contains(out, `"io.modelcontextprotocol/ui"`) {
+		t.Fatalf("initialize result missing declared extension: %s", out)
+	}
+	if !strings.Contains(out, `"version":"1"`) {
+		t.Fatalf("initialize result dropped extension config: %s", out)
+	}
+}
+
+func TestServer_InitializeOmitsExtensionsByDefault(t *testing.T) {
+	server := NewServer("test-server", "dev", "test")
+	out := singleResponse(t, server, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
+	if strings.Contains(out, `"extensions"`) {
+		t.Fatalf("initialize result should omit extensions when none declared: %s", out)
+	}
+	if !strings.Contains(out, `"protocolVersion":"2025-11-25"`) {
+		t.Fatalf("initialize result = %s", out)
+	}
+}
+
+func TestServer_ToolDescriptorCarriesOutputSchemaAndMeta(t *testing.T) {
+	server := NewServer("test-server", "dev", "test")
+	server.RegisterTool(Tool{
+		Name:         "demo.tool",
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}}}`),
+		Meta:         map[string]any{"category": "demo"},
+	}, func(ctx context.Context, raw json.RawMessage) (CallToolResult, error) {
+		return CallToolResult{Content: TextContent("ok")}, nil
+	})
+
+	out := singleResponse(t, server, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	if !strings.Contains(out, `"outputSchema"`) {
+		t.Fatalf("tools/list missing outputSchema: %s", out)
+	}
+	if !strings.Contains(out, `"_meta":{"category":"demo"}`) {
+		t.Fatalf("tools/list missing tool _meta: %s", out)
+	}
+}
+
+func TestServer_CallToolEmbeddedResourceAndBlob(t *testing.T) {
+	server := NewServer("test-server", "dev", "test")
+	server.RegisterTool(Tool{
+		Name:        "demo.blob",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}, func(ctx context.Context, raw json.RawMessage) (CallToolResult, error) {
+		return CallToolResult{
+			Content: []Content{EmbeddedResource(ResourceContent{
+				URI:      "cairnline://demo/blob",
+				MimeType: "application/octet-stream",
+				Blob:     "aGVsbG8=",
+			})},
+			Meta: map[string]any{"trace": "abc123"},
+		}, nil
+	})
+
+	out := singleResponse(t, server, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"demo.blob","arguments":{}}}`)
+	if !strings.Contains(out, `"type":"resource"`) {
+		t.Fatalf("tools/call missing embedded resource content: %s", out)
+	}
+	if !strings.Contains(out, `"blob":"aGVsbG8="`) {
+		t.Fatalf("tools/call missing blob payload: %s", out)
+	}
+	if !strings.Contains(out, `"_meta":{"trace":"abc123"}`) {
+		t.Fatalf("tools/call missing result _meta: %s", out)
+	}
+}
+
+func TestServer_HandleMessage(t *testing.T) {
+	server := NewServer("test-server", "dev", "test")
+
+	resp, ok := server.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":7,"method":"ping"}`))
+	if !ok {
+		t.Fatal("ping should produce a response")
+	}
+	if !strings.Contains(string(resp), `"id":7`) {
+		t.Fatalf("ping response = %s", resp)
+	}
+
+	if _, ok := server.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); ok {
+		t.Fatal("notification should not produce a response")
+	}
+}
+
+func singleResponse(t *testing.T, server *Server, line string) string {
+	t.Helper()
+	input := strings.NewReader(line + "\n")
+	var output bytes.Buffer
+	if err := server.Serve(context.Background(), input, &output); err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	return strings.TrimSpace(output.String())
+}

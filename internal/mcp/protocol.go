@@ -40,8 +40,17 @@ func NewError(code int, message string) *RPCError {
 }
 
 type InitializeParams struct {
-	ProtocolVersion string     `json:"protocolVersion"`
-	ClientInfo      ClientInfo `json:"clientInfo,omitempty"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ClientCapabilities `json:"capabilities,omitempty"`
+	ClientInfo      ClientInfo         `json:"clientInfo,omitempty"`
+}
+
+// ClientCapabilities carries the capability declarations a client sends during
+// initialize. Extensions mirrors the server-side extension map so a host can
+// negotiate optional protocol extensions; Cairnline parses it today and
+// declares no extensions of its own yet.
+type ClientCapabilities struct {
+	Extensions map[string]json.RawMessage `json:"extensions,omitempty"`
 }
 
 type ClientInfo struct {
@@ -56,8 +65,9 @@ type InitializeResult struct {
 }
 
 type ServerCapabilities struct {
-	Tools     *ToolsCapability     `json:"tools,omitempty"`
-	Resources *ResourcesCapability `json:"resources,omitempty"`
+	Tools      *ToolsCapability           `json:"tools,omitempty"`
+	Resources  *ResourcesCapability       `json:"resources,omitempty"`
+	Extensions map[string]json.RawMessage `json:"extensions,omitempty"`
 }
 
 type ToolsCapability struct {
@@ -76,11 +86,13 @@ type ServerInfo struct {
 }
 
 type Tool struct {
-	Name        string           `json:"name"`
-	Title       string           `json:"title,omitempty"`
-	Description string           `json:"description,omitempty"`
-	InputSchema json.RawMessage  `json:"inputSchema"`
-	Annotations *ToolAnnotations `json:"annotations,omitempty"`
+	Name         string           `json:"name"`
+	Title        string           `json:"title,omitempty"`
+	Description  string           `json:"description,omitempty"`
+	InputSchema  json.RawMessage  `json:"inputSchema"`
+	OutputSchema json.RawMessage  `json:"outputSchema,omitempty"`
+	Annotations  *ToolAnnotations `json:"annotations,omitempty"`
+	Meta         map[string]any   `json:"_meta,omitempty"`
 }
 
 type ToolAnnotations struct {
@@ -96,11 +108,12 @@ type ListToolsResult struct {
 }
 
 type Resource struct {
-	URI         string `json:"uri"`
-	Name        string `json:"name"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	MimeType    string `json:"mimeType,omitempty"`
+	URI         string         `json:"uri"`
+	Name        string         `json:"name"`
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	MimeType    string         `json:"mimeType,omitempty"`
+	Meta        map[string]any `json:"_meta,omitempty"`
 }
 
 type ResourceTemplate struct {
@@ -127,10 +140,16 @@ type ReadResourceResult struct {
 	Contents []ResourceContent `json:"contents"`
 }
 
+// ResourceContent is the body of a resource. Text carries UTF-8 payloads and
+// Blob carries base64-encoded binary payloads; the two are mutually exclusive
+// per the MCP spec. ResourceContent also backs embedded-resource tool results
+// (see Content.Resource).
 type ResourceContent struct {
-	URI      string `json:"uri"`
-	MimeType string `json:"mimeType,omitempty"`
-	Text     string `json:"text,omitempty"`
+	URI      string         `json:"uri"`
+	MimeType string         `json:"mimeType,omitempty"`
+	Text     string         `json:"text,omitempty"`
+	Blob     string         `json:"blob,omitempty"`
+	Meta     map[string]any `json:"_meta,omitempty"`
 }
 
 type CallToolParams struct {
@@ -139,14 +158,19 @@ type CallToolParams struct {
 }
 
 type CallToolResult struct {
-	Content           []Content `json:"content"`
-	StructuredContent any       `json:"structuredContent,omitempty"`
-	IsError           bool      `json:"isError,omitempty"`
+	Content           []Content      `json:"content"`
+	StructuredContent any            `json:"structuredContent,omitempty"`
+	IsError           bool           `json:"isError,omitempty"`
+	Meta              map[string]any `json:"_meta,omitempty"`
 }
 
+// Content is a single tool-result content block. Type selects the variant:
+// "text" uses Text; "resource" embeds a ResourceContent (text or blob) via
+// Resource.
 type Content struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	Resource *ResourceContent `json:"resource,omitempty"`
 }
 
 func TextContent(text string) []Content {
@@ -165,4 +189,10 @@ type ToolErrorPayload struct {
 type ToolErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// EmbeddedResource returns a content block that embeds a resource payload in a
+// tool result. The resource may carry either Text or Blob content.
+func EmbeddedResource(resource ResourceContent) Content {
+	return Content{Type: "resource", Resource: &resource}
 }

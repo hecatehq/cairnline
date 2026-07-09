@@ -3,9 +3,13 @@
 Portable local-first project coordination server exposed over MCP.
 
 This repo is intentionally independent from Hecate runtime internals. Keep the
-core model agent-neutral and avoid importing Hecate packages. Hecate may later
-embed or connect to this server, but this repo should stay useful for any
-MCP-capable agent host.
+core model agent-neutral and avoid importing Hecate packages. Hecate already
+embeds this server live (pinned via `go.mod`, run in-process, with an opt-in
+sidecar connector mode) and live-mirrors its portable coordination writes into
+Cairnline; an opt-in, off-by-default replacement mode lets Cairnline become
+authoritative while Hecate keeps a runtime overlay. Even so, this repo must stay
+useful for any MCP-capable agent host, and the integration contracts are still
+alpha and not stable.
 
 ## Conventions
 

@@ -1,14 +1,17 @@
 // Package cairnline exposes the embeddable project coordination core.
 //
 // The root package is the public API intended for applications such as Hecate.
-// Transport details, MCP wiring, and concrete storage internals remain in
-// internal packages.
+// Concrete storage internals remain in internal packages; NewMCPServer exposes
+// the MCP protocol server so an embedding host can mount Cairnline's tool and
+// resource surface on its own transport.
 package cairnline
 
 import (
 	"context"
 
+	"github.com/hecatehq/cairnline/internal/app"
 	"github.com/hecatehq/cairnline/internal/core"
+	"github.com/hecatehq/cairnline/internal/mcp"
 	"github.com/hecatehq/cairnline/internal/sqlitestore"
 )
 
@@ -227,4 +230,17 @@ func NewSQLiteService(ctx context.Context, path string) (*Service, *SQLiteStore,
 		return nil, nil, err
 	}
 	return NewService(store), store, nil
+}
+
+// MCPServer is the MCP protocol server that exposes Cairnline's coordination
+// tools and resources. Build one with NewMCPServer, then mount it on a custom
+// transport via HandleMessage or run the built-in stdio loop with Serve.
+// DeclareExtension advertises optional protocol extensions during initialize.
+type MCPServer = mcp.Server
+
+// NewMCPServer builds an MCP server with Cairnline's full tool and resource set
+// registered against service. version is reported in serverInfo and the
+// coordination.capabilities tool.
+func NewMCPServer(service *Service, version string) *MCPServer {
+	return app.NewServer(service, version)
 }

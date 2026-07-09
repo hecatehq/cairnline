@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	cairnline "github.com/hecatehq/cairnline"
 	"github.com/hecatehq/cairnline/internal/core"
 )
 
@@ -56,31 +55,31 @@ func TestServer_CallToolErrorCodes(t *testing.T) {
 		{
 			name:     "not_found sentinel",
 			err:      fmt.Errorf("root %q not found: %w", "x", core.ErrNotFound),
-			wantCode: cairnline.ErrorCodeNotFound,
+			wantCode: core.ErrorCodeNotFound,
 			wantMsg:  `root "x" not found`,
 		},
 		{
 			name:     "duplicate maps to already_exists",
 			err:      errors.Join(core.ErrDuplicate, errors.New("project proj_1 already exists")),
-			wantCode: cairnline.ErrorCodeAlreadyExists,
+			wantCode: core.ErrorCodeAlreadyExists,
 			wantMsg:  "already exists",
 		},
 		{
 			name:     "conflict sentinel",
 			err:      errors.Join(core.ErrConflict, errors.New("assignment already claimed")),
-			wantCode: cairnline.ErrorCodeConflict,
+			wantCode: core.ErrorCodeConflict,
 			wantMsg:  "already claimed",
 		},
 		{
 			name:     "invalid sentinel",
 			err:      errors.Join(core.ErrInvalid, errors.New("title is required")),
-			wantCode: cairnline.ErrorCodeInvalid,
+			wantCode: core.ErrorCodeInvalid,
 			wantMsg:  "title is required",
 		},
 		{
 			name:     "unclassified defaults to internal",
 			err:      errors.New("disk exploded"),
-			wantCode: cairnline.ErrorCodeInternal,
+			wantCode: core.ErrorCodeInternal,
 			wantMsg:  "disk exploded",
 		},
 	}
