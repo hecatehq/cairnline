@@ -1425,7 +1425,7 @@ func getProject(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetProject(ctx, input.ID)
 		if err != nil {
@@ -1524,7 +1524,7 @@ func createProject(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateProject(ctx, core.Project{
 			Name:           input.Name,
@@ -1554,7 +1554,7 @@ func updateProject(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		existing, err := service.GetProject(ctx, input.ID)
 		if err != nil {
@@ -1595,7 +1595,7 @@ func deleteProject(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteProject(ctx, input.ID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -1613,7 +1613,7 @@ func listRoots(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListRoots(ctx, input.ProjectID)
 		if err != nil {
@@ -1659,7 +1659,7 @@ func createRoot(service *core.Service) mcp.ToolHandler {
 			Active    *bool  `json:"active"`
 		}
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		active := true
 		if input.Active != nil {
@@ -1695,7 +1695,7 @@ func updateRoot(service *core.Service) mcp.ToolHandler {
 			Active    *bool   `json:"active"`
 		}
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetRoot(ctx, input.ProjectID, input.RootID)
 		if err != nil {
@@ -1735,7 +1735,7 @@ func deleteRoot(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		_, deleted, err := service.DeleteRoot(ctx, input.ProjectID, input.RootID)
 		if err != nil {
@@ -1755,7 +1755,7 @@ func listContextSources(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListContextSources(ctx, input.ProjectID)
 		if err != nil {
@@ -1802,7 +1802,7 @@ func createContextSource(service *core.Service) mcp.ToolHandler {
 			Metadata       map[string]string `json:"metadata"`
 		}
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		enabled := true
 		if input.Enabled != nil {
@@ -1846,7 +1846,7 @@ func updateContextSource(service *core.Service) mcp.ToolHandler {
 			Metadata       map[string]string `json:"metadata"`
 		}
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetContextSource(ctx, input.ProjectID, input.SourceID)
 		if err != nil {
@@ -1898,7 +1898,7 @@ func deleteContextSource(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		_, deleted, err := service.DeleteContextSource(ctx, input.ProjectID, input.SourceID)
 		if err != nil {
@@ -1931,7 +1931,7 @@ func projectOperationsBrief(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		brief, err := service.ProjectOperationsBrief(ctx, input.ProjectID)
 		if err != nil {
@@ -1951,7 +1951,7 @@ func projectSetupReadiness(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		readiness, err := service.ProjectSetupReadiness(ctx, input.ProjectID)
 		if err != nil {
@@ -1971,7 +1971,7 @@ func projectHealth(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		health, err := service.ProjectHealth(ctx, input.ProjectID)
 		if err != nil {
@@ -1991,7 +1991,7 @@ func projectActivity(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		activity, err := service.ProjectActivity(ctx, input.ProjectID)
 		if err != nil {
@@ -2008,7 +2008,7 @@ func assistantPropose(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input core.AssistantProposal
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		record, err := service.CreateAssistantProposal(ctx, input)
 		if err != nil {
@@ -2029,7 +2029,7 @@ func listAssistantProposals(service *core.Service) mcp.ToolHandler {
 		var input args
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &input); err != nil {
-				return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+				return mcp.CallToolResult{}, invalidArguments(err)
 			}
 		}
 		items, err := service.ListAssistantProposals(ctx, input.ProjectID)
@@ -2055,7 +2055,7 @@ func getAssistantProposal(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		record, err := service.GetAssistantProposal(ctx, input.ID)
 		if err != nil {
@@ -2077,7 +2077,7 @@ func assistantApply(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		var result core.AssistantApplyResult
 		var err error
@@ -2104,7 +2104,7 @@ func listProjectSkills(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListProjectSkills(ctx, input.ProjectID)
 		if err != nil {
@@ -2124,7 +2124,7 @@ func discoverProjectSkills(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.DiscoverProjectSkills(ctx, input.ProjectID)
 		if err != nil {
@@ -2178,7 +2178,7 @@ func listWorkItems(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListWorkItems(ctx, input.ProjectID)
 		if err != nil {
@@ -2211,7 +2211,7 @@ func getWorkItem(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetWorkItem(ctx, input.ProjectID, input.ID)
 		if err != nil {
@@ -2246,7 +2246,7 @@ func createWorkItem(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateWorkItem(ctx, core.WorkItem{
 			ProjectID:       input.ProjectID,
@@ -2282,7 +2282,7 @@ func updateWorkItem(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		existing, err := service.GetWorkItem(ctx, input.ProjectID, input.ID)
 		if err != nil {
@@ -2327,7 +2327,7 @@ func deleteWorkItem(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteWorkItem(ctx, input.ProjectID, input.ID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -2346,7 +2346,7 @@ func workItemCloseoutReadiness(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		readiness, err := service.WorkItemCloseoutReadiness(ctx, input.ProjectID, input.WorkItemID)
 		if err != nil {
@@ -2366,7 +2366,7 @@ func listRoles(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListRoles(ctx, input.ProjectID)
 		if err != nil {
@@ -2406,7 +2406,7 @@ func createRole(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateRole(ctx, core.Role{
 			ProjectID:            input.ProjectID,
@@ -2438,7 +2438,7 @@ func updateRole(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		roles, err := service.ListRoles(ctx, input.ProjectID)
 		if err != nil {
@@ -2487,7 +2487,7 @@ func deleteRole(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteRole(ctx, input.ProjectID, input.ID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -2505,7 +2505,7 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListAssignments(ctx, input.ProjectID)
 		if err != nil {
@@ -2541,7 +2541,7 @@ func getAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetAssignment(ctx, input.ProjectID, input.AssignmentID)
 		if err != nil {
@@ -2566,7 +2566,7 @@ func nextAssignments(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		var skillIDs []string
 		filterSkills := input.SkillIDs != nil
@@ -2604,7 +2604,7 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateAssignment(ctx, core.Assignment{
 			ProjectID:     input.ProjectID,
@@ -2647,7 +2647,7 @@ func updateAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.UpdateAssignment(ctx, core.Assignment{
 			ProjectID:     input.ProjectID,
@@ -2690,7 +2690,7 @@ func claimAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.ClaimAssignment(ctx, input.ProjectID, input.AssignmentID, input.ClaimedBy)
 		if err != nil {
@@ -2711,7 +2711,7 @@ func releaseAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.ReleaseAssignment(ctx, input.ProjectID, input.AssignmentID, input.ClaimedBy)
 		if err != nil {
@@ -2733,7 +2733,7 @@ func updateAssignmentStatus(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.UpdateAssignmentStatus(ctx, input.ProjectID, input.AssignmentID, input.Status, input.ExecutionRef)
 		if err != nil {
@@ -2753,7 +2753,7 @@ func assignmentContext(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.AssignmentContext(ctx, input.ProjectID, input.AssignmentID)
 		if err != nil {
@@ -2774,7 +2774,7 @@ func assignmentLaunchPacket(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		packet, err := service.AssignmentLaunchPacket(ctx, input.ProjectID, input.AssignmentID)
 		if err != nil {
@@ -2797,7 +2797,7 @@ func completeAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CompleteAssignment(ctx, input.ProjectID, input.AssignmentID, input.Status, input.ExecutionRef)
 		if err != nil {
@@ -2817,7 +2817,7 @@ func deleteAssignment(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteAssignment(ctx, input.ProjectID, input.AssignmentID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -2836,7 +2836,7 @@ func listArtifacts(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListArtifacts(ctx, input.ProjectID, input.WorkItemID)
 		if err != nil {
@@ -2858,7 +2858,7 @@ func getArtifact(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetArtifact(ctx, input.ProjectID, input.WorkItemID, input.ArtifactID)
 		if err != nil {
@@ -2886,7 +2886,7 @@ func createArtifact(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateArtifact(ctx, core.Artifact{
 			ProjectID:      input.ProjectID,
@@ -2917,7 +2917,7 @@ func listEvidence(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListEvidence(ctx, input.ProjectID, input.WorkItemID)
 		if err != nil {
@@ -2939,7 +2939,7 @@ func getEvidence(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetEvidence(ctx, input.ProjectID, input.WorkItemID, input.EvidenceID)
 		if err != nil {
@@ -2968,7 +2968,7 @@ func recordEvidence(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateEvidence(ctx, core.Evidence{
 			ProjectID:    input.ProjectID,
@@ -2999,7 +2999,7 @@ func listReviews(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListReviews(ctx, input.ProjectID, input.WorkItemID)
 		if err != nil {
@@ -3021,7 +3021,7 @@ func getReview(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetReview(ctx, input.ProjectID, input.WorkItemID, input.ReviewID)
 		if err != nil {
@@ -3048,7 +3048,7 @@ func recordReview(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateReview(ctx, core.Review{
 			ProjectID:      input.ProjectID,
@@ -3094,7 +3094,7 @@ func createHandoff(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateHandoff(ctx, core.Handoff{
 			ProjectID:             input.ProjectID,
@@ -3138,7 +3138,7 @@ func listHandoffs(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListHandoffs(ctx, input.ProjectID, input.WorkItemID)
 		if err != nil {
@@ -3160,7 +3160,7 @@ func getHandoff(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID)
 		if err != nil {
@@ -3199,7 +3199,7 @@ func updateHandoff(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		existing, err := service.GetHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID)
 		if err != nil {
@@ -3277,7 +3277,7 @@ func updateHandoffStatus(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.UpdateHandoffStatus(ctx, input.ProjectID, input.WorkItemID, input.HandoffID, input.Status)
 		if err != nil {
@@ -3299,7 +3299,7 @@ func deleteHandoff(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -3318,7 +3318,7 @@ func listMemoryEntries(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListMemoryEntries(ctx, input.ProjectID, input.IncludeDisabled)
 		if err != nil {
@@ -3339,7 +3339,7 @@ func getMemoryEntry(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetMemoryEntry(ctx, input.ProjectID, input.MemoryID)
 		if err != nil {
@@ -3364,7 +3364,7 @@ func createMemoryEntry(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{
 			ProjectID:  input.ProjectID,
@@ -3397,7 +3397,7 @@ func updateMemoryEntry(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		existing, err := service.GetMemoryEntry(ctx, input.ProjectID, input.MemoryID)
 		if err != nil {
@@ -3439,7 +3439,7 @@ func deleteMemoryEntry(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteMemoryEntry(ctx, input.ProjectID, input.MemoryID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -3471,7 +3471,7 @@ func createMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.CreateMemoryCandidate(ctx, core.MemoryCandidate{
 			ProjectID:           input.ProjectID,
@@ -3501,7 +3501,7 @@ func listMemoryCandidates(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		items, err := service.ListMemoryCandidates(ctx, core.MemoryCandidateFilter{
 			ProjectID:       input.ProjectID,
@@ -3526,7 +3526,7 @@ func getMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.GetMemoryCandidate(ctx, input.ProjectID, input.CandidateID)
 		if err != nil {
@@ -3553,7 +3553,7 @@ func promoteMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		candidate, entry, err := service.PromoteMemoryCandidate(ctx, core.MemoryCandidatePromotion{
 			ProjectID:   input.ProjectID,
@@ -3584,7 +3584,7 @@ func rejectMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		item, err := service.RejectMemoryCandidate(ctx, input.ProjectID, input.CandidateID, input.Reason)
 		if err != nil {
@@ -3605,7 +3605,7 @@ func deleteMemoryCandidate(service *core.Service) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
-			return mcp.CallToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+			return mcp.CallToolResult{}, invalidArguments(err)
 		}
 		if err := service.DeleteMemoryCandidate(ctx, input.ProjectID, input.CandidateID); err != nil {
 			return mcp.CallToolResult{}, err
@@ -3701,7 +3701,7 @@ type projectSkillArgs struct {
 func decodeCreateProjectSkillArgs(raw json.RawMessage) (core.ProjectSkill, error) {
 	var input projectSkillArgs
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return core.ProjectSkill{}, fmt.Errorf("invalid arguments: %w", err)
+		return core.ProjectSkill{}, invalidArguments(err)
 	}
 	enabled := false
 	if input.Enabled != nil {
@@ -3728,7 +3728,7 @@ func decodeCreateProjectSkillArgs(raw json.RawMessage) (core.ProjectSkill, error
 func decodeUpdateProjectSkillArgs(ctx context.Context, service *core.Service, raw json.RawMessage) (core.ProjectSkill, error) {
 	var input projectSkillArgs
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return core.ProjectSkill{}, fmt.Errorf("invalid arguments: %w", err)
+		return core.ProjectSkill{}, invalidArguments(err)
 	}
 	existing, err := service.GetProjectSkill(ctx, input.ProjectID, input.ID)
 	if err != nil {
@@ -4341,3 +4341,18 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// invalidArguments wraps a tool argument-decode failure so it both reads
+// naturally in prose and classifies as core.ErrInvalid for the structured
+// tool-error contract. Argument decoding is bad input, so it belongs in the
+// same class as domain validation errors; errors.Is reaches both the
+// ErrInvalid sentinel and the underlying decode error.
+func invalidArguments(err error) error {
+	return invalidArgumentsError{err: err}
+}
+
+type invalidArgumentsError struct{ err error }
+
+func (e invalidArgumentsError) Error() string { return "invalid arguments: " + e.err.Error() }
+
+func (e invalidArgumentsError) Unwrap() []error { return []error{core.ErrInvalid, e.err} }

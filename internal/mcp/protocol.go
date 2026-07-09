@@ -177,6 +177,20 @@ func TextContent(text string) []Content {
 	return []Content{{Type: "text", Text: text}}
 }
 
+// ToolErrorPayload is the StructuredContent carried on a failed tool call. It
+// gives hosts a machine-readable error alongside the unchanged human-readable
+// Content, so a client can branch on Error.Code without parsing prose.
+type ToolErrorPayload struct {
+	Error ToolErrorDetail `json:"error"`
+}
+
+// ToolErrorDetail names the failure class (see the cairnline ErrorCode*
+// contract) and echoes the underlying error message.
+type ToolErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 // EmbeddedResource returns a content block that embeds a resource payload in a
 // tool result. The resource may carry either Text or Blob content.
 func EmbeddedResource(resource ResourceContent) Content {

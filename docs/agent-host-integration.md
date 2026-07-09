@@ -114,6 +114,43 @@ coordination state; the approval object, its policy, and its resolution stay
 host-owned. Portable readers treat `awaiting_approval` as blocked-on-operator,
 not as active execution.
 
+## Tool Error Codes
+
+Every MCP tool failure carries a stable, machine-readable code so a host can map
+a coordination failure onto its own error taxonomy (for example an HTTP status)
+without parsing human prose. On failure the tool result sets `isError: true`,
+keeps the human-readable message in `content`, and adds a `structuredContent`
+error envelope:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "root \"x\" not found"
+  }
+}
+```
+
+`error.message` repeats the human-readable text; `error.code` is one of the
+fixed values below. The catalog derives from Cairnline's typed store sentinels
+plus one default. Hosts should branch on `error.code`, treat unknown codes as
+`internal`, and never parse `error.message`.
+
+| Code             | Meaning                                            | Suggested host HTTP status |
+| ---------------- | -------------------------------------------------- | -------------------------- |
+| `not_found`      | Referenced entity does not exist                   | 404                        |
+| `invalid`        | Bad or missing input, including argument-decode and validation failures | 400 |
+| `already_exists` | Id or uniqueness collision                         | 409                        |
+| `conflict`       | Invalid state transition or claim race             | 409                        |
+| `internal`       | Unexpected, unclassified server-side error         | 500                        |
+
+A Go host embedding Cairnline can classify errors it raises itself and reuse the
+same code constants from the public package
+(`github.com/hecatehq/cairnline`): `ErrorCodeNotFound`, `ErrorCodeInvalid`,
+`ErrorCodeAlreadyExists`, `ErrorCodeConflict`, `ErrorCodeInternal`, and the
+`ClassifyErrorCode(err error) string` helper (which returns `""` for a nil
+error and `internal` for anything unclassified).
+
 ## Role And Desired-Agent Mapping
 
 Cairnline roles answer "what responsibility does this project need?" They are
