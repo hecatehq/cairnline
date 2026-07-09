@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Default-deny CSP: the view runs entirely from its inlined bundle and talks
+      to the host only through window.postMessage, which needs no network origin.
+      No external hosts are granted; connect-src stays denied by default-src.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Status</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1b1f24;
+        --muted: #5b6672;
+        --bg: #ffffff;
+        --card: #f5f7fa;
+        --border: #dfe4ea;
+        --clear: #1f8a4c;
+        --attention: #b4690e;
+        --blocked: #c0392b;
+        --accent: #2f6feb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6e9ee;
+          --muted: #9aa4b0;
+          --bg: #14171c;
+          --card: #1d222a;
+          --border: #2b323c;
+          --clear: #48c07d;
+          --attention: #e0a44a;
+          --blocked: #e57373;
+          --accent: #6ea0ff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      section {
+        margin: 0 0 18px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .title {
+        font-weight: 600;
+      }
+      .detail {
+        color: var(--muted);
+      }
+      .badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .badge.clear {
+        color: var(--clear);
+        border-color: var(--clear);
+      }
+      .badge.attention,
+      .badge.action,
+      .badge.ready,
+      .badge.active {
+        color: var(--attention);
+        border-color: var(--attention);
+      }
+      .badge.blocked {
+        color: var(--blocked);
+        border-color: var(--blocked);
+      }
+      .badge.action-label {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .counts {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 6px 12px;
+        margin-top: 8px;
+      }
+      .count {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .count .k {
+        color: var(--muted);
+      }
+      .count .v {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      ul {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+      }
+      li.item {
+        padding: 8px 0;
+        border-top: 1px solid var(--border);
+      }
+      li.item:first-child {
+        border-top: none;
+      }
+      .bucket {
+        margin-top: 10px;
+      }
+      .bucket > .bhead {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .empty {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Project Status</h1>
+    <main id="root">
+      <p class="empty" id="placeholder">Waiting for project status data…</p>
+    </main>
+    <script>
+      (()=>{var L={};function Z(j){return typeof j==="object"&&j!==null}function S(j){if(Z(j.summary))L.health=j;if(Z(j.buckets))L.activity=j;if(Z(j.counts)&&"work_items"in j.counts)L.operations=j}function q(j,z,D){let F=document.createElement(j);if(z)F.className=z;if(D!==void 0)F.textContent=D;return F}function X(j,z){return q("span",z?`badge ${z}`:"badge",j)}function $(j){let z=q("div","counts");for(let[D,F]of j){let B=q("div","count");B.appendChild(q("span","k",D)),B.appendChild(q("span","v",String(F))),z.appendChild(B)}return z}function V(j){let z=q("section");z.appendChild(q("h2",void 0,"Project health"));let D=q("div","card"),F=q("div","row");if(F.appendChild(X(j.status,j.status)),F.appendChild(q("span","title",j.title)),D.appendChild(F),j.detail)D.appendChild(q("p","detail",j.detail));let B=j.summary;D.appendChild($([["Attention",B.attention_count],["Setup to-do",B.setup_todo_count],["Active assignments",B.active_assignment_count],["Blocked assignments",B.blocked_assignment_count],["Open handoffs",B.open_handoff_count],["Review follow-ups",B.review_follow_up_count],["Pending memory",B.pending_memory_candidate_count],["Skill issues",B.project_skill_issue_count]]));let W=j.attention??[];if(W.length>0){let Q=q("ul");for(let J of W){let U=q("li","item"),K=q("div","row");if(K.appendChild(X(J.severity,J.severity)),K.appendChild(q("span","title",J.title)),J.action_label)K.appendChild(X(J.action_label,"action-label"));if(U.appendChild(K),J.detail)U.appendChild(q("div","detail",J.detail));Q.appendChild(U)}D.appendChild(Q)}return z.appendChild(D),z}function E(j){let z=q("section");z.appendChild(q("h2",void 0,"Operations brief"));let D=q("div","card"),F=q("div","row");if(F.appendChild(X(j.status,j.status)),F.appendChild(q("span","title",j.title)),D.appendChild(F),j.detail)D.appendChild(q("p","detail",j.detail));let B=j.counts;D.appendChild($([["Open work items",B.open_work_items],["Active assignments",B.active_assignments],["Blocked assignments",B.blocked_assignments],["Review follow-ups",B.review_follow_ups],["Missing evidence",B.missing_evidence],["Open handoffs",B.open_handoffs],["Pending memory",B.pending_memory_candidates],["Closeout ready",B.closeout_ready]]));let W=j.items??[];if(W.length>0){let Q=q("ul");for(let J of W){let U=q("li","item"),K=q("div","row");if(K.appendChild(X(J.severity,J.severity)),K.appendChild(q("span","title",J.title)),U.appendChild(K),J.detail)U.appendChild(q("div","detail",J.detail));Q.appendChild(U)}D.appendChild(Q)}return z.appendChild(D),z}function O(j){let z=q("section");z.appendChild(q("h2",void 0,"Activity"));let D=q("div","card"),F=j.counts;D.appendChild($([["Assignments",F.assignments],["Active",F.active],["Blocked",F.blocked],["Completed",F.completed],["Awaiting approval",F.awaiting_approval],["Awaiting review",F.awaiting_review]]));let B=[["Active",j.buckets.active],["Blocked",j.buckets.blocked],["Completed",j.buckets.completed],["Other",j.buckets.other]];for(let[W,Q]of B){if(!Q||Q.length===0)continue;let J=q("div","bucket");J.appendChild(q("div","bhead",`${W} (${Q.length})`));let U=q("ul");for(let K of Q){let I=q("li","item"),Y=q("div","row");if(Y.appendChild(X(K.status,K.bucket)),Y.appendChild(q("span","title",K.work_item_title||K.work_item_id)),K.role_name)Y.appendChild(q("span","detail",K.role_name));I.appendChild(Y),U.appendChild(I)}J.appendChild(U),D.appendChild(J)}return z.appendChild(D),z}function T(){let j=document.getElementById("root");if(!j)return;if(j.textContent="",!L.health&&!L.operations&&!L.activity){j.appendChild(q("p","empty","Waiting for project status data…"));return}if(L.health)j.appendChild(V(L.health));if(L.operations)j.appendChild(E(L.operations));if(L.activity)j.appendChild(O(L.activity))}function _(j){if(!Z(j))return;S(j),T()}var G="cairnline-project-status",H="1.0.0";function M(j){window.parent.postMessage(j,"*")}window.addEventListener("message",(j)=>{let z=j.data;if(!z||z.jsonrpc!=="2.0")return;if(z.method==="ui/notifications/tool-result")_(z.params?.structuredContent)});M({jsonrpc:"2.0",id:1,method:"ui/initialize",params:{appInfo:{name:G,version:H},appCapabilities:{availableDisplayModes:["inline","fullscreen"]}}});M({jsonrpc:"2.0",method:"ui/notifications/initialized"});})();
+
+    </script>
+  </body>
+</html>

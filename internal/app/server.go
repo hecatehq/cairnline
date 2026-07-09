@@ -13,5 +13,6 @@ func NewServer(service *core.Service, version string) *mcp.Server {
 	)
 	RegisterTools(server, service, version)
 	RegisterResources(server, service)
+	RegisterApps(server, ProjectStatusApp())
 	return server
 }

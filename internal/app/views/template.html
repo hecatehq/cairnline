@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Default-deny CSP: the view runs entirely from its inlined bundle and talks
+      to the host only through window.postMessage, which needs no network origin.
+      No external hosts are granted; connect-src stays denied by default-src.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Status</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1b1f24;
+        --muted: #5b6672;
+        --bg: #ffffff;
+        --card: #f5f7fa;
+        --border: #dfe4ea;
+        --clear: #1f8a4c;
+        --attention: #b4690e;
+        --blocked: #c0392b;
+        --accent: #2f6feb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6e9ee;
+          --muted: #9aa4b0;
+          --bg: #14171c;
+          --card: #1d222a;
+          --border: #2b323c;
+          --clear: #48c07d;
+          --attention: #e0a44a;
+          --blocked: #e57373;
+          --accent: #6ea0ff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      section {
+        margin: 0 0 18px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .title {
+        font-weight: 600;
+      }
+      .detail {
+        color: var(--muted);
+      }
+      .badge {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 1px 7px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .badge.clear {
+        color: var(--clear);
+        border-color: var(--clear);
+      }
+      .badge.attention,
+      .badge.action,
+      .badge.ready,
+      .badge.active {
+        color: var(--attention);
+        border-color: var(--attention);
+      }
+      .badge.blocked {
+        color: var(--blocked);
+        border-color: var(--blocked);
+      }
+      .badge.action-label {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .counts {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 6px 12px;
+        margin-top: 8px;
+      }
+      .count {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .count .k {
+        color: var(--muted);
+      }
+      .count .v {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      ul {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+      }
+      li.item {
+        padding: 8px 0;
+        border-top: 1px solid var(--border);
+      }
+      li.item:first-child {
+        border-top: none;
+      }
+      .bucket {
+        margin-top: 10px;
+      }
+      .bucket > .bhead {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .empty {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Project Status</h1>
+    <main id="root">
+      <p class="empty" id="placeholder">Waiting for project status data…</p>
+    </main>
+    <script>
+      /* __BUNDLE__ */
+    </script>
+  </body>
+</html>
