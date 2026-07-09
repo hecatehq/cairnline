@@ -132,6 +132,11 @@ discovery; both were checked on July 4, 2026:
   assignments, artifacts, evidence, reviews, handoffs, memory entries,
   memory candidates, and assistant proposal records
 - stdio MCP server with JSON-RPC framing
+- MCP protocol structs carry the spec fields a richer tool surface needs: tool
+  `outputSchema`, `_meta` passthrough on tools, resources, resource content, and
+  tool results, embedded-resource and base64 `blob` tool-result content, and
+  `capabilities.extensions` negotiation during `initialize` (the server declares
+  none by default)
 - MCP read tools return human-readable text plus `structuredContent` where a
   stable data shape exists, including core project/role/work/assignment
   list surfaces, coordination capabilities, and assignment context/launch
@@ -364,6 +369,15 @@ if err != nil {
 Snapshot import is additive/upsert. It does not delete records that are absent
 from the snapshot, does not replay assistant proposal actions, and is not
 exposed as an MCP bulk mutation tool.
+
+An embedding host can also build the MCP server from the root package instead of
+shelling out to the stdio binary. `cairnline.NewMCPServer(service, version)`
+returns the fully-registered server; mount it on a custom transport by feeding
+each inbound JSON-RPC message through `server.HandleMessage(ctx, msg)` (the
+second return is false for notifications), or run the built-in stdio loop with
+`server.Serve(ctx, os.Stdin, os.Stdout)`. See
+[Agent Host Integration](docs/agent-host-integration.md) for the mount details
+and optional `capabilities.extensions` negotiation.
 
 ## MCP Client Config
 
