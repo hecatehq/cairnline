@@ -21,6 +21,21 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: internal/app/views/.bun-version
+
+      # The Project Status view bundle is gitignored and built from source. Build
+      # it before the Go steps so the //go:embed all:views/dist directory carries
+      # the real bundle (not just the .gitkeep placeholder + "not built" fallback)
+      # when Go compiles and tests run. Order matters: JS build before Go.
+      - name: Build embedded views bundle
+        working-directory: internal/app/views
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
       - name: Test
         run: go test ./...
 
@@ -31,7 +46,7 @@ jobs:
         run: go test -race ./...
 
   views:
-    name: Views bundle freshness
+    name: Views
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -42,20 +57,17 @@ jobs:
         with:
           bun-version-file: internal/app/views/.bun-version
 
-      # The embedded dist/*.html bundle is a committed build artifact. Rebuild it
-      # from source with the pinned Bun and fail if the committed bundle drifted,
-      # so a source edit that skipped `bun run build` cannot ship a stale view.
-      # The view bundles the @modelcontextprotocol/ext-apps SDK, so install the
-      # locked dependency tree first. --frozen-lockfile keeps the build pinned to
-      # the committed bun.lock; with pinned Bun + lockfile the minified output is
-      # byte-reproducible, so the freshness diff below stays deterministic.
       - name: Install views dependencies
         working-directory: internal/app/views
         run: bun install --frozen-lockfile
 
-      - name: Rebuild embedded views bundle
+      # Typecheck and run the Vitest component tests for the Web Components view.
+      # This replaces the old "bundle freshness" diff guard: the bundle is no
+      # longer committed, so the real coverage is the component test suite.
+      - name: Typecheck
         working-directory: internal/app/views
-        run: bun run build
+        run: bun run typecheck
 
-      - name: Fail if committed bundle is stale
-        run: git diff --exit-code -- internal/app/views/dist
+      - name: Test
+        working-directory: internal/app/views
+        run: bun run test

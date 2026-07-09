@@ -11,139 +11,30 @@
 // is the view itself, which would answer its own ui/initialize with -32601. The
 // iframe host below is the faithful arrangement.
 //
-// Requires the pinned `playwright` package and its Chromium build. In this repo:
+// Run with bun (no separate Node step). Requires the `playwright` package and its
+// Chromium build. In this repo:
+//   NODE_PATH=/opt/node22/lib/node_modules \
 //   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
 //   bun verify/verify.ts [screenshot-path]
 
-import { chromium, type Browser, type Frame, type Page } from "playwright";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+
+const require = createRequire(import.meta.url);
+const { chromium } = require("playwright");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const htmlPath = join(here, "..", "dist", "project-status.html");
 // Screenshot path is overridable as argv[2]; defaults next to this script.
 const screenshotPath = process.argv[2] || join(here, "project-status.png");
 
-// Fixture shapes mirror internal/core/types.go (snake_case JSON tags). A real
-// tool result carries one shape; the view renders each shape it has received, so
-// delivering all three fills every section for the screenshot.
-interface HealthSummary {
-  attention_count: number;
-  available_attention_count: number;
-  omitted_attention_count: number;
-  attention_limit: number;
-  setup_todo_count: number;
-  missing_project_root: boolean;
-  open_handoff_count: number;
-  review_follow_up_count: number;
-  active_assignment_count: number;
-  blocked_assignment_count: number;
-  pending_memory_candidate_count: number;
-  project_skill_issue_count: number;
-}
-
-interface HealthAttentionItem {
-  kind: string;
-  severity: string;
-  status?: string;
-  title: string;
-  detail?: string;
-  action_kind?: string;
-  action_label?: string;
-}
-
-interface Health {
-  project_id: string;
-  status: string;
-  title: string;
-  detail?: string;
-  summary: HealthSummary;
-  attention: HealthAttentionItem[];
-}
-
-interface OperationsCounts {
-  work_items: number;
-  open_work_items: number;
-  assignments: number;
-  active_assignments: number;
-  blocked_assignments: number;
-  pending_memory_candidates: number;
-  review_follow_ups: number;
-  missing_evidence: number;
-  open_handoffs: number;
-  closeout_ready: number;
-}
-
-interface OperationItem {
-  kind: string;
-  severity: string;
-  status?: string;
-  title: string;
-  detail?: string;
-}
-
-interface Operations {
-  project_id: string;
-  status: string;
-  title: string;
-  detail?: string;
-  counts: OperationsCounts;
-  items: OperationItem[];
-}
-
-interface ActivityCounts {
-  assignments: number;
-  queued: number;
-  claimed: number;
-  running: number;
-  awaiting_approval: number;
-  awaiting_review: number;
-  completed: number;
-  failed: number;
-  cancelled: number;
-  other: number;
-  active: number;
-  blocked: number;
-}
-
-interface ActivityItem {
-  bucket: string;
-  work_item_id: string;
-  work_item_title?: string;
-  role_name?: string;
-  status: string;
-}
-
-interface ActivityBuckets {
-  active?: ActivityItem[];
-  blocked?: ActivityItem[];
-  completed?: ActivityItem[];
-  other?: ActivityItem[];
-  recent?: ActivityItem[];
-}
-
-interface Activity {
-  project_id: string;
-  counts: ActivityCounts;
-  buckets: ActivityBuckets;
-}
-
-// One tool-result payload is any of the three shapes the view understands.
-type StructuredContent = Health | Operations | Activity;
-
-// Host-injected helpers on the host page's window (see hostHtml below). Declared
-// so the page.evaluate / waitForFunction callbacks that run in the host page are
-// typed without casts.
-declare global {
-  interface Window {
-    __hostLog?: string[];
-    __deliver: (structuredContent: StructuredContent) => void;
-  }
-}
-
-const health: Health = {
+// Representative fixtures. Field names mirror internal/core/types.go. A real
+// tool result carries one shape; the view renders each shape it has received,
+// so delivering all three fills every section for the screenshot.
+const health = {
   project_id: "proj_demo",
   status: "attention",
   title: "3 items need attention",
@@ -182,7 +73,7 @@ const health: Health = {
   ],
 };
 
-const operations: Operations = {
+const operations = {
   project_id: "proj_demo",
   status: "attention",
   title: "Next: unblock deploy approval",
@@ -215,7 +106,7 @@ const operations: Operations = {
   ],
 };
 
-const activity: Activity = {
+const activity = {
   project_id: "proj_demo",
   counts: {
     assignments: 5,
@@ -313,10 +204,10 @@ const hostHtml = `<!doctype html>
 const hostFile = join(tmpdir(), `cairnline-verify-host-${process.pid}.html`);
 writeFileSync(hostFile, hostHtml, "utf8");
 
-const browser: Browser = await chromium.launch();
-const page: Page = await browser.newPage();
+const browser = await chromium.launch();
+const page = await browser.newPage();
 
-const errors: string[] = [];
+const errors = [];
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 page.on("console", (m) => {
   if (m.type() === "error") errors.push(`console.error: ${m.text()}`);
@@ -324,9 +215,33 @@ page.on("console", (m) => {
 
 await page.goto("file://" + hostFile, { waitUntil: "load" });
 
-const viewFrame = (): Frame | undefined => page.frames().find((f) => f.url().includes("project-status"));
-const deliver = (structuredContent: StructuredContent): Promise<void> =>
-  page.evaluate((sc) => window.__deliver(sc), structuredContent);
+const viewFrame = () => page.frames().find((f) => f.url().includes("project-status"));
+const deliver = (structuredContent) => page.evaluate((sc) => window.__deliver(sc), structuredContent);
+
+// The view renders into Web Component shadow roots, so the rendered text is not
+// reachable via a single element's textContent. These walkers cross every shadow
+// boundary to collect what the operator actually sees. They run inside the view
+// frame via Playwright's evaluate (which is not subject to the page CSP).
+const deepText = () => {
+  const walk = (node, acc) => {
+    if (node.nodeType === 3) acc.push(node.nodeValue || "");
+    const shadow = node.shadowRoot;
+    if (shadow) walk(shadow, acc);
+    for (const child of node.childNodes) walk(child, acc);
+    return acc;
+  };
+  return walk(document.body, []).join(" ");
+};
+const deepIncludes = (needle) => {
+  const walk = (node, acc) => {
+    if (node.nodeType === 3) acc.push(node.nodeValue || "");
+    const shadow = node.shadowRoot;
+    if (shadow) walk(shadow, acc);
+    for (const child of node.childNodes) walk(child, acc);
+    return acc;
+  };
+  return walk(document.body, []).join(" ").includes(needle);
+};
 
 // The view must complete the request/response handshake before signaling ready:
 // it should not post ui/notifications/initialized until the host answers
@@ -348,17 +263,9 @@ for (const structuredContent of [health, operations, activity]) {
 }
 
 const frame = viewFrame();
-if (!frame) throw new Error("project-status view iframe not found");
-await frame.waitForFunction(
-  () => {
-    const root = document.getElementById("root");
-    return !!root && (root.textContent ?? "").includes("Activity");
-  },
-  null,
-  { timeout: 15000 },
-);
+await frame.waitForFunction(deepIncludes, "Activity", { timeout: 15000 });
 
-const rendered = await frame.evaluate(() => document.getElementById("root")?.textContent ?? "");
+const rendered = await frame.evaluate(deepText);
 const expected = [
   "Project health",
   "3 items need attention",
@@ -375,7 +282,7 @@ await page.screenshot({ path: screenshotPath, fullPage: true });
 // State-bleed check: a result for a different project_id must reset the view so
 // none of the first project's sections survive. Deliver a health result for a
 // new project and assert the prior project's content is gone.
-const otherHealth: Health = {
+const otherHealth = {
   project_id: "proj_other",
   status: "clear",
   title: "Second project is clear",
@@ -383,15 +290,8 @@ const otherHealth: Health = {
   attention: [],
 };
 await deliver(otherHealth);
-await frame.waitForFunction(
-  () => {
-    const root = document.getElementById("root");
-    return !!root && (root.textContent ?? "").includes("Second project is clear");
-  },
-  null,
-  { timeout: 15000 },
-);
-const afterSwitch = await frame.evaluate(() => document.getElementById("root")?.textContent ?? "");
+await frame.waitForFunction(deepIncludes, "Second project is clear", { timeout: 15000 });
+const afterSwitch = await frame.evaluate(deepText);
 const bled = [
   "3 items need attention", // first project's health title
   "Operations brief", // first project's operations section
