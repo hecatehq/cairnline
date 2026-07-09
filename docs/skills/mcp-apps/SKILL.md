@@ -91,7 +91,7 @@ One stateless view backs three tools. Read these files together:
   view. `action_kind` / `action_label` hints render as **inert badges** — this
   batch never calls tools back from the view.
 
-## Build & embed model
+## Build & embed model (guarded at `go test`)
 
 The built bundle `internal/app/views/dist/project-status.html` is **gitignored**,
 not committed (mirroring Hecate's `ui/dist`). `dist/.gitkeep` is committed and
@@ -101,6 +101,25 @@ present, the app serves a minimal "view not built" placeholder (same strict CSP)
 A single-file embed of an absent file is a hard compile error — that is why the
 directory + placeholder pattern is used. CI and release run `bun run build`
 before the Go build so shipped binaries embed the real view.
+
+**The teeth are a guard test, not a convention.** Forgetting to build — or to
+rebuild after editing `src/` — is a hard, immediate `go test` failure:
+
+- The Vite build injects `<meta name="cairnline-views-src-sha256" content="…">`
+  into the bundle head: a sha256 over a deterministic, POSIX-sorted source set
+  (`src/**` plus `index.html`, `package.json`, `bun.lock`, `vite.config.ts`);
+  scheme = outer sha256 of, per file, `relpath + "\n" + hex(sha256(bytes)) + "\n"`
+  (see `injectSrcHash` in `vite.config.ts`). Static, data-free meta — CSP-safe.
+- `TestProjectStatusView_BundleBuiltAndFresh` (`status_app_bundle_test.go`) reads
+  the embedded bundle: **fails "not built"** if the meta is absent (fallback
+  embedded), **fails "STALE"** if the meta hash ≠ the hash recomputed from the
+  working-tree source. The source set is embedded into the **test** binary (a
+  `_test.go` embed, so it does not bloat the shipped binary) specifically so that
+  editing any src file busts the `go test` cache and the guard re-runs — a runtime
+  `os.ReadFile` would be invisible to the cache and could be masked by a cached
+  PASS. Keep the Go recompute scheme byte-identical to `vite.config.ts`.
+- Refresh the bundle with `bun run build`, `make views`, or `go generate ./...`
+  (the `//go:generate` on `status_app.go`).
 
 ## Recipe: add a new app end to end
 
@@ -242,9 +261,15 @@ Go changes (the floor for any app/registration/tagging change):
 ```sh
 go build ./...
 go vet ./...
-go test ./...            # includes apps_test.go + status_app_test.go
+go test ./...            # apps_test.go + status_app_test.go + the freshness guard
 go test -race ./...      # required for MCP transport / server changes
 ```
+
+Note: `go test ./...` hard-fails if the view bundle is missing or stale (the
+`TestProjectStatusView_BundleBuiltAndFresh` guard). Build the view first
+(`make views` / `bun run build` / `go generate ./...`) or every Go test run in
+`internal/app` fails with a "not built" / "STALE" message. `go build` /
+`go install` still compile and serve the placeholder.
 
 Focused test iteration while editing the app wiring:
 
@@ -265,11 +290,13 @@ bun run preview         # vite dev server + fixture selector, to develop outside
 ```
 
 The built bundle is **gitignored** — do not commit it (`dist/.gitkeep` is the
-only tracked file in `dist/`). CI's `views` job runs `bun install
+only tracked file in `dist/`). The old bundle-freshness diff is replaced by the
+`go test` guard (`TestProjectStatusView_BundleBuiltAndFresh`): a missing/stale
+bundle hard-fails `go test`. CI's `views` job runs `bun install
 --frozen-lockfile`, `bun run typecheck`, and `bun run test` (the component suite
-replaces the old bundle-freshness diff); the Go `test` job runs `bun run build`
-before `go test` so it embeds the real view. Keep the lockfile committed and in
-sync.
+is the view's behavioral coverage); the Go `test` job runs `bun run build`
+before `go test` so it embeds a fresh real view. Keep the lockfile committed and
+in sync.
 
 Headless render check — renders the built HTML inside a **sandboxed iframe** host
 (the SDK `App` is a full JSON-RPC peer, so it needs a real parent to answer
@@ -289,7 +316,8 @@ bun verify/verify.ts [screenshot-path]
 ```
 
 Done criteria: `go vet` and `go test` (and `-race` for transport/server work)
-pass; if a view source changed, `bun run typecheck` + `bun run test` pass and the
+pass against a freshly built bundle (the freshness guard is green — not skipped);
+if a view source changed, `bun run typecheck` + `bun run test` pass and the
 headless check runs against a fresh `bun run build` with zero console/CSP errors;
 the byte-identical fallback regression and the resource/extension/descriptor
 tests cover every newly tagged tool.

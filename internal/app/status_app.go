@@ -5,6 +5,13 @@ import (
 	"embed"
 )
 
+// go:generate refreshes the embedded bundle from source. `go generate ./...`
+// runs it from this package dir, so it enters views/ and rebuilds dist/. This is
+// a convenience entrypoint; the hard gate is the guard test in
+// status_app_bundle_test.go (`go test` fails if the bundle is missing or stale).
+//
+//go:generate bash -c "cd views && bun install --frozen-lockfile && bun run build"
+
 // projectStatusViewFS embeds the built Project Status view directory. This is a
 // directory embed (all:views/dist), not a single named file, so `go build`
 // compiles on a clean source checkout where only dist/.gitkeep is present and

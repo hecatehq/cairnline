@@ -3,11 +3,11 @@
 Self-contained HTML views for Cairnline's MCP Apps (`ui://`) extension
 (`io.modelcontextprotocol/ui`, SEP-1865). Each view is built from native Web
 Components into a single HTML file with all CSS and JS inlined and embedded into
-the Go server with `//go:embed`. **The runtime and `go test` need no JS
-toolchain** to compile — only building the real view does (see the build & embed
-model below).
+the Go server with `//go:embed`. **`go build` / `go install` need no JS
+toolchain** to compile and run — but **`go test` hard-fails** until the real view
+is built and fresh (see the build & embed model below).
 
-## Build & embed model (dist is gitignored)
+## Build & embed model (dist is gitignored, guarded at `go test`)
 
 The built bundle `dist/project-status.html` is **not committed** — it is
 gitignored and produced by `bun run build`. This mirrors Hecate's `ui/dist`
@@ -22,16 +22,37 @@ compiling on a clean checkout without a JS toolchain:
   is absent (only `.gitkeep` present), it falls back to a small committed
   "Project Status view not built" page carrying the **exact same strict CSP**.
 
+### Structural freshness guard (the teeth)
+
+A missing or stale bundle is a **hard, immediate `go test` failure** — not a
+convention, not only a CI diff-check:
+
+- The Vite build injects `<meta name="cairnline-views-src-sha256" content="…">`
+  into the built HTML head — a sha256 over a deterministic, POSIX-sorted source
+  set (`src/**` plus `index.html`, `package.json`, `bun.lock`, `vite.config.ts`),
+  scheme: outer sha256 of, per file, `relpath + "\n" + hex(sha256(bytes)) + "\n"`.
+- `TestProjectStatusView_BundleBuiltAndFresh` (`internal/app/status_app_bundle_test.go`)
+  reads the embedded bundle and:
+  - **Fails "not built"** if the meta is absent (the fallback page is embedded).
+  - **Fails "STALE"** if the meta hash ≠ the hash recomputed from the working-tree
+    source (same set + scheme). The source set is embedded into the **test**
+    binary (a `_test.go` embed, excluded from the shipped binary), so editing any
+    src file busts the `go test` cache and the guard actually re-runs at plain
+    `go test` — a runtime file read would be masked by a cached PASS.
+
 Consequences:
 
-- A clean `go install` / `go build` / `go test` **compiles and runs**, but the
-  Project Status app serves the minimal "not built" placeholder until the bundle
-  is built.
+- A clean `go install` / `go build` **compiles and runs**, serving the minimal
+  "not built" placeholder until the bundle is built. `go test` does **not** pass
+  until the bundle is built and fresh.
 - CI (`.github/workflows/ci.yml`) and release (`release.yml`) run
   `bun install --frozen-lockfile && bun run build` in `internal/app/views`
-  **before** the Go build, so shipped binaries embed the real view.
-- Building locally before `go test` / `verify` embeds the real view:
-  `cd internal/app/views && bun run build`.
+  **before** the Go build, so shipped binaries embed the real view and CI stays
+  green.
+- Refresh the bundle before `go test` / `verify` with any of:
+  `cd internal/app/views && bun run build`, `make views` (top-level), or
+  `go generate ./...` (the `//go:generate` on `status_app.go` runs the same
+  build).
 
 ## Architecture: native Web Components
 
@@ -134,11 +155,12 @@ The Bun version is pinned in `.bun-version` and `package.json`
 plus the Vite/Vitest/oxlint toolchain) are pinned in the committed `bun.lock`.
 With pinned Bun + frozen lockfile the Vite single-file output is byte-stable.
 
-Because the bundle is no longer committed, there is no "bundle freshness" diff
-guard. CI's `views` job runs `bun install --frozen-lockfile`, `bun run
-typecheck`, and `bun run test` (the Vitest component suite) — that suite is the
-real coverage. The Go `test` job builds the bundle before running `go test` so
-it embeds the real view.
+Because the bundle is no longer committed, the old "bundle freshness" diff guard
+is gone; the **`go test` freshness guard** above replaces it (a missing/stale
+bundle hard-fails `go test`, locally and in CI). CI's `views` job runs `bun
+install --frozen-lockfile`, `bun run typecheck`, and `bun run test` (the Vitest
+component suite) — that suite is the view's behavioral coverage. The Go `test`
+job builds the bundle before running `go test` so it embeds a fresh real view.
 
 ## CSP / injection-safety invariants
 
