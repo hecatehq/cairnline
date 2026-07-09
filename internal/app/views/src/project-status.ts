@@ -9,13 +9,17 @@
 // projects' results can never bleed together. All action_kind/action_label
 // hints render as inert badges: this batch never calls tools back from the view.
 //
-// The host<->view bridge is hand-rolled against the MCP Apps
-// (io.modelcontextprotocol/ui) postMessage contract rather than the official
-// @modelcontextprotocol/ext-apps SDK: that SDK does not bundle to a
-// self-contained browser IIFE (a transitive dynamic require survives bundling)
-// and pulls in eval/new Function code paths that the view's strict default-deny
-// CSP forbids. The bridge below sends only the two messages this read-only view
-// needs and reads params.structuredContent from ui/notifications/tool-result.
+// The host<->view bridge is the official @modelcontextprotocol/ext-apps SDK
+// (io.modelcontextprotocol/ui). The App drives the ui/initialize handshake and
+// delivers each tool result via app.ontoolresult; the view reads
+// result.structuredContent. The SDK is bundled to ESM and loaded as an inline
+// <script type="module">, which runs under the view's strict, no-unsafe-eval
+// CSP: the App constructor sets zod to jitless mode, so no eval/new Function
+// path is taken at runtime. (Bundling the SDK to an IIFE instead emits an
+// undefined __require reference — a Bun IIFE-interop bug, not an SDK defect —
+// which is why the build targets ESM.)
+
+import { App } from "@modelcontextprotocol/ext-apps";
 
 // Field names mirror internal/core/types.go exactly (snake_case JSON tags).
 
@@ -339,59 +343,22 @@ function ingest(structuredContent: unknown): void {
   render();
 }
 
-interface JsonRpcMessage {
-  jsonrpc?: string;
-  id?: number | string;
-  method?: string;
-  result?: unknown;
-  params?: { structuredContent?: unknown };
-}
+// Host <-> view bridge via the official SDK. new App() sets zod to jitless mode
+// (allowUnsafeEval defaults false), so nothing here needs eval/new Function. The
+// App performs the ui/initialize -> McpUiInitializeResult -> initialized
+// handshake against window.parent; app.ontoolresult fires for each host
+// ui/notifications/tool-result, whose CallToolResult carries structuredContent.
+const app = new App(
+  { name: "cairnline-project-status", version: "1.0.0" },
+  { availableDisplayModes: ["inline", "fullscreen"] },
+);
 
-const APP_NAME = "cairnline-project-status";
-const APP_VERSION = "1.0.0";
-const INIT_REQUEST_ID = 1;
+// Register the result handler before connecting so no early notification is
+// missed, then complete the handshake.
+app.ontoolresult = (result) => {
+  ingest(result.structuredContent);
+};
 
-function postToHost(message: Record<string, unknown>): void {
-  // Views render inside a sandboxed iframe; the host is the parent window.
-  window.parent.postMessage(message, "*");
-}
-
-let initialized = false;
-
-// The MCP Apps handshake is request/response ordered: the view sends the
-// ui/initialize request, waits for the host's McpUiInitializeResult response,
-// and only then sends the ui/notifications/initialized readiness notification.
-function markInitialized(): void {
-  if (initialized) return;
-  initialized = true;
-  postToHost({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
-}
-
-// Host -> View: the host answers ui/initialize with a JSON-RPC response and
-// proxies each tool result as a ui/notifications/tool-result notification whose
-// params are a standard MCP CallToolResult. Read structuredContent from it.
-window.addEventListener("message", (event: MessageEvent) => {
-  const message = event.data as JsonRpcMessage | null;
-  if (!message || message.jsonrpc !== "2.0") return;
-  // The ui/initialize response completes the handshake; a response carries the
-  // request id and no method.
-  if (message.method === undefined && message.id === INIT_REQUEST_ID) {
-    markInitialized();
-    return;
-  }
-  if (message.method === "ui/notifications/tool-result") {
-    ingest(message.params?.structuredContent);
-  }
-});
-
-// View -> Host: announce the app by sending the ui/initialize request. Readiness
-// is signaled from markInitialized() once the host's response arrives.
-postToHost({
-  jsonrpc: "2.0",
-  id: INIT_REQUEST_ID,
-  method: "ui/initialize",
-  params: {
-    appInfo: { name: APP_NAME, version: APP_VERSION },
-    appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
-  },
+app.connect().catch((err: unknown) => {
+  console.error("[project-status] app.connect failed", err);
 });

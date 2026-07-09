@@ -335,12 +335,14 @@ session.
 
 ### Authoring a view (contributors)
 
-Views live in `internal/app/views` and are bundled to a single self-contained
-HTML file (`bun run build`) that is committed under `dist/` and embedded with
+Views live in `internal/app/views` and are bundled — together with the official
+`@modelcontextprotocol/ext-apps` SDK they use for the host bridge — to a single
+self-contained HTML file (`bun install` then `bun run build`, ESM inlined into a
+`<script type="module">`) that is committed under `dist/` and embedded with
 `//go:embed`; the runtime and `go test` need no JS toolchain. Register a built
 view with `app.RegisterApps` and tag its tools with the `_meta.ui.resourceUri`
-helper. See `internal/app/views/README.md` for the build and headless render
-check.
+helper. See `internal/app/views/README.md` for the build (including why the
+bundle targets ESM rather than IIFE) and the headless render check.
 
 ## Security Checklist For Hosts
 

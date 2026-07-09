@@ -11,5 +11,8 @@
   "scripts": {
     "build": "bun run build.ts",
     "verify": "node verify/verify.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.4"
   }
 }

@@ -1,9 +1,15 @@
-// Headless render check for the Project Status view. It loads the built
-// dist/project-status.html in Chromium under the view's real (strict) CSP,
-// delivers representative projects.health / projects.operations_brief /
-// projects.activity results over the exact ui/notifications/tool-result
-// postMessage contract the view implements, asserts the key text rendered, and
+// Headless render check for the Project Status view. It renders the built
+// dist/project-status.html inside a sandboxed iframe (as a real host does) under
+// the view's strict, no-unsafe-eval CSP, plays the host side of the SDK's
+// ui/initialize handshake, delivers representative projects.health /
+// projects.operations_brief / projects.activity results over the
+// ui/notifications/tool-result contract, asserts the key text rendered, and
 // writes a screenshot. It is a reproducibility aid, not part of `go test`.
+//
+// The view uses the @modelcontextprotocol/ext-apps App, a full JSON-RPC peer, so
+// it must run in an iframe whose parent is the host: at top level window.parent
+// is the view itself, which would answer its own ui/initialize with -32601. The
+// iframe host below is the faithful arrangement.
 //
 // Requires the `playwright` package and its Chromium build. In this repo:
 //   NODE_PATH=/opt/node22/lib/node_modules \
@@ -13,6 +19,8 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -144,6 +152,57 @@ const activity = {
   },
 };
 
+// Host page: embeds the view file in a sandboxed iframe and plays the host side
+// of the handshake. It must be a real file:// document so Chromium lets the
+// iframe load the file:// view (a data:/about:blank parent cannot). The host
+// answers ui/initialize with an McpUiInitializeResult, records readiness, and
+// forwards tool-results into the iframe.
+const hostHtml = `<!doctype html>
+<html>
+  <head><meta charset="utf-8" /><title>verify host</title></head>
+  <body>
+    <iframe
+      id="view"
+      sandbox="allow-scripts allow-same-origin"
+      src="file://${htmlPath}"
+      style="width: 520px; height: 940px; border: 0"
+    ></iframe>
+    <script>
+      window.__hostLog = [];
+      const view = document.getElementById("view");
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || message.jsonrpc !== "2.0") return;
+        if (message.method === "ui/initialize") {
+          window.__hostLog.push("initialize");
+          view.contentWindow.postMessage(
+            {
+              jsonrpc: "2.0",
+              id: message.id,
+              result: {
+                protocolVersion: "2026-01-26",
+                hostCapabilities: {},
+                hostInfo: { name: "cairnline-verify", version: "0.0.0" },
+                hostContext: { displayMode: "inline" },
+              },
+            },
+            "*",
+          );
+        } else if (message.method === "ui/notifications/initialized") {
+          window.__hostLog.push("initialized");
+        }
+      });
+      window.__deliver = (structuredContent) =>
+        view.contentWindow.postMessage(
+          { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: { content: [], structuredContent } },
+          "*",
+        );
+    </script>
+  </body>
+</html>`;
+const hostFile = join(tmpdir(), `cairnline-verify-host-${process.pid}.html`);
+writeFileSync(hostFile, hostHtml, "utf8");
+
 const browser = await chromium.launch();
 const page = await browser.newPage();
 
@@ -153,53 +212,22 @@ page.on("console", (m) => {
   if (m.type() === "error") errors.push(`console.error: ${m.text()}`);
 });
 
-// Stand in for the host before the view's scripts run: answer the view's
-// ui/initialize request with an McpUiInitializeResult and record when the view
-// replies with ui/notifications/initialized, so the handshake ordering is
-// exercised end to end.
-await page.addInitScript(() => {
-  window.__hostLog = [];
-  window.addEventListener("message", (event) => {
-    const message = event.data;
-    if (!message || message.jsonrpc !== "2.0") return;
-    if (message.method === "ui/initialize") {
-      window.__hostLog.push("initialize");
-      window.postMessage(
-        {
-          jsonrpc: "2.0",
-          id: message.id,
-          result: {
-            protocolVersion: "2026-01-26",
-            hostCapabilities: {},
-            hostInfo: { name: "cairnline-verify", version: "0.0.0" },
-            hostContext: { displayMode: "inline" },
-          },
-        },
-        "*",
-      );
-    } else if (message.method === "ui/notifications/initialized") {
-      window.__hostLog.push("initialized");
-    }
-  });
-});
+await page.goto("file://" + hostFile, { waitUntil: "load" });
 
-await page.goto("file://" + htmlPath, { waitUntil: "load" });
-
-const deliver = (structuredContent) =>
-  page.evaluate((sc) => {
-    window.postMessage(
-      { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: { content: [], structuredContent: sc } },
-      "*",
-    );
-  }, structuredContent);
+const viewFrame = () => page.frames().find((f) => f.url().includes("project-status"));
+const deliver = (structuredContent) => page.evaluate((sc) => window.__deliver(sc), structuredContent);
 
 // The view must complete the request/response handshake before signaling ready:
 // it should not post ui/notifications/initialized until the host answers
 // ui/initialize.
-await page.waitForFunction(() => {
-  const log = window.__hostLog || [];
-  return log.indexOf("initialize") !== -1 && log.indexOf("initialized") > log.indexOf("initialize");
-});
+await page.waitForFunction(
+  () => {
+    const log = window.__hostLog || [];
+    return log.indexOf("initialize") !== -1 && log.indexOf("initialized") > log.indexOf("initialize");
+  },
+  null,
+  { timeout: 15000 },
+);
 
 // Deliver each shape as the host would: a ui/notifications/tool-result whose
 // params are a CallToolResult carrying structuredContent. All three share one
@@ -208,12 +236,17 @@ for (const structuredContent of [health, operations, activity]) {
   await deliver(structuredContent);
 }
 
-await page.waitForFunction(() => {
-  const root = document.getElementById("root");
-  return !!root && root.textContent.includes("Activity");
-});
+const frame = viewFrame();
+await frame.waitForFunction(
+  () => {
+    const root = document.getElementById("root");
+    return !!root && root.textContent.includes("Activity");
+  },
+  null,
+  { timeout: 15000 },
+);
 
-const rendered = await page.evaluate(() => document.getElementById("root").textContent);
+const rendered = await frame.evaluate(() => document.getElementById("root").textContent);
 const expected = [
   "Project health",
   "3 items need attention",
@@ -238,11 +271,15 @@ const otherHealth = {
   attention: [],
 };
 await deliver(otherHealth);
-await page.waitForFunction(() => {
-  const root = document.getElementById("root");
-  return !!root && root.textContent.includes("Second project is clear");
-});
-const afterSwitch = await page.evaluate(() => document.getElementById("root").textContent);
+await frame.waitForFunction(
+  () => {
+    const root = document.getElementById("root");
+    return !!root && root.textContent.includes("Second project is clear");
+  },
+  null,
+  { timeout: 15000 },
+);
+const afterSwitch = await frame.evaluate(() => document.getElementById("root").textContent);
 const bled = [
   "3 items need attention", // first project's health title
   "Operations brief", // first project's operations section
@@ -251,6 +288,7 @@ const bled = [
 ].filter((text) => afterSwitch.includes(text));
 
 await browser.close();
+rmSync(hostFile, { force: true });
 
 if (errors.length > 0) {
   console.error("runtime errors (CSP or script):\n" + errors.join("\n"));
