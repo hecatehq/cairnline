@@ -11,29 +11,139 @@
 // is the view itself, which would answer its own ui/initialize with -32601. The
 // iframe host below is the faithful arrangement.
 //
-// Requires the `playwright` package and its Chromium build. In this repo:
-//   NODE_PATH=/opt/node22/lib/node_modules \
+// Requires the pinned `playwright` package and its Chromium build. In this repo:
 //   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-//   node verify/verify.mjs [screenshot-path]
+//   bun verify/verify.ts [screenshot-path]
 
-import { createRequire } from "node:module";
+import { chromium, type Browser, type Frame, type Page } from "playwright";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-
-const require = createRequire(import.meta.url);
-const { chromium } = require("playwright");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const htmlPath = join(here, "..", "dist", "project-status.html");
 // Screenshot path is overridable as argv[2]; defaults next to this script.
 const screenshotPath = process.argv[2] || join(here, "project-status.png");
 
-// Representative fixtures. Field names mirror internal/core/types.go. A real
-// tool result carries one shape; the view renders each shape it has received,
-// so delivering all three fills every section for the screenshot.
-const health = {
+// Fixture shapes mirror internal/core/types.go (snake_case JSON tags). A real
+// tool result carries one shape; the view renders each shape it has received, so
+// delivering all three fills every section for the screenshot.
+interface HealthSummary {
+  attention_count: number;
+  available_attention_count: number;
+  omitted_attention_count: number;
+  attention_limit: number;
+  setup_todo_count: number;
+  missing_project_root: boolean;
+  open_handoff_count: number;
+  review_follow_up_count: number;
+  active_assignment_count: number;
+  blocked_assignment_count: number;
+  pending_memory_candidate_count: number;
+  project_skill_issue_count: number;
+}
+
+interface HealthAttentionItem {
+  kind: string;
+  severity: string;
+  status?: string;
+  title: string;
+  detail?: string;
+  action_kind?: string;
+  action_label?: string;
+}
+
+interface Health {
+  project_id: string;
+  status: string;
+  title: string;
+  detail?: string;
+  summary: HealthSummary;
+  attention: HealthAttentionItem[];
+}
+
+interface OperationsCounts {
+  work_items: number;
+  open_work_items: number;
+  assignments: number;
+  active_assignments: number;
+  blocked_assignments: number;
+  pending_memory_candidates: number;
+  review_follow_ups: number;
+  missing_evidence: number;
+  open_handoffs: number;
+  closeout_ready: number;
+}
+
+interface OperationItem {
+  kind: string;
+  severity: string;
+  status?: string;
+  title: string;
+  detail?: string;
+}
+
+interface Operations {
+  project_id: string;
+  status: string;
+  title: string;
+  detail?: string;
+  counts: OperationsCounts;
+  items: OperationItem[];
+}
+
+interface ActivityCounts {
+  assignments: number;
+  queued: number;
+  claimed: number;
+  running: number;
+  awaiting_approval: number;
+  awaiting_review: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  other: number;
+  active: number;
+  blocked: number;
+}
+
+interface ActivityItem {
+  bucket: string;
+  work_item_id: string;
+  work_item_title?: string;
+  role_name?: string;
+  status: string;
+}
+
+interface ActivityBuckets {
+  active?: ActivityItem[];
+  blocked?: ActivityItem[];
+  completed?: ActivityItem[];
+  other?: ActivityItem[];
+  recent?: ActivityItem[];
+}
+
+interface Activity {
+  project_id: string;
+  counts: ActivityCounts;
+  buckets: ActivityBuckets;
+}
+
+// One tool-result payload is any of the three shapes the view understands.
+type StructuredContent = Health | Operations | Activity;
+
+// Host-injected helpers on the host page's window (see hostHtml below). Declared
+// so the page.evaluate / waitForFunction callbacks that run in the host page are
+// typed without casts.
+declare global {
+  interface Window {
+    __hostLog?: string[];
+    __deliver: (structuredContent: StructuredContent) => void;
+  }
+}
+
+const health: Health = {
   project_id: "proj_demo",
   status: "attention",
   title: "3 items need attention",
@@ -72,7 +182,7 @@ const health = {
   ],
 };
 
-const operations = {
+const operations: Operations = {
   project_id: "proj_demo",
   status: "attention",
   title: "Next: unblock deploy approval",
@@ -105,7 +215,7 @@ const operations = {
   ],
 };
 
-const activity = {
+const activity: Activity = {
   project_id: "proj_demo",
   counts: {
     assignments: 5,
@@ -203,10 +313,10 @@ const hostHtml = `<!doctype html>
 const hostFile = join(tmpdir(), `cairnline-verify-host-${process.pid}.html`);
 writeFileSync(hostFile, hostHtml, "utf8");
 
-const browser = await chromium.launch();
-const page = await browser.newPage();
+const browser: Browser = await chromium.launch();
+const page: Page = await browser.newPage();
 
-const errors = [];
+const errors: string[] = [];
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 page.on("console", (m) => {
   if (m.type() === "error") errors.push(`console.error: ${m.text()}`);
@@ -214,8 +324,9 @@ page.on("console", (m) => {
 
 await page.goto("file://" + hostFile, { waitUntil: "load" });
 
-const viewFrame = () => page.frames().find((f) => f.url().includes("project-status"));
-const deliver = (structuredContent) => page.evaluate((sc) => window.__deliver(sc), structuredContent);
+const viewFrame = (): Frame | undefined => page.frames().find((f) => f.url().includes("project-status"));
+const deliver = (structuredContent: StructuredContent): Promise<void> =>
+  page.evaluate((sc) => window.__deliver(sc), structuredContent);
 
 // The view must complete the request/response handshake before signaling ready:
 // it should not post ui/notifications/initialized until the host answers
@@ -237,16 +348,17 @@ for (const structuredContent of [health, operations, activity]) {
 }
 
 const frame = viewFrame();
+if (!frame) throw new Error("project-status view iframe not found");
 await frame.waitForFunction(
   () => {
     const root = document.getElementById("root");
-    return !!root && root.textContent.includes("Activity");
+    return !!root && (root.textContent ?? "").includes("Activity");
   },
   null,
   { timeout: 15000 },
 );
 
-const rendered = await frame.evaluate(() => document.getElementById("root").textContent);
+const rendered = await frame.evaluate(() => document.getElementById("root")?.textContent ?? "");
 const expected = [
   "Project health",
   "3 items need attention",
@@ -263,7 +375,7 @@ await page.screenshot({ path: screenshotPath, fullPage: true });
 // State-bleed check: a result for a different project_id must reset the view so
 // none of the first project's sections survive. Deliver a health result for a
 // new project and assert the prior project's content is gone.
-const otherHealth = {
+const otherHealth: Health = {
   project_id: "proj_other",
   status: "clear",
   title: "Second project is clear",
@@ -274,12 +386,12 @@ await deliver(otherHealth);
 await frame.waitForFunction(
   () => {
     const root = document.getElementById("root");
-    return !!root && root.textContent.includes("Second project is clear");
+    return !!root && (root.textContent ?? "").includes("Second project is clear");
   },
   null,
   { timeout: 15000 },
 );
-const afterSwitch = await frame.evaluate(() => document.getElementById("root").textContent);
+const afterSwitch = await frame.evaluate(() => document.getElementById("root")?.textContent ?? "");
 const bled = [
   "3 items need attention", // first project's health title
   "Operations brief", // first project's operations section

@@ -10,9 +10,15 @@
   },
   "scripts": {
     "build": "bun run build.ts",
-    "verify": "node verify/verify.mjs"
+    "typecheck": "tsc --noEmit",
+    "verify": "bun verify/verify.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.7",
+    "playwright": "1.56.1",
+    "typescript": "5.7.3"
   }
 }

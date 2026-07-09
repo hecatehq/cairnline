@@ -57,7 +57,7 @@ All of the following is enforced in `internal/app/apps.go` and
     **request** (params carry the app info + `availableDisplayModes`), waits for the
     host's `McpUiInitializeResult` **response**, then posts a
     `ui/notifications/initialized` **notification**. The `App` enforces that
-    request→response→initialized ordering; `verify.mjs` asserts it.
+    request→response→initialized ordering; `verify.ts` asserts it.
   - **Host → view:** delivers the tool result as a `ui/notifications/tool-result`
     notification whose `params` are a standard `CallToolResult`. The SDK routes it
     to `app.ontoolresult`; the handler reads `result.structuredContent` and renders.
@@ -139,7 +139,7 @@ One stateless view backs three tools. Read these files together:
      `_meta.ui.resourceUri`; the extension is present with an app and absent
      without one; the embedded HTML is non-empty and looks like the built
      document.
-   - **Headless render check.** Extend `internal/app/views/verify/verify.mjs`
+   - **Headless render check.** Extend `internal/app/views/verify/verify.ts`
      with representative fixtures for the new shapes and assert the key text
      rendered (see the verification ladder). The harness renders the view inside a
      **sandboxed iframe** whose parent plays the host and answers `ui/initialize`,
@@ -234,9 +234,9 @@ any console/CSP/page error. It is a reproducibility aid, **not** part of
 
 ```sh
 cd internal/app/views
-NODE_PATH=/opt/node22/lib/node_modules \
+bun install
 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-node verify/verify.mjs [screenshot-path]
+bun verify/verify.ts [screenshot-path]
 ```
 
 Done criteria: `go vet` and `go test` (and `-race` for transport/server work)

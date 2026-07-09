@@ -49,7 +49,7 @@ from source. A contributor who edits `src/` without rebuilding is caught in CI.
   `ProjectOperationsBrief`, `ProjectActivity`).
 - `build.ts` — the bundler.
 - `dist/` — committed, embedded output.
-- `verify/verify.mjs` — headless Chromium render check (see below).
+- `verify/verify.ts` — headless Chromium render check (see below).
 
 ## Host <-> view bridge
 
@@ -66,7 +66,7 @@ The view uses the official `@modelcontextprotocol/ext-apps` SDK. `new App(...)`:
 Because the SDK is a full JSON-RPC peer, the view must run in an iframe whose
 parent is the host (as real hosts render it): at top level `window.parent` is the
 view itself, which would answer its own `ui/initialize` with `-32601`. The
-`verify/verify.mjs` harness embeds the view in a sandboxed iframe accordingly.
+`verify/verify.ts` harness embeds the view in a sandboxed iframe accordingly.
 
 ## CSP / sandbox posture
 
@@ -82,13 +82,15 @@ network origin). Hosts render the view in a sandboxed iframe.
 ## Verify (headless render check)
 
 ```sh
-NODE_PATH=/opt/node22/lib/node_modules \
+bun install
 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-node verify/verify.mjs [screenshot-path]
+bun verify/verify.ts [screenshot-path]
 ```
 
 Renders `dist/project-status.html` in a sandboxed iframe under its real CSP,
 plays the host side of the `ui/initialize` handshake, delivers representative
 health/operations/activity results over the tool-result contract, asserts the
-key text rendered, and writes a screenshot. Requires the `playwright` package and
-its Chromium build; it is a reproducibility aid, not part of `go test`.
+key text rendered, and writes a screenshot. Requires the pinned `playwright`
+devDependency (`bun install`) and its Chromium build; it is a reproducibility
+aid, not part of `go test`. Type-check the views tree (both `src/` and the
+harness) with `bun run typecheck`.
