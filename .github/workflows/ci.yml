@@ -29,3 +29,33 @@ jobs:
 
       - name: Race
         run: go test -race ./...
+
+  views:
+    name: Views bundle freshness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: internal/app/views/.bun-version
+
+      # The embedded dist/*.html bundle is a committed build artifact. Rebuild it
+      # from source with the pinned Bun and fail if the committed bundle drifted,
+      # so a source edit that skipped `bun run build` cannot ship a stale view.
+      # The view bundles the @modelcontextprotocol/ext-apps SDK, so install the
+      # locked dependency tree first. --frozen-lockfile keeps the build pinned to
+      # the committed bun.lock; with pinned Bun + lockfile the minified output is
+      # byte-reproducible, so the freshness diff below stays deterministic.
+      - name: Install views dependencies
+        working-directory: internal/app/views
+        run: bun install --frozen-lockfile
+
+      - name: Rebuild embedded views bundle
+        working-directory: internal/app/views
+        run: bun run build
+
+      - name: Fail if committed bundle is stale
+        run: git diff --exit-code -- internal/app/views/dist

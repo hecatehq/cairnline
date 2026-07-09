@@ -159,7 +159,9 @@ func (s *Server) handleInitialize(raw json.RawMessage) (any, *RPCError) {
 		}
 	}
 	// params.Capabilities carries the client's extension declarations; parsing it
-	// keeps extension negotiation open even though Cairnline declares none yet.
+	// keeps extension negotiation open. Cairnline's own declared extensions (e.g.
+	// io.modelcontextprotocol/ui when an MCP Apps view is registered) are returned
+	// in the initialize result via capabilities().
 	return InitializeResult{
 		ProtocolVersion: DeclaredProtocolVersion,
 		Capabilities:    s.capabilities(),

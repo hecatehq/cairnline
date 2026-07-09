@@ -1,0 +1,22 @@
+{
+  // Typechecks the whole views tree (src/ browser views + verify/ Playwright
+  // harness) with `bun run typecheck`. Bun runs the .ts sources directly and the
+  // build bundles them, so this config only type-checks (noEmit); it emits
+  // nothing. DOM libs cover both the views and the in-browser page.evaluate
+  // callbacks in verify.ts; @types/node covers verify.ts's node builtins.
+  // build.ts is excluded: it relies on the Bun global, which this node-typed
+  // config does not carry.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src", "verify"]
+}

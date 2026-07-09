@@ -269,6 +269,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 			"required":["project_id"]
 		}`),
 		Annotations: readOnly,
+		Meta:        uiAppMeta(projectStatusAppURI),
 	}, projectOperationsBrief(service))
 
 	server.RegisterTool(mcp.Tool{
@@ -293,6 +294,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 			"required":["project_id"]
 		}`),
 		Annotations: readOnly,
+		Meta:        uiAppMeta(projectStatusAppURI),
 	}, projectHealth(service))
 
 	server.RegisterTool(mcp.Tool{
@@ -305,6 +307,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 			"required":["project_id"]
 		}`),
 		Annotations: readOnly,
+		Meta:        uiAppMeta(projectStatusAppURI),
 	}, projectActivity(service))
 
 	server.RegisterTool(mcp.Tool{

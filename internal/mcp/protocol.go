@@ -47,8 +47,9 @@ type InitializeParams struct {
 
 // ClientCapabilities carries the capability declarations a client sends during
 // initialize. Extensions mirrors the server-side extension map so a host can
-// negotiate optional protocol extensions; Cairnline parses it today and
-// declares no extensions of its own yet.
+// negotiate optional protocol extensions; Cairnline parses the client's
+// declarations and declares its own via DeclareExtension (e.g.
+// io.modelcontextprotocol/ui once an MCP Apps view is registered).
 type ClientCapabilities struct {
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty"`
 }

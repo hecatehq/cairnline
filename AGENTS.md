@@ -20,6 +20,15 @@ alpha and not stable.
   outside core.
 - Skill metadata never grants tools, writes, network, or approval bypass.
 
+## Skills
+
+Task-shaped contributor guidance for specific areas lives in `docs/skills/`.
+Reach for the relevant one before working in that area:
+
+| Skill | Use when |
+| --- | --- |
+| [`docs/skills/mcp-apps/SKILL.md`](docs/skills/mcp-apps/SKILL.md) | Adding or changing a `ui://` MCP Apps interactive view: the `io.modelcontextprotocol/ui` extension, `_meta.ui.resourceUri` tagging, the view↔host handshake, the strict-CSP view bundle, and the required tests. |
+
 ## Verification
 
 Run:
