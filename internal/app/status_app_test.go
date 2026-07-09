@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"flag"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -11,12 +14,23 @@ import (
 	"github.com/hecatehq/cairnline/internal/mcp"
 )
 
+// updateGolden regenerates the committed status-app golden fixtures from the
+// current projection output: `go test ./internal/app -run TestProjectStatusApp -update`.
+var updateGolden = flag.Bool("update", false, "update status-app golden fixtures")
+
 // projections stamp a fresh created_at per call, so normalize timestamps before
-// comparing two independent calls for structural equality.
+// comparing against the golden fixtures for structural equality.
 var timestampField = regexp.MustCompile(`"(created_at|updated_at)":"[^"]*"`)
 
 func normalizeTimestamps(raw []byte) string {
 	return timestampField.ReplaceAllString(string(raw), `"$1":"T"`)
+}
+
+// normalizeResult stamps the projection output into a deterministic form:
+// per-call timestamps become "T" and the generated project id becomes the
+// PROJECT_ID placeholder the golden fixtures use.
+func normalizeResult(raw []byte, projectID string) string {
+	return strings.ReplaceAll(normalizeTimestamps(raw), projectID, "PROJECT_ID")
 }
 
 // projectStatusToolNames are the projection tools the Project Status app backs.
@@ -37,10 +51,24 @@ func resultBytes(t *testing.T, response string) []byte {
 	return envelope.Result
 }
 
+// goldenFiles maps each projection tool to its committed golden fixture. The
+// fixtures capture the exact text + structuredContent a call returns for a
+// freshly created project, normalized (timestamps -> "T", project id ->
+// PROJECT_ID). They were generated from the projection output that predates the
+// Project Status app tag (PR #80 only added tool-descriptor _meta, never touched
+// the call result), so any future drift in a result body is caught here — not
+// just the presence or absence of the app tag.
+var goldenFiles = map[string]string{
+	"projects.health":           "testdata/status_app/health.golden.json",
+	"projects.operations_brief": "testdata/status_app/operations_brief.golden.json",
+	"projects.activity":         "testdata/status_app/activity.golden.json",
+}
+
 // Tagging the projection tools with the Project Status app must change only the
-// tool descriptor's _meta, never the tool-call result. This compares each
-// tagged tool's call result byte-for-byte against a reference server that
-// registers the same handlers without the app tag.
+// tool descriptor's _meta, never the tool-call result. This asserts each tagged
+// tool's call result equals its pre-#80 golden fixture byte-for-byte (after
+// deterministic normalization), so a change to the result body is caught, not
+// only a change to the tag.
 func TestProjectStatusApp_TagLeavesToolResultsUnchanged(t *testing.T) {
 	service := core.NewService(core.NewMemoryStore())
 	project, err := service.CreateProject(context.Background(), core.Project{Name: "Status demo"})
@@ -50,20 +78,24 @@ func TestProjectStatusApp_TagLeavesToolResultsUnchanged(t *testing.T) {
 
 	tagged := NewServer(service, "test")
 
-	// Reference server: same handlers over the same service, but no app _meta.
-	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: mcp.BoolPtr(true)}
-	schema := json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","minLength":1}},"required":["project_id"]}`)
-	reference := mcp.NewServer("cairnline", "test", "")
-	reference.RegisterTool(mcp.Tool{Name: "projects.health", InputSchema: schema, Annotations: readOnly}, projectHealth(service))
-	reference.RegisterTool(mcp.Tool{Name: "projects.operations_brief", InputSchema: schema, Annotations: readOnly}, projectOperationsBrief(service))
-	reference.RegisterTool(mcp.Tool{Name: "projects.activity", InputSchema: schema, Annotations: readOnly}, projectActivity(service))
-
 	for _, name := range projectStatusToolNames {
 		call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":{"project_id":"` + project.ID + `"}}}`
 		gotResult := resultBytes(t, appServerResponse(t, tagged, call))
-		wantResult := resultBytes(t, appServerResponse(t, reference, call))
-		if normalizeTimestamps(gotResult) != normalizeTimestamps(wantResult) {
-			t.Fatalf("%s call result changed by app tag:\n got=%s\nwant=%s", name, gotResult, wantResult)
+		got := normalizeResult(gotResult, project.ID)
+
+		path := goldenFiles[name]
+		if *updateGolden {
+			if err := os.WriteFile(filepath.FromSlash(path), []byte(got+"\n"), 0o644); err != nil {
+				t.Fatalf("update golden %s: %v", path, err)
+			}
+		}
+		wantBytes, err := os.ReadFile(filepath.FromSlash(path))
+		if err != nil {
+			t.Fatalf("read golden %s: %v", path, err)
+		}
+		want := strings.TrimRight(string(wantBytes), "\n")
+		if got != want {
+			t.Fatalf("%s call result drifted from golden %s:\n got=%s\nwant=%s\n(regenerate with -update after an intended change)", name, path, got, want)
 		}
 		// Guard against the tag leaking into the call result itself.
 		if strings.Contains(string(gotResult), "resourceUri") {
