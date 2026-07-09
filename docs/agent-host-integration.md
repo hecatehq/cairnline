@@ -155,6 +155,31 @@ Hosts should translate that packet into their own prompt format and enforce
 their own token, privacy, and egress policy before sending anything to a model
 or external process.
 
+## Mounting The MCP Server
+
+A host that embeds Cairnline in-process does not have to shell out to the stdio
+binary to speak MCP. The root package builds the fully-registered server and
+exposes a single per-message entry point, so the host can mount Cairnline's tool
+and resource surface on whatever transport it already runs.
+
+```go
+service := cairnline.NewMemoryService()          // or NewSQLiteService(ctx, path)
+server := cairnline.NewMCPServer(service, version)
+// Custom transport: feed each inbound JSON-RPC message through HandleMessage.
+resp, ok := server.HandleMessage(ctx, msg)       // ok == false for notifications (no response)
+// Or run the built-in stdio loop:
+// server.Serve(ctx, os.Stdin, os.Stdout)
+// Optionally advertise a protocol extension during initialize:
+// server.DeclareExtension("io.modelcontextprotocol/ui", nil)
+```
+
+`HandleMessage` processes one JSON-RPC message and returns the encoded response;
+`ok` is false for notifications, which produce no reply. `Serve` owns the stdio
+read/write loop and dispatches through the same path, so stdio behavior is
+identical whichever entry point the host uses. `DeclareExtension` advertises an
+optional protocol extension in the `initialize` capabilities under its extension
+id; Cairnline declares none by default, so a host opts in explicitly.
+
 ## Manual And Non-Agent Clients
 
 Cairnline should still be useful without an AI agent. A simple UI or script can:
