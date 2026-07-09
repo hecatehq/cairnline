@@ -153,22 +153,60 @@ page.on("console", (m) => {
   if (m.type() === "error") errors.push(`console.error: ${m.text()}`);
 });
 
+// Stand in for the host before the view's scripts run: answer the view's
+// ui/initialize request with an McpUiInitializeResult and record when the view
+// replies with ui/notifications/initialized, so the handshake ordering is
+// exercised end to end.
+await page.addInitScript(() => {
+  window.__hostLog = [];
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (message.method === "ui/initialize") {
+      window.__hostLog.push("initialize");
+      window.postMessage(
+        {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: "2026-01-26",
+            hostCapabilities: {},
+            hostInfo: { name: "cairnline-verify", version: "0.0.0" },
+            hostContext: { displayMode: "inline" },
+          },
+        },
+        "*",
+      );
+    } else if (message.method === "ui/notifications/initialized") {
+      window.__hostLog.push("initialized");
+    }
+  });
+});
+
 await page.goto("file://" + htmlPath, { waitUntil: "load" });
 
-// Deliver each shape as the host would: a ui/notifications/tool-result whose
-// params are a CallToolResult carrying structuredContent.
-await page.evaluate((fixtures) => {
-  for (const structuredContent of fixtures) {
+const deliver = (structuredContent) =>
+  page.evaluate((sc) => {
     window.postMessage(
-      {
-        jsonrpc: "2.0",
-        method: "ui/notifications/tool-result",
-        params: { content: [], structuredContent },
-      },
+      { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: { content: [], structuredContent: sc } },
       "*",
     );
-  }
-}, [health, operations, activity]);
+  }, structuredContent);
+
+// The view must complete the request/response handshake before signaling ready:
+// it should not post ui/notifications/initialized until the host answers
+// ui/initialize.
+await page.waitForFunction(() => {
+  const log = window.__hostLog || [];
+  return log.indexOf("initialize") !== -1 && log.indexOf("initialized") > log.indexOf("initialize");
+});
+
+// Deliver each shape as the host would: a ui/notifications/tool-result whose
+// params are a CallToolResult carrying structuredContent. All three share one
+// project_id, so the same-project results accumulate into one combined view.
+for (const structuredContent of [health, operations, activity]) {
+  await deliver(structuredContent);
+}
 
 await page.waitForFunction(() => {
   const root = document.getElementById("root");
@@ -188,6 +226,30 @@ const expected = [
 const missing = expected.filter((text) => !rendered.includes(text));
 
 await page.screenshot({ path: screenshotPath, fullPage: true });
+
+// State-bleed check: a result for a different project_id must reset the view so
+// none of the first project's sections survive. Deliver a health result for a
+// new project and assert the prior project's content is gone.
+const otherHealth = {
+  project_id: "proj_other",
+  status: "clear",
+  title: "Second project is clear",
+  summary: { ...health.summary, attention_count: 0 },
+  attention: [],
+};
+await deliver(otherHealth);
+await page.waitForFunction(() => {
+  const root = document.getElementById("root");
+  return !!root && root.textContent.includes("Second project is clear");
+});
+const afterSwitch = await page.evaluate(() => document.getElementById("root").textContent);
+const bled = [
+  "3 items need attention", // first project's health title
+  "Operations brief", // first project's operations section
+  "Activity", // first project's activity section
+  "Implement gateway retry",
+].filter((text) => afterSwitch.includes(text));
+
 await browser.close();
 
 if (errors.length > 0) {
@@ -198,4 +260,8 @@ if (missing.length > 0) {
   console.error("missing expected text: " + JSON.stringify(missing));
   process.exit(1);
 }
-console.log("OK: all sections rendered; screenshot -> " + screenshotPath);
+if (bled.length > 0) {
+  console.error("state bled across projects; stale text after project switch: " + JSON.stringify(bled));
+  process.exit(1);
+}
+console.log("OK: handshake ordered, all sections rendered, no cross-project bleed; screenshot -> " + screenshotPath);

@@ -322,11 +322,16 @@ grant no external origins; `connect-src` stays denied because postMessage needs
 no network. Hosts should still render every view in a sandboxed iframe and must
 not loosen the declared origins.
 
-### Statelessness / single view
+### Single view / per-project rendering
 
-Per the MCP Apps maturity guidance, views are stateless between calls and a
-single view backs all three projection tools. The view holds no cross-turn state:
-it renders whatever tool result the host delivers.
+A single view backs all three projection tools. Per the MCP Apps maturity
+guidance the view holds no durable cross-turn state; it keeps only light
+per-project state within a session so the health, operations-brief, and activity
+results for one project accumulate into a single combined view. That state is
+keyed on `project_id`: the first result carrying a different `project_id` resets
+every section, so one project's results can never bleed into another's. The view
+renders whatever tool result the host delivers and never persists beyond the
+session.
 
 ### Authoring a view (contributors)
 

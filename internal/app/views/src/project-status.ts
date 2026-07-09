@@ -1,10 +1,12 @@
 // Project Status view for Cairnline's MCP Apps (ui://) extension.
 //
-// One stateless, read-only view backs the projects.health,
-// projects.operations_brief, and projects.activity tools. A single view can
-// receive any of the three structuredContent shapes, so it detects which shape
-// arrived by distinctive fields and renders that section, keeping any sections
-// already populated from earlier tool results. All action_kind/action_label
+// One read-only view backs the projects.health, projects.operations_brief, and
+// projects.activity tools. A single view can receive any of the three
+// structuredContent shapes, so it detects which shape arrived by distinctive
+// fields and renders that section. The view holds only light per-project state:
+// results for the same project_id accumulate into one combined view, and the
+// first result carrying a different project_id resets every section so two
+// projects' results can never bleed together. All action_kind/action_label
 // hints render as inert badges: this batch never calls tools back from the view.
 //
 // The host<->view bridge is hand-rolled against the MCP Apps
@@ -121,7 +123,12 @@ interface ProjectActivity {
 
 type Structured = Record<string, unknown>;
 
+// State is keyed on the project the sections describe. When a tool-result
+// arrives for a different project_id than the one held, every section is
+// cleared before the new shape is stored, so results from one project never
+// bleed into another project's view.
 const state: {
+  projectId?: string;
   health?: ProjectHealth;
   operations?: ProjectOperationsBrief;
   activity?: ProjectActivity;
@@ -129,6 +136,21 @@ const state: {
 
 function isRecord(value: unknown): value is Structured {
   return typeof value === "object" && value !== null;
+}
+
+// resetForProject clears accumulated sections when the incoming project_id does
+// not match the project currently rendered. Same-project results merge; a new
+// project replaces the view. Payloads without a project_id keep the current
+// project (nothing to key on) rather than merging blindly.
+function resetForProject(data: Structured): void {
+  const projectId = typeof data.project_id === "string" ? data.project_id : undefined;
+  if (projectId === undefined) return;
+  if (state.projectId !== projectId) {
+    state.projectId = projectId;
+    state.health = undefined;
+    state.operations = undefined;
+    state.activity = undefined;
+  }
 }
 
 // Detect a shape by a field unique to it: health carries `summary`, activity
@@ -312,45 +334,64 @@ function render(): void {
 
 function ingest(structuredContent: unknown): void {
   if (!isRecord(structuredContent)) return;
+  resetForProject(structuredContent);
   classify(structuredContent);
   render();
 }
 
 interface JsonRpcMessage {
   jsonrpc?: string;
+  id?: number | string;
   method?: string;
+  result?: unknown;
   params?: { structuredContent?: unknown };
 }
 
 const APP_NAME = "cairnline-project-status";
 const APP_VERSION = "1.0.0";
+const INIT_REQUEST_ID = 1;
 
 function postToHost(message: Record<string, unknown>): void {
   // Views render inside a sandboxed iframe; the host is the parent window.
   window.parent.postMessage(message, "*");
 }
 
-// Host -> View: the host proxies a tool result to the view as a
-// ui/notifications/tool-result JSON-RPC notification whose params are a standard
-// MCP CallToolResult. Read structuredContent from it.
+let initialized = false;
+
+// The MCP Apps handshake is request/response ordered: the view sends the
+// ui/initialize request, waits for the host's McpUiInitializeResult response,
+// and only then sends the ui/notifications/initialized readiness notification.
+function markInitialized(): void {
+  if (initialized) return;
+  initialized = true;
+  postToHost({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
+}
+
+// Host -> View: the host answers ui/initialize with a JSON-RPC response and
+// proxies each tool result as a ui/notifications/tool-result notification whose
+// params are a standard MCP CallToolResult. Read structuredContent from it.
 window.addEventListener("message", (event: MessageEvent) => {
   const message = event.data as JsonRpcMessage | null;
   if (!message || message.jsonrpc !== "2.0") return;
+  // The ui/initialize response completes the handshake; a response carries the
+  // request id and no method.
+  if (message.method === undefined && message.id === INIT_REQUEST_ID) {
+    markInitialized();
+    return;
+  }
   if (message.method === "ui/notifications/tool-result") {
     ingest(message.params?.structuredContent);
   }
 });
 
-// View -> Host: announce the app during the initialize handshake, then signal
-// readiness. A spec host responds to ui/initialize; this read-only view does not
-// depend on the response, so it renders whenever the first tool-result arrives.
+// View -> Host: announce the app by sending the ui/initialize request. Readiness
+// is signaled from markInitialized() once the host's response arrives.
 postToHost({
   jsonrpc: "2.0",
-  id: 1,
+  id: INIT_REQUEST_ID,
   method: "ui/initialize",
   params: {
     appInfo: { name: APP_NAME, version: APP_VERSION },
     appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
   },
 });
-postToHost({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
