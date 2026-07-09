@@ -406,24 +406,43 @@ coordination substrate. It is still developed as a standalone, agent-neutral
 server first; Hecate is one integration client, not the host that defines the
 core model.
 
-Cairnline now has a public embeddable Go API. Hecate uses that in-process
-service as its first replacement path, while MCP remains the interoperability
-surface for external agents and other hosts.
+Cairnline ships a public embeddable Go API, and Hecate embeds it live today:
+Hecate pins Cairnline through `go.mod` and runs it as an in-process service. A
+sidecar connector mode also exists for running Cairnline out of process. MCP
+remains the interoperability surface for external agents and other hosts.
+
+Mirror-on-write is live. Hecate live-mirrors every portable project-coordination
+write family into the embedded Cairnline store: project identity,
+metadata/defaults, roots, context sources, skills, roles, work items,
+assignments, collaboration artifacts, handoffs, accepted memory, memory
+candidates, and Project Assistant proposal-ledger records.
 
 Current Hecate dogfood covers:
 
 - embedded Cairnline read-model projections for Hecate's project list/detail,
   setup, health, skills, memory, roles, work, assignment, collaboration,
   Project Assistant, chat-context, activity, closeout, and operations views
-- opt-in embedded write-authority switchpoints for portable project identity,
-  metadata/defaults, roots, context sources, skills, roles, work items,
-  assignments, collaboration artifacts, handoffs, accepted memory, memory
-  candidates, and Project Assistant proposal-ledger records
+- live write-mirroring of all the portable project-coordination families listed
+  above into the embedded Cairnline store
 - strict embedded mirror/parity probes, migration rehearsal evidence, rollback
   notes, and backend-status gates for deciding when Cairnline is authoritative
   for portable project coordination state
 - Cairnline-only project identity and project-work journeys in Hecate tests,
   where Hecate keeps only runtime/workspace overlays for task/chat execution
+
+Recent fidelity work (cairnline#76, merged 2026-07-09) added a structured
+`ExecutionRef`, a first-class `awaiting_approval` assignment status, and memory
+in assignment context packets, tightening how host runtime state maps onto
+Cairnline coordination records.
+
+An opt-in armed replacement mode is implemented and off by default. When an
+operator enables it, Cairnline becomes authoritative for portable project
+coordination and Hecate keeps only a runtime overlay for task/chat execution.
+Normal builds still default to Hecate-owned coordination with Cairnline mirrored
+alongside.
+
+These integration contracts are not stable yet. Cairnline is still alpha, and
+both the MCP surface and the embedded Go API can change.
 
 Hecate still owns native operator UI/UX, model gateway behavior, task runtime,
 External Agent supervision, approvals, traces, root discovery, and Git worktree
@@ -432,7 +451,7 @@ creation. Those are host/orchestrator responsibilities, not Cairnline core.
 Before Hecate can make Cairnline the default Projects backend in normal builds,
 the remaining integration work is:
 
-- keep replacement-status gates green under real dogfood, not only fixture tests
+- keep replacement-mode gates green under real dogfood, not only fixture tests
 - shrink Hecate compatibility-shadow code once cutover behavior is stable
 - package Cairnline as an additional local download for non-Hecate hosts
 - keep MCP contracts stable enough for MCP-pull/manual assignment workflows
