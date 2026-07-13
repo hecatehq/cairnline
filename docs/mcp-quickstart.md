@@ -109,6 +109,21 @@ Replace `WORK_ITEM_ID` with the generated work item id.
 
 Cairnline does not perform the launch for any of these modes.
 
+#### Optional: edit the queued assignment safely
+
+Read the assignment with `assignments.get`, then pass its exact coordination
+fields and `updated_at` back as the expected snapshot. Only the replacement
+fields may differ:
+
+```json
+{"jsonrpc":"2.0","id":"4-edit","method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","expected":{"work_item_id":"WORK_ITEM_ID","role_id":"ROLE_ID","root_id":"","execution_mode":"mcp_pull","desired_agent":{"kind":"any","skill_ids":["review"]}},"expected_updated_at":"ASSIGNMENT_UPDATED_AT","replacement":{"work_item_id":"WORK_ITEM_ID","role_id":"NEW_ROLE_ID","root_id":"","execution_mode":"manual","desired_agent":{"kind":"human","skill_ids":["review"]}}}}}
+```
+
+If the assignment was edited, claimed, or prepared after the read, the update
+returns a conflict. Re-read before deciding whether the new state should be
+changed. Breaking (alpha): `assignments.update` now uses this nested
+compare-and-set shape and no longer changes lifecycle or execution fields.
+
 ### 5. Let A Compatible Agent Find Work
 
 An agent can ask for queued assignments matching its kind and skills:
@@ -144,10 +159,20 @@ host does not need a side channel to recover promoted project memory. Skill
 metadata and source locators are provenance hints; Cairnline does not inject
 `SKILL.md` bodies or fetch source locators.
 
+After claiming, a host may attach its execution reference or generated context
+snapshot without marking work as started:
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claimed_by":"local-agent-reviewer","execution_ref":{"kind":"task_run","run_id":"local-run-1"},"context_snapshot_id":"HOST_CONTEXT_SNAPSHOT_ID"}}}
+```
+
+Preparation returns a conflict if the assignment is no longer claimed by that
+exact worker.
+
 ### 8. Mark It Running
 
 ```json
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"running","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
+{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"running","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
 ```
 
 `execution_ref` is a structured, host-neutral reference to the execution the
@@ -171,7 +196,7 @@ authoritative data.
 When the host pauses the execution on a human approval gate, report it:
 
 ```json
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"awaiting_approval","execution_ref":{"kind":"task_run","run_id":"local-run-1","pending_approvals":1}}}}
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"awaiting_approval","execution_ref":{"kind":"task_run","run_id":"local-run-1","pending_approvals":1}}}}
 ```
 
 `awaiting_approval` is a first-class assignment status so portable readers can
@@ -182,7 +207,7 @@ resolves. The approval object itself stays host-owned.
 ### 9. Record Evidence
 
 ```json
-{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"PROJECT_ID","work_item_id":"WORK_ITEM_ID","assignment_id":"ASSIGNMENT_ID","title":"Checklist review notes","body":"Reviewed the launch checklist and found two missing owner approvals.","locator":"notes://launch-checklist-review","source_kind":"note","external_id":"launch-review-1","provider":"local","trust_label":"agent_reported"}}}
+{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"evidence.record","arguments":{"project_id":"PROJECT_ID","work_item_id":"WORK_ITEM_ID","assignment_id":"ASSIGNMENT_ID","title":"Checklist review notes","body":"Reviewed the launch checklist and found two missing owner approvals.","locator":"notes://launch-checklist-review","source_kind":"note","external_id":"launch-review-1","provider":"local","trust_label":"agent_reported"}}}
 ```
 
 Evidence locators are stored as metadata. Clients must validate schemes before
@@ -191,7 +216,7 @@ rendering locators as links or opening them.
 ### 10. Complete The Assignment
 
 ```json
-{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"completed","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
+{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"completed","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
 ```
 
 Use `status:"failed"` when the agent cannot complete the work. The work item
@@ -200,7 +225,7 @@ remains durable coordination state for an operator or another agent to inspect.
 ### 11. Inspect Closeout Readiness
 
 ```json
-{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"work_items.closeout_readiness","arguments":{"project_id":"PROJECT_ID","work_item_id":"WORK_ITEM_ID"}}}
+{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"work_items.closeout_readiness","arguments":{"project_id":"PROJECT_ID","work_item_id":"WORK_ITEM_ID"}}}
 ```
 
 Closeout readiness is advisory. Cairnline tells the operator whether assignments,
@@ -213,13 +238,13 @@ Cairnline also exposes read-only resources for clients that prefer resource
 pickers over tool calls. Discover parameterized URI shapes:
 
 ```json
-{"jsonrpc":"2.0","id":12,"method":"resources/templates/list"}
+{"jsonrpc":"2.0","id":14,"method":"resources/templates/list"}
 ```
 
 Then read concrete resources such as the assignment launch packet:
 
 ```json
-{"jsonrpc":"2.0","id":13,"method":"resources/read","params":{"uri":"cairnline://projects/PROJECT_ID/assignments/ASSIGNMENT_ID/launch-packet"}}
+{"jsonrpc":"2.0","id":15,"method":"resources/read","params":{"uri":"cairnline://projects/PROJECT_ID/assignments/ASSIGNMENT_ID/launch-packet"}}
 ```
 
 ## Tool Error Shape

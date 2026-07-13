@@ -42,6 +42,78 @@ func TestServiceSnapshotRoundTripMemoryStore(t *testing.T) {
 	}
 }
 
+func TestServiceSnapshotImportPreservesTargetOnlyAssignmentHistory(t *testing.T) {
+	ctx := context.Background()
+	source := NewService(NewMemoryStore())
+	fixture := createSnapshotFixture(t, ctx, source)
+	snapshot, err := source.ExportSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("ExportSnapshot() error = %v", err)
+	}
+	target := NewService(NewMemoryStore())
+	if _, err := target.ImportSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("ImportSnapshot(first) error = %v", err)
+	}
+	if _, err := target.CreateArtifact(ctx, Artifact{
+		ID:           "art_target_only",
+		ProjectID:    fixture.projectID,
+		WorkItemID:   "work_snapshot",
+		AssignmentID: "asgn_snapshot",
+		Kind:         "decision_note",
+		Title:        "Target-only decision",
+		Body:         "Keep this target-only assignment history.",
+	}); err != nil {
+		t.Fatalf("CreateArtifact(target only) error = %v", err)
+	}
+	if _, err := target.CreateReview(ctx, Review{
+		ID:             "rev_target_only",
+		ProjectID:      fixture.projectID,
+		WorkItemID:     "work_snapshot",
+		AssignmentID:   "asgn_snapshot",
+		ReviewerRoleID: "role_architect",
+		Title:          "Target-only review",
+		Body:           "Keep this target-only review history.",
+		Verdict:        ReviewVerdictPass,
+	}); err != nil {
+		t.Fatalf("CreateReview(target only) error = %v", err)
+	}
+	if _, err := target.ImportSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("ImportSnapshot(second) error = %v", err)
+	}
+	artifacts, err := target.ListArtifacts(ctx, fixture.projectID, "work_snapshot")
+	if err != nil {
+		t.Fatalf("ListArtifacts() error = %v", err)
+	}
+	if !artifactIDPresent(artifacts, "art_target_only") {
+		t.Fatalf("artifacts = %+v, want target-only assignment history preserved", artifacts)
+	}
+	reviews, err := target.ListReviews(ctx, fixture.projectID, "work_snapshot")
+	if err != nil {
+		t.Fatalf("ListReviews() error = %v", err)
+	}
+	if !reviewIDPresent(reviews, "rev_target_only") {
+		t.Fatalf("reviews = %+v, want target-only assignment history preserved", reviews)
+	}
+}
+
+func artifactIDPresent(items []Artifact, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func reviewIDPresent(items []Review, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func TestServiceSnapshotRejectsUnsupportedVersion(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
@@ -156,8 +228,8 @@ func createSnapshotFixture(t *testing.T, ctx context.Context, service *Service) 
 	assignment.StartedAt = base.Add(2 * time.Minute)
 	assignment.CompletedAt = base.Add(4 * time.Minute)
 	assignment.UpdatedAt = assignment.CompletedAt
-	if _, err := service.store.UpdateAssignment(ctx, assignment); err != nil {
-		t.Fatalf("store.UpdateAssignment() error = %v", err)
+	if _, err := service.store.RestoreAssignmentSnapshot(ctx, assignment); err != nil {
+		t.Fatalf("store.RestoreAssignmentSnapshot() error = %v", err)
 	}
 	if _, err := service.CreateArtifact(ctx, Artifact{
 		ID:             "art_snapshot",

@@ -254,6 +254,9 @@ func TestMCPTools_CoordinationCapabilities(t *testing.T) {
 	if !containsString(capabilities.ExecutionModes, core.ExecutionMCPPull) || !containsString(capabilities.ExecutionModes, core.ExecutionExternalAdapter) {
 		t.Fatalf("execution modes = %+v, want portable execution ladder", capabilities.ExecutionModes)
 	}
+	if !containsString(capabilities.AssignmentStatuses, core.AssignmentAwaitingApproval) || !containsString(capabilities.AssignmentStatuses, core.AssignmentReview) {
+		t.Fatalf("assignment statuses = %+v, want approval and review states", capabilities.AssignmentStatuses)
+	}
 	if !containsString(capabilities.AgentHostOwns, "agent launch and supervision") ||
 		!containsString(capabilities.AgentHostOwns, "provider and model selection") ||
 		!containsString(capabilities.AgentHostOwns, "mapping desired_agent hints to host-specific agents or presets") {
@@ -662,6 +665,10 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if assignments[0].RootID != "root_review" {
 		t.Fatalf("assignment root = %q, want root_review", assignments[0].RootID)
 	}
+	expectedUpdatedAt, err := json.Marshal(assignments[0].UpdatedAt)
+	if err != nil {
+		t.Fatalf("Marshal(expected updated at) error = %v", err)
+	}
 	assignmentID := assignments[0].ID
 	updatedWork, err := service.CreateWorkItem(ctx, core.WorkItem{
 		ProjectID: project.ID,
@@ -673,7 +680,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("CreateWorkItem(updated) error = %v", err)
 	}
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_mode":"mcp_pull","desired_agent_kind":"codex","skill_ids":["review","backend","backend"],"status":"queued","execution_ref":{"kind":"chat_session","session_id":"chat-1"},"context_snapshot_id":"ctx-1"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"assignments.update","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","expected":{"work_item_id":"` + work.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_mode":"mcp_pull","desired_agent":{"kind":"any","skill_ids":["review"]}},"expected_updated_at":` + string(expectedUpdatedAt) + `,"replacement":{"work_item_id":"` + updatedWork.ID + `","role_id":"` + role.ID + `","root_id":"root_review","execution_mode":"mcp_pull","desired_agent":{"kind":"specialist","skill_ids":["review","backend","backend"]}}}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -691,10 +698,10 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 		t.Fatalf("update assignment response did not unmarshal: %v\n%s", err, output.String())
 	}
 	updatedAssignment := updateAssignmentResponse.Result.StructuredContent
-	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.ContextSnapshotID != "ctx-1" {
+	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.ExecutionMode != core.ExecutionMCPPull || updatedAssignment.Status != core.AssignmentQueued || updatedAssignment.ContextSnapshotID != "" {
 		t.Fatalf("updated assignment = %+v, want retargeted assignment metadata", updatedAssignment)
 	}
-	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" {
+	if updatedAssignment.DesiredAgent.Kind != "specialist" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" {
 		t.Fatalf("updated assignment desired agent = %+v, want normalized desired agent", updatedAssignment.DesiredAgent)
 	}
 	work = updatedWork
@@ -808,6 +815,17 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Claimed assignment "+assignmentID+" by agent-a") {
 		t.Fatalf("claim assignment response = %s", output.String())
+	}
+
+	input = strings.NewReader(
+		`{"jsonrpc":"2.0","id":63,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claimed_by":"agent-a","execution_ref":{"session_id":"session-1"},"context_snapshot_id":"ctx-prepared"}}}` + "\n",
+	)
+	output.Reset()
+	if err := server.Serve(ctx, input, &output); err != nil {
+		t.Fatalf("Serve() prepare error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Prepared assignment "+assignmentID) || !strings.Contains(output.String(), `"context_snapshot_id":"ctx-prepared"`) {
+		t.Fatalf("prepare assignment response = %s", output.String())
 	}
 
 	input = strings.NewReader(

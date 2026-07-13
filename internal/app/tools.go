@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hecatehq/cairnline/internal/core"
 	"github.com/hecatehq/cairnline/internal/mcp"
@@ -682,34 +683,50 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.update",
-		Title:       "Update assignment metadata",
-		Description: "Update assignment coordination metadata such as work item, role, root, execution mode, desired agent, status, and context refs.",
+		Title:       "Update queued assignment metadata",
+		Description: "Compare and replace coordination metadata on a pristine queued assignment. Returns a conflict if the assignment changed or was claimed after it was read.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
-				"work_item_id":{"type":"string","minLength":1},
-				"role_id":{"type":"string","minLength":1},
-				"root_id":{"type":"string"},
-				"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
-				"desired_agent_kind":{"type":"string"},
-				"skill_ids":{"type":"array","items":{"type":"string"}},
-				"status":{"type":"string","enum":["queued","claimed","running","awaiting_approval","awaiting_review","completed","failed","cancelled"]},
-				"execution_ref":{
+				"expected":{
 					"type":"object",
 					"properties":{
-						"kind":{"type":"string"},
-						"task_id":{"type":"string"},
-						"run_id":{"type":"string"},
-						"session_id":{"type":"string"},
-						"trace_id":{"type":"string"},
-						"pending_approvals":{"type":"integer","minimum":0}
-					}
+						"work_item_id":{"type":"string","minLength":1},
+						"role_id":{"type":"string","minLength":1},
+						"root_id":{"type":"string"},
+						"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
+						"desired_agent":{
+							"type":"object",
+							"properties":{
+								"kind":{"type":"string"},
+								"skill_ids":{"type":"array","items":{"type":"string"}}
+							}
+						}
+					},
+					"required":["work_item_id","role_id","execution_mode"]
 				},
-				"context_snapshot_id":{"type":"string"}
+				"expected_updated_at":{"type":"string","format":"date-time"},
+				"replacement":{
+					"type":"object",
+					"properties":{
+						"work_item_id":{"type":"string","minLength":1},
+						"role_id":{"type":"string","minLength":1},
+						"root_id":{"type":"string"},
+						"execution_mode":{"type":"string","enum":["manual","mcp_pull","external_adapter","orchestrated"]},
+						"desired_agent":{
+							"type":"object",
+							"properties":{
+								"kind":{"type":"string"},
+								"skill_ids":{"type":"array","items":{"type":"string"}}
+							}
+						}
+					},
+					"required":["work_item_id","role_id","execution_mode"]
+				}
 			},
-			"required":["project_id","assignment_id","work_item_id","role_id"]
+			"required":["project_id","assignment_id","expected","expected_updated_at","replacement"]
 		}`),
 	}, updateAssignment(service))
 
@@ -727,6 +744,37 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 			"required":["project_id","assignment_id","claimed_by"]
 		}`),
 	}, claimAssignment(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.prepare",
+		Title:       "Prepare claimed assignment",
+		Description: "Attach host execution or context references while the assignment is still claimed by the expected worker. This does not mark work as started.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1},
+				"claimed_by":{"type":"string","minLength":1},
+				"execution_ref":{
+					"type":"object",
+					"properties":{
+						"kind":{"type":"string"},
+						"task_id":{"type":"string"},
+						"run_id":{"type":"string"},
+						"session_id":{"type":"string"},
+						"trace_id":{"type":"string"},
+						"pending_approvals":{"type":"integer","minimum":0}
+					}
+				},
+				"context_snapshot_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id","claimed_by"],
+			"anyOf":[
+				{"required":["execution_ref"]},
+				{"required":["context_snapshot_id"]}
+			]
+		}`),
+	}, prepareAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.release",
@@ -1338,6 +1386,7 @@ func coordinationCapabilities(version string) mcp.ToolHandler {
 				core.AssignmentQueued,
 				core.AssignmentClaimed,
 				core.AssignmentRunning,
+				core.AssignmentAwaitingApproval,
 				core.AssignmentReview,
 				core.AssignmentCompleted,
 				core.AssignmentFailed,
@@ -2635,37 +2684,21 @@ func createAssignment(service *core.Service) mcp.ToolHandler {
 
 func updateAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID         string            `json:"project_id"`
-		AssignmentID      string            `json:"assignment_id"`
-		WorkItemID        string            `json:"work_item_id"`
-		RoleID            string            `json:"role_id"`
-		RootID            string            `json:"root_id"`
-		ExecutionMode     string            `json:"execution_mode"`
-		DesiredAgentKind  string            `json:"desired_agent_kind"`
-		SkillIDs          []string          `json:"skill_ids"`
-		Status            string            `json:"status"`
-		ExecutionRef      core.ExecutionRef `json:"execution_ref"`
-		ContextSnapshotID string            `json:"context_snapshot_id"`
+		ProjectID         string                      `json:"project_id"`
+		AssignmentID      string                      `json:"assignment_id"`
+		Expected          core.AssignmentCoordination `json:"expected"`
+		ExpectedUpdatedAt time.Time                   `json:"expected_updated_at"`
+		Replacement       core.AssignmentCoordination `json:"replacement"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.UpdateAssignment(ctx, core.Assignment{
-			ProjectID:     input.ProjectID,
-			ID:            input.AssignmentID,
-			WorkItemID:    input.WorkItemID,
-			RoleID:        input.RoleID,
-			RootID:        input.RootID,
-			ExecutionMode: input.ExecutionMode,
-			Status:        input.Status,
-			DesiredAgent: core.DesiredAgent{
-				Kind:     input.DesiredAgentKind,
-				SkillIDs: input.SkillIDs,
-			},
-			ExecutionRef:      input.ExecutionRef,
-			ContextSnapshotID: input.ContextSnapshotID,
+		item, err := service.UpdateQueuedAssignment(ctx, input.ProjectID, input.AssignmentID, core.QueuedAssignmentUpdate{
+			Expected:          input.Expected,
+			ExpectedUpdatedAt: input.ExpectedUpdatedAt,
+			Replacement:       input.Replacement,
 		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
@@ -2701,6 +2734,34 @@ func claimAssignment(service *core.Service) mcp.ToolHandler {
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Claimed assignment %s by %s", item.ID, item.ClaimedBy)),
+		}, nil
+	}
+}
+
+func prepareAssignment(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID         string            `json:"project_id"`
+		AssignmentID      string            `json:"assignment_id"`
+		ClaimedBy         string            `json:"claimed_by"`
+		ExecutionRef      core.ExecutionRef `json:"execution_ref"`
+		ContextSnapshotID string            `json:"context_snapshot_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, invalidArguments(err)
+		}
+		item, err := service.PrepareAssignment(ctx, input.ProjectID, input.AssignmentID, core.AssignmentPreparation{
+			ClaimedBy:         input.ClaimedBy,
+			ExecutionRef:      input.ExecutionRef,
+			ContextSnapshotID: input.ContextSnapshotID,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Prepared assignment %s", item.ID)),
+			StructuredContent: item,
 		}, nil
 	}
 }

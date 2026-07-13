@@ -434,6 +434,39 @@ type Assignment struct {
 	CompletedAt       time.Time    `json:"completed_at,omitempty"`
 }
 
+type AssignmentCoordination struct {
+	WorkItemID    string       `json:"work_item_id"`
+	RoleID        string       `json:"role_id"`
+	RootID        string       `json:"root_id,omitempty"`
+	ExecutionMode string       `json:"execution_mode"`
+	DesiredAgent  DesiredAgent `json:"desired_agent,omitempty"`
+}
+
+type QueuedAssignmentUpdate struct {
+	Expected          AssignmentCoordination `json:"expected"`
+	ExpectedUpdatedAt time.Time              `json:"expected_updated_at"`
+	Replacement       AssignmentCoordination `json:"replacement"`
+}
+
+type AssignmentPreparation struct {
+	ClaimedBy         string       `json:"claimed_by"`
+	ExecutionRef      ExecutionRef `json:"execution_ref,omitzero"`
+	ContextSnapshotID string       `json:"context_snapshot_id,omitempty"`
+}
+
+func (assignment Assignment) Coordination() AssignmentCoordination {
+	return AssignmentCoordination{
+		WorkItemID:    assignment.WorkItemID,
+		RoleID:        assignment.RoleID,
+		RootID:        assignment.RootID,
+		ExecutionMode: assignment.ExecutionMode,
+		DesiredAgent: DesiredAgent{
+			Kind:     assignment.DesiredAgent.Kind,
+			SkillIDs: append([]string(nil), assignment.DesiredAgent.SkillIDs...),
+		},
+	}
+}
+
 type AssignmentCompatibilityFilter struct {
 	Status         string
 	ExecutionModes []string
