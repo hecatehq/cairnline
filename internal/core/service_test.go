@@ -1472,22 +1472,21 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkItem(updated target) error = %v", err)
 	}
-	updatedAssignment, err := service.UpdateAssignment(ctx, Assignment{
-		ProjectID:     project.ID,
-		ID:            assignment.ID,
-		WorkItemID:    updatedWork.ID,
-		RoleID:        implementer.ID,
-		ExecutionMode: ExecutionExternalAdapter,
-		Status:        AssignmentQueued,
-		DesiredAgent: DesiredAgent{
-			Kind:     "codex",
-			SkillIDs: []string{"review", "backend", "backend"},
+	updatedAssignment, err := service.UpdateQueuedAssignment(ctx, project.ID, assignment.ID, QueuedAssignmentUpdate{
+		Expected:          assignment.Coordination(),
+		ExpectedUpdatedAt: assignment.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    updatedWork.ID,
+			RoleID:        implementer.ID,
+			ExecutionMode: ExecutionExternalAdapter,
+			DesiredAgent: DesiredAgent{
+				Kind:     "codex",
+				SkillIDs: []string{"review", "backend", "backend"},
+			},
 		},
-		ExecutionRef:      ExecutionRef{SessionID: "chat-1"},
-		ContextSnapshotID: "ctx-1",
 	})
 	if err != nil {
-		t.Fatalf("UpdateAssignment() error = %v", err)
+		t.Fatalf("UpdateQueuedAssignment() error = %v", err)
 	}
 	if updatedAssignment.WorkItemID != updatedWork.ID || updatedAssignment.RoleID != implementer.ID || updatedAssignment.ExecutionMode != ExecutionExternalAdapter {
 		t.Fatalf("updated assignment = %+v, want replacement metadata", updatedAssignment)
@@ -1495,28 +1494,30 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if updatedAssignment.CreatedAt != assignment.CreatedAt {
 		t.Fatalf("updated assignment created_at = %s, want original %s", updatedAssignment.CreatedAt, assignment.CreatedAt)
 	}
-	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" || updatedAssignment.ExecutionRef != (ExecutionRef{SessionID: "chat-1"}) || updatedAssignment.ContextSnapshotID != "ctx-1" {
-		t.Fatalf("updated assignment desired/context = %+v/%q/%q, want normalized desired agent and refs", updatedAssignment.DesiredAgent, updatedAssignment.ExecutionRef.SessionID, updatedAssignment.ContextSnapshotID)
+	if updatedAssignment.DesiredAgent.Kind != "codex" || len(updatedAssignment.DesiredAgent.SkillIDs) != 2 || updatedAssignment.DesiredAgent.SkillIDs[1] != "backend" || !updatedAssignment.ExecutionRef.Empty() || updatedAssignment.ContextSnapshotID != "" {
+		t.Fatalf("updated assignment desired/context = %+v/%q/%q, want normalized desired agent and pristine refs", updatedAssignment.DesiredAgent, updatedAssignment.ExecutionRef.SessionID, updatedAssignment.ContextSnapshotID)
 	}
-	if _, err := service.UpdateAssignment(ctx, Assignment{
-		ProjectID:     project.ID,
-		ID:            assignment.ID,
-		WorkItemID:    "missing",
-		RoleID:        implementer.ID,
-		ExecutionMode: ExecutionMCPPull,
-		Status:        AssignmentQueued,
+	if _, err := service.UpdateQueuedAssignment(ctx, project.ID, assignment.ID, QueuedAssignmentUpdate{
+		Expected:          updatedAssignment.Coordination(),
+		ExpectedUpdatedAt: updatedAssignment.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    "missing",
+			RoleID:        implementer.ID,
+			ExecutionMode: ExecutionMCPPull,
+		},
 	}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("UpdateAssignment(missing work item) error = %v, want ErrNotFound", err)
+		t.Fatalf("UpdateQueuedAssignment(missing work item) error = %v, want ErrNotFound", err)
 	}
-	if _, err := service.UpdateAssignment(ctx, Assignment{
-		ProjectID:     project.ID,
-		ID:            assignment.ID,
-		WorkItemID:    updatedWork.ID,
-		RoleID:        implementer.ID,
-		ExecutionMode: ExecutionMCPPull,
-		Status:        "paused",
+	if _, err := service.UpdateQueuedAssignment(ctx, project.ID, assignment.ID, QueuedAssignmentUpdate{
+		Expected:          updatedAssignment.Coordination(),
+		ExpectedUpdatedAt: updatedAssignment.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    updatedWork.ID,
+			RoleID:        implementer.ID,
+			ExecutionMode: "paused",
+		},
 	}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("UpdateAssignment(invalid status) error = %v, want ErrInvalid", err)
+		t.Fatalf("UpdateQueuedAssignment(invalid mode) error = %v, want ErrInvalid", err)
 	}
 	work = updatedWork
 	role = implementer
@@ -1532,6 +1533,17 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if claimed.Status != AssignmentClaimed || claimed.ClaimedBy != "agent-a" {
 		t.Fatalf("claimed assignment = %+v, want claimed by agent-a", claimed)
 	}
+	prepared, err := service.PrepareAssignment(ctx, project.ID, assignment.ID, AssignmentPreparation{
+		ClaimedBy:         "agent-a",
+		ExecutionRef:      ExecutionRef{SessionID: "chat-1"},
+		ContextSnapshotID: "ctx-1",
+	})
+	if err != nil {
+		t.Fatalf("PrepareAssignment() error = %v", err)
+	}
+	if prepared.Status != AssignmentClaimed || prepared.ExecutionRef.SessionID != "chat-1" || prepared.ContextSnapshotID != "ctx-1" || !prepared.StartedAt.IsZero() {
+		t.Fatalf("prepared assignment = %+v, want claimed refs without a start time", prepared)
+	}
 	running, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, ExecutionRef{RunID: "run-123"})
 	if err != nil {
 		t.Fatalf("UpdateAssignmentStatus() error = %v", err)
@@ -1542,27 +1554,6 @@ func TestService_AssignmentLifecycle(t *testing.T) {
 	if running.StartedAt.IsZero() || !running.CompletedAt.IsZero() {
 		t.Fatalf("running assignment timestamps = started:%s completed:%s, want started only", running.StartedAt, running.CompletedAt)
 	}
-	runningUpdated, err := service.UpdateAssignment(ctx, Assignment{
-		ProjectID:         project.ID,
-		ID:                assignment.ID,
-		WorkItemID:        work.ID,
-		RoleID:            role.ID,
-		ExecutionMode:     ExecutionOrchestrated,
-		Status:            AssignmentRunning,
-		DesiredAgent:      DesiredAgent{Kind: "hecate", SkillIDs: []string{"review"}},
-		ExecutionRef:      ExecutionRef{RunID: "run-456"},
-		ContextSnapshotID: "ctx-running",
-	})
-	if err != nil {
-		t.Fatalf("UpdateAssignment(running) error = %v", err)
-	}
-	if runningUpdated.Status != AssignmentRunning || runningUpdated.ClaimedBy != "agent-a" || runningUpdated.ExecutionMode != ExecutionOrchestrated || runningUpdated.ExecutionRef.RunID != "run-456" || runningUpdated.ContextSnapshotID != "ctx-running" {
-		t.Fatalf("running updated assignment = %+v, want metadata update preserving claim", runningUpdated)
-	}
-	if !runningUpdated.StartedAt.Equal(running.StartedAt) || !runningUpdated.CompletedAt.IsZero() {
-		t.Fatalf("running updated timestamps = started:%s completed:%s, want preserved started timestamp", runningUpdated.StartedAt, runningUpdated.CompletedAt)
-	}
-
 	packet, err := service.AssignmentContext(ctx, project.ID, assignment.ID)
 	if err != nil {
 		t.Fatalf("AssignmentContext() error = %v", err)
@@ -3526,9 +3517,348 @@ func TestService_ClaimAssignmentRaceHasOneWinner(t *testing.T) {
 	}
 }
 
-func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
+func TestService_QueuedAssignmentUpdateIsCompareAndSet(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Assignment edit safety"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	firstRole, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Researcher"})
+	if err != nil {
+		t.Fatalf("CreateRole(first) error = %v", err)
+	}
+	secondRole, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer", DefaultExecutionMode: ExecutionManual})
+	if err != nil {
+		t.Fatalf("CreateRole(second) error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Edit assignment safely"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:     project.ID,
+		WorkItemID:    work.ID,
+		RoleID:        firstRole.ID,
+		ExecutionMode: ExecutionMCPPull,
+		DesiredAgent:  DesiredAgent{Kind: DesiredAgentAny, SkillIDs: []string{"research"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	updated, err := service.UpdateQueuedAssignment(ctx, project.ID, assignment.ID, QueuedAssignmentUpdate{
+		Expected:          assignment.Coordination(),
+		ExpectedUpdatedAt: assignment.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    work.ID,
+			RoleID:        secondRole.ID,
+			ExecutionMode: ExecutionManual,
+			DesiredAgent:  DesiredAgent{Kind: "human"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateQueuedAssignment() error = %v", err)
+	}
+	if updated.RoleID != secondRole.ID || updated.ExecutionMode != ExecutionManual || updated.Status != AssignmentQueued || updated.ClaimedBy != "" {
+		t.Fatalf("updated assignment = %+v, want queued manual metadata", updated)
+	}
+	if !updated.ExecutionRef.Empty() || updated.ContextSnapshotID != "" || !updated.StartedAt.IsZero() || !updated.CompletedAt.IsZero() {
+		t.Fatalf("updated lifecycle = %+v, want empty lifecycle preserved", updated)
+	}
+	if _, err := service.UpdateQueuedAssignment(ctx, project.ID, assignment.ID, QueuedAssignmentUpdate{
+		Expected:          assignment.Coordination(),
+		ExpectedUpdatedAt: assignment.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    work.ID,
+			RoleID:        firstRole.ID,
+			ExecutionMode: ExecutionMCPPull,
+		},
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateQueuedAssignment(stale editor) error = %v, want ErrConflict", err)
+	}
+	contextual, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:         project.ID,
+		WorkItemID:        work.ID,
+		RoleID:            firstRole.ID,
+		ContextSnapshotID: "ctx-already-prepared",
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment(contextual) error = %v", err)
+	}
+	if _, err := service.UpdateQueuedAssignment(ctx, project.ID, contextual.ID, QueuedAssignmentUpdate{
+		Expected:          contextual.Coordination(),
+		ExpectedUpdatedAt: contextual.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    work.ID,
+			RoleID:        secondRole.ID,
+			ExecutionMode: ExecutionManual,
+		},
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateQueuedAssignment(context already prepared) error = %v, want ErrConflict", err)
+	}
+
+	claimed, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a")
+	if err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	if _, err := service.UpdateQueuedAssignment(ctx, project.ID, assignment.ID, QueuedAssignmentUpdate{
+		Expected:          updated.Coordination(),
+		ExpectedUpdatedAt: updated.UpdatedAt,
+		Replacement: AssignmentCoordination{
+			WorkItemID:    work.ID,
+			RoleID:        firstRole.ID,
+			ExecutionMode: ExecutionMCPPull,
+		},
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateQueuedAssignment(after claim) error = %v, want ErrConflict", err)
+	}
+	current, err := service.GetAssignment(ctx, project.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("GetAssignment() error = %v", err)
+	}
+	if current.Status != AssignmentClaimed || current.ClaimedBy != claimed.ClaimedBy || current.RoleID != secondRole.ID || current.ExecutionMode != ExecutionManual {
+		t.Fatalf("assignment after stale update = %+v, want claim and edited metadata preserved", current)
+	}
+}
+
+func TestService_TerminalAssignmentTransitionIsFirstWriterWins(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	stamp := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return stamp }
+	project, err := service.CreateProject(ctx, Project{Name: "Terminal transition safety"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Operator"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Finish once"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	cancelled, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionMode: ExecutionManual})
+	if err != nil {
+		t.Fatalf("CreateAssignment(cancelled) error = %v", err)
+	}
+	cancelled, err = service.CompleteAssignment(ctx, project.ID, cancelled.ID, AssignmentCancelled, ExecutionRef{})
+	if err != nil {
+		t.Fatalf("CompleteAssignment(cancelled) error = %v", err)
+	}
+	if !cancelled.StartedAt.IsZero() || !cancelled.CompletedAt.After(stamp) {
+		t.Fatalf("queued cancellation timestamps = started:%s completed:%s, want no fabricated start and a finish after creation", cancelled.StartedAt, cancelled.CompletedAt)
+	}
+	claimedOnly, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionMode: ExecutionManual})
+	if err != nil {
+		t.Fatalf("CreateAssignment(claimed completion) error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, claimedOnly.ID, "operator-a"); err != nil {
+		t.Fatalf("ClaimAssignment(claimed completion) error = %v", err)
+	}
+	claimedOnly, err = service.CompleteAssignment(ctx, project.ID, claimedOnly.ID, AssignmentCompleted, ExecutionRef{})
+	if err != nil {
+		t.Fatalf("CompleteAssignment(claimed completion) error = %v", err)
+	}
+	if claimedOnly.StartedAt.IsZero() || !claimedOnly.StartedAt.Equal(claimedOnly.CompletedAt) || !claimedOnly.CompletedAt.After(stamp) {
+		t.Fatalf("claimed completion timestamps = started:%s completed:%s, want equal transition timestamps after creation", claimedOnly.StartedAt, claimedOnly.CompletedAt)
+	}
+
+	assignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(race) error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, ExecutionRef{}); err != nil {
+		t.Fatalf("UpdateAssignmentStatus() error = %v", err)
+	}
+
+	statuses := []string{AssignmentCompleted, AssignmentFailed}
+	var wins atomic.Int32
+	var conflicts atomic.Int32
+	var wg sync.WaitGroup
+	for _, status := range statuses {
+		wg.Add(1)
+		go func(status string) {
+			defer wg.Done()
+			item, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, status, ExecutionRef{})
+			switch {
+			case err == nil:
+				if item.Status != status {
+					t.Errorf("CompleteAssignment(%s) returned status %q", status, item.Status)
+				}
+				wins.Add(1)
+			case errors.Is(err, ErrConflict):
+				conflicts.Add(1)
+			default:
+				t.Errorf("CompleteAssignment(%s) unexpected error = %v", status, err)
+			}
+		}(status)
+	}
+	wg.Wait()
+	if wins.Load() != 1 || conflicts.Load() != 1 {
+		t.Fatalf("terminal transition wins=%d conflicts=%d, want one of each", wins.Load(), conflicts.Load())
+	}
+	current, err := service.GetAssignment(ctx, project.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("GetAssignment() error = %v", err)
+	}
+	if current.Status != AssignmentCompleted && current.Status != AssignmentFailed {
+		t.Fatalf("terminal status = %q, want completed or failed", current.Status)
+	}
+	if _, err := service.UpdateAssignmentStatus(ctx, project.ID, assignment.ID, AssignmentRunning, ExecutionRef{}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateAssignmentStatus(after terminal) error = %v, want ErrConflict", err)
+	}
+
+	progressRace, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment(progress race) error = %v", err)
+	}
+	if _, err := service.ClaimAssignment(ctx, project.ID, progressRace.ID, "agent-b"); err != nil {
+		t.Fatalf("ClaimAssignment(progress race) error = %v", err)
+	}
+	start := make(chan struct{})
+	type transitionResult struct {
+		assignment Assignment
+		err        error
+	}
+	progressResult := make(chan transitionResult, 1)
+	completeResult := make(chan transitionResult, 1)
+	go func() {
+		<-start
+		item, err := service.UpdateAssignmentStatus(ctx, project.ID, progressRace.ID, AssignmentReview, ExecutionRef{})
+		progressResult <- transitionResult{assignment: item, err: err}
+	}()
+	go func() {
+		<-start
+		item, err := service.CompleteAssignment(ctx, project.ID, progressRace.ID, AssignmentCompleted, ExecutionRef{})
+		completeResult <- transitionResult{assignment: item, err: err}
+	}()
+	close(start)
+	completedResult := <-completeResult
+	if completedResult.err != nil {
+		t.Fatalf("CompleteAssignment(progress race) error = %v", completedResult.err)
+	}
+	if completedResult.assignment.Status != AssignmentCompleted {
+		t.Fatalf("CompleteAssignment(progress race) returned status = %q, want completed", completedResult.assignment.Status)
+	}
+	progressedResult := <-progressResult
+	if progressedResult.err != nil && !errors.Is(progressedResult.err, ErrConflict) {
+		t.Fatalf("UpdateAssignmentStatus(progress race) error = %v, want nil or ErrConflict", progressedResult.err)
+	}
+	if progressedResult.err == nil && progressedResult.assignment.Status != AssignmentReview {
+		t.Fatalf("UpdateAssignmentStatus(progress race) returned status = %q, want awaiting_review", progressedResult.assignment.Status)
+	}
+	progressRace, err = service.GetAssignment(ctx, project.ID, progressRace.ID)
+	if err != nil {
+		t.Fatalf("GetAssignment(progress race) error = %v", err)
+	}
+	if progressRace.Status != AssignmentCompleted {
+		t.Fatalf("progress race status = %q, want completed", progressRace.Status)
+	}
+	if progressRace.StartedAt.After(progressRace.CompletedAt) || progressRace.CompletedAt.After(progressRace.UpdatedAt) {
+		t.Fatalf("progress race timestamps = started:%s completed:%s updated:%s, want monotone lifecycle", progressRace.StartedAt, progressRace.CompletedAt, progressRace.UpdatedAt)
+	}
+}
+
+func TestService_AssignmentTransitionTimestampPreventsQueuedABA(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	stamp := time.Date(2026, 7, 13, 15, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return stamp }
+	project, err := service.CreateProject(ctx, Project{Name: "Assignment transition token"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Operator"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Do not accept stale edits"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	original, err := service.CreateAssignment(ctx, Assignment{
+		ProjectID:     project.ID,
+		WorkItemID:    work.ID,
+		RoleID:        role.ID,
+		ExecutionMode: ExecutionManual,
+		DesiredAgent:  DesiredAgent{Kind: "human", SkillIDs: []string{"review"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	claimed, err := service.ClaimAssignment(ctx, project.ID, original.ID, "operator-a")
+	if err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	released, err := service.ReleaseAssignment(ctx, project.ID, original.ID, "operator-a")
+	if err != nil {
+		t.Fatalf("ReleaseAssignment() error = %v", err)
+	}
+	if !claimed.UpdatedAt.After(original.UpdatedAt) || !released.UpdatedAt.After(claimed.UpdatedAt) {
+		t.Fatalf("transition timestamps = original:%s claimed:%s released:%s, want strict advancement", original.UpdatedAt, claimed.UpdatedAt, released.UpdatedAt)
+	}
+	if _, err := service.UpdateQueuedAssignment(ctx, project.ID, original.ID, QueuedAssignmentUpdate{
+		Expected:          original.Coordination(),
+		ExpectedUpdatedAt: original.UpdatedAt,
+		Replacement:       original.Coordination(),
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("UpdateQueuedAssignment(stale after claim/release) error = %v, want ErrConflict", err)
+	}
+
+	original.DesiredAgent.SkillIDs[0] = "mutated-outside-store"
+	current, err := service.GetAssignment(ctx, project.ID, original.ID)
+	if err != nil {
+		t.Fatalf("GetAssignment() error = %v", err)
+	}
+	if len(current.DesiredAgent.SkillIDs) != 1 || current.DesiredAgent.SkillIDs[0] != "review" {
+		t.Fatalf("stored desired skills = %+v, want defensive copy", current.DesiredAgent.SkillIDs)
+	}
+}
+
+func TestService_CompleteAssignmentCanSubmitQueuedOrClaimedForReview(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	project, err := service.CreateProject(ctx, Project{Name: "Review submission"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, Role{ProjectID: project.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Submit for review"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	for _, initial := range []string{AssignmentQueued, AssignmentClaimed} {
+		assignment, err := service.CreateAssignment(ctx, Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID, ExecutionMode: ExecutionManual})
+		if err != nil {
+			t.Fatalf("CreateAssignment(%s) error = %v", initial, err)
+		}
+		if initial == AssignmentClaimed {
+			if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "operator-a"); err != nil {
+				t.Fatalf("ClaimAssignment() error = %v", err)
+			}
+		}
+		review, err := service.CompleteAssignment(ctx, project.ID, assignment.ID, AssignmentReview, ExecutionRef{})
+		if err != nil {
+			t.Fatalf("CompleteAssignment(%s to review) error = %v", initial, err)
+		}
+		if review.Status != AssignmentReview || review.StartedAt.IsZero() || !review.CompletedAt.IsZero() {
+			t.Fatalf("%s to review assignment = %+v, want started nonterminal review", initial, review)
+		}
+	}
+}
+
+func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
 	project, err := service.CreateProject(ctx, Project{Name: "Release"})
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
@@ -3555,7 +3885,10 @@ func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 	}
 	startedAt := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
 	completedAt := startedAt.Add(time.Minute)
-	claimed, err = service.UpdateAssignment(ctx, Assignment{
+	if err := store.DeleteAssignment(ctx, project.ID, assignment.ID); err != nil {
+		t.Fatalf("DeleteAssignment(claim metadata fixture) error = %v", err)
+	}
+	claimed, err = store.CreateAssignment(ctx, Assignment{
 		ProjectID:         project.ID,
 		ID:                assignment.ID,
 		WorkItemID:        work.ID,
@@ -3569,7 +3902,7 @@ func TestService_ReleaseAssignmentClearsClaimForRetry(t *testing.T) {
 		CompletedAt:       completedAt,
 	})
 	if err != nil {
-		t.Fatalf("UpdateAssignment(claim metadata) error = %v", err)
+		t.Fatalf("CreateAssignment(claim metadata fixture) error = %v", err)
 	}
 	if _, err := service.ReleaseAssignment(ctx, project.ID, assignment.ID, "agent-b"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("ReleaseAssignment(wrong claimer) error = %v, want ErrConflict", err)

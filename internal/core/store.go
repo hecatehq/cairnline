@@ -40,9 +40,13 @@ type Store interface {
 	ListAssignments(ctx context.Context, projectID string) ([]Assignment, error)
 	GetAssignment(ctx context.Context, projectID, id string) (Assignment, error)
 	CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
-	UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
+	RestoreAssignmentSnapshot(ctx context.Context, assignment Assignment) (Assignment, error)
+	UpdateQueuedAssignment(ctx context.Context, projectID, id string, update QueuedAssignmentUpdate, now func() time.Time) (Assignment, error)
 	ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)
+	PrepareAssignment(ctx context.Context, projectID, id string, preparation AssignmentPreparation, now func() time.Time) (Assignment, error)
 	ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)
+	UpdateAssignmentStatus(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, now func() time.Time) (Assignment, error)
+	CompleteAssignment(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, now func() time.Time) (Assignment, error)
 	DeleteAssignment(ctx context.Context, projectID, id string) error
 
 	ListArtifacts(ctx context.Context, projectID, workItemID string) ([]Artifact, error)

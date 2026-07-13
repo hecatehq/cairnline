@@ -49,6 +49,68 @@ func TestStore_SnapshotImportExportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStore_SnapshotImportPreservesTargetOnlyAssignmentHistory(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "snapshot-target-history.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	snapshot := sqliteSnapshotFixture()
+	if _, err := service.ImportSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("ImportSnapshot(first) error = %v", err)
+	}
+	if _, err := service.CreateArtifact(ctx, core.Artifact{
+		ID:           "art_sqlite_target_only",
+		ProjectID:    "proj_sqlite_snapshot",
+		WorkItemID:   "work_sqlite",
+		AssignmentID: "asgn_sqlite",
+		Kind:         "decision_note",
+		Title:        "Target-only SQLite decision",
+		Body:         "Keep this target-only assignment history.",
+	}); err != nil {
+		t.Fatalf("CreateArtifact(target only) error = %v", err)
+	}
+	if _, err := service.CreateReview(ctx, core.Review{
+		ID:             "rev_sqlite_target_only",
+		ProjectID:      "proj_sqlite_snapshot",
+		WorkItemID:     "work_sqlite",
+		AssignmentID:   "asgn_sqlite",
+		ReviewerRoleID: "role_sqlite",
+		Title:          "Target-only SQLite review",
+		Body:           "Keep this target-only review history.",
+		Verdict:        core.ReviewVerdictPass,
+	}); err != nil {
+		t.Fatalf("CreateReview(target only) error = %v", err)
+	}
+	if _, err := service.ImportSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("ImportSnapshot(second) error = %v", err)
+	}
+	artifacts, err := service.ListArtifacts(ctx, "proj_sqlite_snapshot", "work_sqlite")
+	if err != nil {
+		t.Fatalf("ListArtifacts() error = %v", err)
+	}
+	foundArtifact := false
+	for _, artifact := range artifacts {
+		foundArtifact = foundArtifact || artifact.ID == "art_sqlite_target_only"
+	}
+	if !foundArtifact {
+		t.Fatalf("artifacts = %+v, want target-only assignment history preserved", artifacts)
+	}
+	reviews, err := service.ListReviews(ctx, "proj_sqlite_snapshot", "work_sqlite")
+	if err != nil {
+		t.Fatalf("ListReviews() error = %v", err)
+	}
+	foundReview := false
+	for _, review := range reviews {
+		foundReview = foundReview || review.ID == "rev_sqlite_target_only"
+	}
+	if !foundReview {
+		t.Fatalf("reviews = %+v, want target-only assignment history preserved", reviews)
+	}
+}
+
 func sqliteSnapshotFixture() core.Snapshot {
 	base := time.Date(2026, 6, 28, 15, 0, 0, 0, time.UTC)
 	return core.Snapshot{

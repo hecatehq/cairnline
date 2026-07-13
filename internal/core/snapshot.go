@@ -260,7 +260,7 @@ func upsertWorkItem(ctx context.Context, store Store, item WorkItem) error {
 func upsertAssignment(ctx context.Context, store Store, item Assignment) error {
 	if _, err := store.CreateAssignment(ctx, item); err != nil {
 		if errors.Is(err, ErrDuplicate) {
-			_, err = store.UpdateAssignment(ctx, item)
+			_, err = store.RestoreAssignmentSnapshot(ctx, item)
 		}
 		return err
 	}

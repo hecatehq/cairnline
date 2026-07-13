@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.Join(core.ErrInvalid, errors.New("sqlite path is required"))
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteConnectionDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -32,6 +33,14 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func sqliteConnectionDSN(path string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 }
 
 func (s *Store) Close() error {
@@ -816,7 +825,9 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 	return assignment, nil
 }
 
-func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+// RestoreAssignmentSnapshot atomically replaces an assignment during offline
+// snapshot import. Live callers must use the narrow transition methods below.
+func (s *Store) RestoreAssignmentSnapshot(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
 	if err := s.requireWorkItem(ctx, assignment.ProjectID, assignment.WorkItemID); err != nil {
 		return core.Assignment{}, err
 	}
@@ -831,64 +842,302 @@ func (s *Store) UpdateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ? WHERE project_id = ? AND id = ?`,
+	row := s.db.QueryRowContext(ctx, `UPDATE assignments
+		SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ?
+		WHERE project_id = ? AND id = ?
+		RETURNING `+assignmentColumnsSQL,
 		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
+	item, err := scanAssignment(row)
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
-	return assignment, requireAffected(result)
+	return item, nil
+}
+
+func (s *Store) UpdateQueuedAssignment(ctx context.Context, projectID, id string, update core.QueuedAssignmentUpdate, now func() time.Time) (core.Assignment, error) {
+	if err := s.requireWorkItem(ctx, projectID, update.Replacement.WorkItemID); err != nil {
+		return core.Assignment{}, err
+	}
+	if err := s.requireRole(ctx, projectID, update.Replacement.RoleID); err != nil {
+		return core.Assignment{}, err
+	}
+	desiredAgent, err := encodeJSON(update.Replacement.DesiredAgent)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	expectedDesiredAgent, err := encodeJSON(update.Expected.DesiredAgent)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	stamp := assignmentTransitionTime(current, now)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, desired_agent_json = ?, updated_at = ?
+		WHERE project_id = ? AND id = ?
+			AND work_item_id = ? AND role_id = ? AND root_id = ? AND execution_mode = ?
+			AND status = ? AND claimed_by = '' AND desired_agent_json = ?
+			AND execution_ref = '' AND context_snapshot_id = ''
+			AND updated_at = ? AND started_at = '' AND completed_at = ''
+		RETURNING `+assignmentColumnsSQL,
+		update.Replacement.WorkItemID, update.Replacement.RoleID, update.Replacement.RootID, update.Replacement.ExecutionMode, desiredAgent, encodeTime(stamp),
+		projectID, id,
+		update.Expected.WorkItemID, update.Expected.RoleID, update.Expected.RootID, update.Expected.ExecutionMode,
+		core.AssignmentQueued, expectedDesiredAgent,
+		encodeTime(update.ExpectedUpdatedAt))
+	return finishAssignmentTransition(tx, row)
 }
 
 func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (core.Assignment, error) {
-	stamp := time.Now().UTC()
-	if now != nil {
-		stamp = now()
-	}
-	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET status = ?, claimed_by = ?, updated_at = ? WHERE project_id = ? AND id = ? AND status = ?`,
-		core.AssignmentClaimed, claimedBy, encodeTime(stamp), projectID, id, core.AssignmentQueued)
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	if affected, err := result.RowsAffected(); err == nil && affected == 1 {
-		return s.GetAssignment(ctx, projectID, id)
-	}
-	if err := s.requireProject(ctx, projectID); err != nil {
-		return core.Assignment{}, err
-	}
-	item, err := s.GetAssignment(ctx, projectID, id)
-	if err != nil {
-		return core.Assignment{}, err
-	}
-	if item.Status != core.AssignmentQueued {
+	if current.Status != core.AssignmentQueued {
+		_ = tx.Rollback()
 		return core.Assignment{}, core.ErrConflict
 	}
-	return core.Assignment{}, core.ErrConflict
+	stamp := assignmentTransitionTime(current, now)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, claimed_by = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		core.AssignmentClaimed, claimedBy, encodeTime(stamp),
+		projectID, id, current.Status, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) PrepareAssignment(ctx context.Context, projectID, id string, preparation core.AssignmentPreparation, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if current.Status != core.AssignmentClaimed || current.ClaimedBy != preparation.ClaimedBy {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	executionRef := current.ExecutionRef
+	if !preparation.ExecutionRef.Empty() {
+		executionRef = preparation.ExecutionRef
+	}
+	encodedRef, err := encodeExecutionRef(executionRef)
+	if err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	contextSnapshotID := current.ContextSnapshotID
+	if preparation.ContextSnapshotID != "" {
+		contextSnapshotID = preparation.ContextSnapshotID
+	}
+	stamp := assignmentTransitionTime(current, now)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET execution_ref = ?, context_snapshot_id = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claimed_by = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		encodedRef, contextSnapshotID, encodeTime(stamp),
+		projectID, id, current.Status, current.ClaimedBy, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
 }
 
 func (s *Store) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if current.Status != core.AssignmentClaimed || current.ClaimedBy != claimedBy {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTime(current, now)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, claimed_by = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claimed_by = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		core.AssignmentQueued, encodeTime(stamp),
+		projectID, id, current.Status, current.ClaimedBy, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) CompleteAssignment(ctx context.Context, projectID, id, status string, executionRef core.ExecutionRef, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if terminalAssignmentStatus(current.Status) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTime(current, now)
+	startedAt := current.StartedAt
+	if startedAt.IsZero() && !(current.Status == core.AssignmentQueued && status == core.AssignmentCancelled) {
+		startedAt = stamp
+	}
+	completedAt := current.CompletedAt
+	if terminalAssignmentStatus(status) && completedAt.IsZero() {
+		completedAt = stamp
+	}
+	ref := current.ExecutionRef
+	if !executionRef.Empty() {
+		ref = executionRef
+	}
+	encodedRef, err := encodeExecutionRef(ref)
+	if err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, started_at = ?, completed_at = ?, execution_ref = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		status, encodeOptionalTime(startedAt), encodeOptionalTime(completedAt), encodedRef, encodeTime(stamp),
+		projectID, id, current.Status, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) UpdateAssignmentStatus(ctx context.Context, projectID, id, status string, executionRef core.ExecutionRef, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if current.Status == core.AssignmentQueued || terminalAssignmentStatus(current.Status) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTime(current, now)
+	startedAt := current.StartedAt
+	if startedAt.IsZero() {
+		startedAt = stamp
+	}
+	ref := current.ExecutionRef
+	if !executionRef.Empty() {
+		ref = executionRef
+	}
+	encodedRef, err := encodeExecutionRef(ref)
+	if err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, started_at = ?, execution_ref = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		status, encodeTime(startedAt), encodedRef, encodeTime(stamp),
+		projectID, id, current.Status, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+type assignmentTransition struct {
+	conn   *sql.Conn
+	active bool
+}
+
+func (s *Store) beginAssignmentTransition(ctx context.Context, projectID, id string) (*assignmentTransition, core.Assignment, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, core.Assignment{}, err
+	}
+	transition := &assignmentTransition{conn: conn}
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		_ = conn.Close()
+		return nil, core.Assignment{}, mapSQLiteWriteError(err)
+	}
+	transition.active = true
+	current, err := scanAssignment(transition.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, projectID, id))
+	if err != nil {
+		_ = transition.Rollback()
+		return nil, core.Assignment{}, err
+	}
+	return transition, current, nil
+}
+
+func (transition *assignmentTransition) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return transition.conn.QueryRowContext(ctx, query, args...)
+}
+
+func (transition *assignmentTransition) Rollback() error {
+	if !transition.active {
+		return nil
+	}
+	finalizeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, rollbackErr := transition.conn.ExecContext(finalizeCtx, `ROLLBACK`)
+	if rollbackErr != nil {
+		transition.discard()
+		return rollbackErr
+	}
+	transition.active = false
+	closeErr := transition.conn.Close()
+	return closeErr
+}
+
+func (transition *assignmentTransition) Commit() error {
+	if !transition.active {
+		return nil
+	}
+	commitCtx, cancelCommit := context.WithTimeout(context.Background(), 5*time.Second)
+	_, commitErr := transition.conn.ExecContext(commitCtx, `COMMIT`)
+	cancelCommit()
+	if commitErr != nil {
+		rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), 5*time.Second)
+		_, rollbackErr := transition.conn.ExecContext(rollbackCtx, `ROLLBACK`)
+		cancelRollback()
+		if rollbackErr != nil {
+			transition.discard()
+			return commitErr
+		}
+		transition.active = false
+		_ = transition.conn.Close()
+		return commitErr
+	}
+	transition.active = false
+	closeErr := transition.conn.Close()
+	return closeErr
+}
+
+func (transition *assignmentTransition) discard() {
+	transition.active = false
+	_ = transition.conn.Raw(func(any) error { return driver.ErrBadConn })
+	_ = transition.conn.Close()
+}
+
+func finishAssignmentTransition(transition *assignmentTransition, row *sql.Row) (core.Assignment, error) {
+	item, err := scanAssignment(row)
+	if err != nil {
+		_ = transition.Rollback()
+		if errors.Is(err, core.ErrNotFound) {
+			return core.Assignment{}, core.ErrConflict
+		}
+		return core.Assignment{}, mapSQLiteWriteError(err)
+	}
+	if err := transition.Commit(); err != nil {
+		return core.Assignment{}, mapSQLiteWriteError(err)
+	}
+	return item, nil
+}
+
+func assignmentTransitionTime(current core.Assignment, now func() time.Time) time.Time {
 	stamp := time.Now().UTC()
 	if now != nil {
 		stamp = now()
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE assignments SET status = ?, claimed_by = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ? WHERE project_id = ? AND id = ? AND status = ? AND claimed_by = ?`,
-		core.AssignmentQueued, encodeTime(stamp), projectID, id, core.AssignmentClaimed, claimedBy)
-	if err != nil {
-		return core.Assignment{}, err
+	if stamp.Before(current.StartedAt) {
+		stamp = current.StartedAt
 	}
-	if affected, err := result.RowsAffected(); err == nil && affected == 1 {
-		return s.GetAssignment(ctx, projectID, id)
+	if !stamp.After(current.UpdatedAt) {
+		stamp = current.UpdatedAt.Add(time.Nanosecond)
 	}
-	if err := s.requireProject(ctx, projectID); err != nil {
-		return core.Assignment{}, err
+	return stamp
+}
+
+func terminalAssignmentStatus(status string) bool {
+	switch status {
+	case core.AssignmentCompleted, core.AssignmentFailed, core.AssignmentCancelled:
+		return true
+	default:
+		return false
 	}
-	item, err := s.GetAssignment(ctx, projectID, id)
-	if err != nil {
-		return core.Assignment{}, err
-	}
-	if item.Status != core.AssignmentClaimed || item.ClaimedBy != claimedBy {
-		return core.Assignment{}, core.ErrConflict
-	}
-	return core.Assignment{}, core.ErrConflict
 }
 
 func (s *Store) DeleteAssignment(ctx context.Context, projectID, id string) error {
@@ -1490,7 +1739,8 @@ func (s *Store) UpdateAssistantProposal(ctx context.Context, record core.Assista
 	return record, nil
 }
 
-const assignmentSelectSQL = `SELECT project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`
+const assignmentColumnsSQL = `project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at`
+const assignmentSelectSQL = `SELECT ` + assignmentColumnsSQL + ` FROM assignments`
 
 const memoryCandidateSelectSQL = `SELECT project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at FROM memory_candidates`
 
@@ -1904,6 +2154,8 @@ func mapSQLiteWriteError(err error) error {
 		return core.ErrDuplicate
 	case strings.Contains(message, "FOREIGN KEY constraint failed"):
 		return core.ErrNotFound
+	case strings.Contains(message, "database is locked"), strings.Contains(message, "database table is locked"), strings.Contains(message, "SQLITE_BUSY"), strings.Contains(message, "SQLITE_LOCKED"):
+		return core.ErrConflict
 	default:
 		return err
 	}

@@ -365,7 +365,7 @@ func (s *MemoryStore) ListAssignments(ctx context.Context, projectID string) ([]
 	assignmentsByID := s.assignments[projectID]
 	items := make([]Assignment, 0, len(assignmentsByID))
 	for _, item := range assignmentsByID {
-		items = append(items, item)
+		items = append(items, cloneAssignment(item))
 	}
 	slices.SortFunc(items, func(a, b Assignment) int {
 		return b.UpdatedAt.Compare(a.UpdatedAt)
@@ -384,7 +384,7 @@ func (s *MemoryStore) GetAssignment(ctx context.Context, projectID, id string) (
 	if !ok {
 		return Assignment{}, ErrNotFound
 	}
-	return item, nil
+	return cloneAssignment(item), nil
 }
 
 func (s *MemoryStore) CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error) {
@@ -408,11 +408,14 @@ func (s *MemoryStore) CreateAssignment(ctx context.Context, assignment Assignmen
 	if _, ok := s.assignments[assignment.ProjectID][assignment.ID]; ok {
 		return Assignment{}, ErrDuplicate
 	}
-	s.assignments[assignment.ProjectID][assignment.ID] = assignment
-	return assignment, nil
+	stored := cloneAssignment(assignment)
+	s.assignments[assignment.ProjectID][assignment.ID] = stored
+	return cloneAssignment(stored), nil
 }
 
-func (s *MemoryStore) UpdateAssignment(ctx context.Context, assignment Assignment) (Assignment, error) {
+// RestoreAssignmentSnapshot atomically replaces an assignment during offline
+// snapshot import. It is intentionally not exposed through Service or MCP.
+func (s *MemoryStore) RestoreAssignmentSnapshot(ctx context.Context, assignment Assignment) (Assignment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -422,16 +425,88 @@ func (s *MemoryStore) UpdateAssignment(ctx context.Context, assignment Assignmen
 	if _, ok := s.workItems[assignment.ProjectID][assignment.WorkItemID]; !ok {
 		return Assignment{}, ErrNotFound
 	}
-	if assignment.RoleID != "" {
-		if _, ok := s.roles[assignment.ProjectID][assignment.RoleID]; !ok {
-			return Assignment{}, ErrNotFound
-		}
+	if _, ok := s.roles[assignment.ProjectID][assignment.RoleID]; !ok {
+		return Assignment{}, ErrNotFound
 	}
 	if _, ok := s.assignments[assignment.ProjectID][assignment.ID]; !ok {
 		return Assignment{}, ErrNotFound
 	}
-	s.assignments[assignment.ProjectID][assignment.ID] = assignment
-	return assignment, nil
+	stored := cloneAssignment(assignment)
+	s.assignments[assignment.ProjectID][assignment.ID] = stored
+	return cloneAssignment(stored), nil
+}
+
+func (s *MemoryStore) UpdateQueuedAssignment(ctx context.Context, projectID, id string, update QueuedAssignmentUpdate, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if _, ok := s.workItems[projectID][update.Replacement.WorkItemID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if _, ok := s.roles[projectID][update.Replacement.RoleID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	current, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if !queuedAssignmentSnapshotMatches(current, update) {
+		return Assignment{}, ErrConflict
+	}
+	current.WorkItemID = update.Replacement.WorkItemID
+	current.RoleID = update.Replacement.RoleID
+	current.RootID = update.Replacement.RootID
+	current.ExecutionMode = update.Replacement.ExecutionMode
+	current.DesiredAgent = cloneDesiredAgent(update.Replacement.DesiredAgent)
+	current.UpdatedAt = assignmentTransitionTime(current, now)
+	s.assignments[projectID][id] = cloneAssignment(current)
+	return cloneAssignment(current), nil
+}
+
+func queuedAssignmentSnapshotMatches(current Assignment, update QueuedAssignmentUpdate) bool {
+	return current.WorkItemID == update.Expected.WorkItemID &&
+		current.RoleID == update.Expected.RoleID &&
+		current.RootID == update.Expected.RootID &&
+		current.ExecutionMode == update.Expected.ExecutionMode &&
+		current.Status == AssignmentQueued &&
+		current.ClaimedBy == "" &&
+		current.DesiredAgent.Kind == update.Expected.DesiredAgent.Kind &&
+		slices.Equal(current.DesiredAgent.SkillIDs, update.Expected.DesiredAgent.SkillIDs) &&
+		current.ExecutionRef.Empty() &&
+		current.ContextSnapshotID == "" &&
+		current.UpdatedAt.Equal(update.ExpectedUpdatedAt) &&
+		current.StartedAt.IsZero() &&
+		current.CompletedAt.IsZero()
+}
+
+func cloneDesiredAgent(agent DesiredAgent) DesiredAgent {
+	agent.SkillIDs = append([]string(nil), agent.SkillIDs...)
+	return agent
+}
+
+func cloneAssignment(assignment Assignment) Assignment {
+	assignment.DesiredAgent = cloneDesiredAgent(assignment.DesiredAgent)
+	return assignment
+}
+
+func assignmentTransitionTime(current Assignment, now func() time.Time) time.Time {
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now()
+	}
+	if stamp.Before(current.UpdatedAt) {
+		stamp = current.UpdatedAt
+	}
+	if stamp.Before(current.StartedAt) {
+		stamp = current.StartedAt
+	}
+	if !stamp.After(current.UpdatedAt) {
+		stamp = current.UpdatedAt.Add(time.Nanosecond)
+	}
+	return stamp
 }
 
 func (s *MemoryStore) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error) {
@@ -448,15 +523,37 @@ func (s *MemoryStore) ClaimAssignment(ctx context.Context, projectID, id, claime
 	if item.Status != AssignmentQueued {
 		return Assignment{}, ErrConflict
 	}
-	stamp := time.Now().UTC()
-	if now != nil {
-		stamp = now()
-	}
+	stamp := assignmentTransitionTime(item, now)
 	item.Status = AssignmentClaimed
 	item.ClaimedBy = claimedBy
 	item.UpdatedAt = stamp
-	s.assignments[projectID][id] = item
-	return item, nil
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) PrepareAssignment(ctx context.Context, projectID, id string, preparation AssignmentPreparation, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if item.Status != AssignmentClaimed || item.ClaimedBy != preparation.ClaimedBy {
+		return Assignment{}, ErrConflict
+	}
+	if !preparation.ExecutionRef.Empty() {
+		item.ExecutionRef = preparation.ExecutionRef
+	}
+	if preparation.ContextSnapshotID != "" {
+		item.ContextSnapshotID = preparation.ContextSnapshotID
+	}
+	item.UpdatedAt = assignmentTransitionTime(item, now)
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
 }
 
 func (s *MemoryStore) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error) {
@@ -473,10 +570,7 @@ func (s *MemoryStore) ReleaseAssignment(ctx context.Context, projectID, id, clai
 	if item.Status != AssignmentClaimed || item.ClaimedBy != claimedBy {
 		return Assignment{}, ErrConflict
 	}
-	stamp := time.Now().UTC()
-	if now != nil {
-		stamp = now()
-	}
+	stamp := assignmentTransitionTime(item, now)
 	item.Status = AssignmentQueued
 	item.ClaimedBy = ""
 	item.ExecutionRef = ExecutionRef{}
@@ -484,8 +578,66 @@ func (s *MemoryStore) ReleaseAssignment(ctx context.Context, projectID, id, clai
 	item.StartedAt = time.Time{}
 	item.CompletedAt = time.Time{}
 	item.UpdatedAt = stamp
-	s.assignments[projectID][id] = item
-	return item, nil
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) CompleteAssignment(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if isTerminalAssignmentStatus(item.Status) {
+		return Assignment{}, ErrConflict
+	}
+	stamp := assignmentTransitionTime(item, now)
+	previousStatus := item.Status
+	item.Status = status
+	if item.StartedAt.IsZero() && !(previousStatus == AssignmentQueued && status == AssignmentCancelled) {
+		item.StartedAt = stamp
+	}
+	if isTerminalAssignmentStatus(status) && item.CompletedAt.IsZero() {
+		item.CompletedAt = stamp
+	}
+	if !executionRef.Empty() {
+		item.ExecutionRef = executionRef
+	}
+	item.UpdatedAt = stamp
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) UpdateAssignmentStatus(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if item.Status == AssignmentQueued || isTerminalAssignmentStatus(item.Status) {
+		return Assignment{}, ErrConflict
+	}
+	stamp := assignmentTransitionTime(item, now)
+	item.Status = status
+	if item.StartedAt.IsZero() {
+		item.StartedAt = stamp
+	}
+	if !executionRef.Empty() {
+		item.ExecutionRef = executionRef
+	}
+	item.UpdatedAt = stamp
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
 }
 
 func (s *MemoryStore) DeleteAssignment(ctx context.Context, projectID, id string) error {

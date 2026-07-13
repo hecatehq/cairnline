@@ -63,6 +63,38 @@ manual
 The mode is a request, not authorization. A host may downgrade, ignore, or
 reject a mode if its policy does not allow it.
 
+Embedding hosts that let operators change a queued assignment's role, root,
+execution mode, or desired-agent metadata should use
+`Service.UpdateQueuedAssignment` with the exact coordination snapshot and
+`updated_at` value that were read:
+
+```go
+replacement := assignment.Coordination()
+replacement.RoleID = newRoleID
+updated, err := service.UpdateQueuedAssignment(ctx, projectID, assignment.ID,
+	cairnline.QueuedAssignmentUpdate{
+		Expected:          assignment.Coordination(),
+		ExpectedUpdatedAt: assignment.UpdatedAt,
+		Replacement:       replacement,
+	})
+```
+
+The update is compare-and-set: it preserves lifecycle/execution fields and
+returns `ErrConflict` if another writer changed or claimed the assignment.
+This prevents a stale editor from releasing a claim that may already have
+started execution. After a claim, use `Service.PrepareAssignment` to attach a
+host execution reference or context snapshot while verifying the expected
+claim owner. Snapshot import remains an administrative/offline workflow and is
+not exposed as a live whole-assignment mutation.
+
+Progress and completion transitions are also atomic, and terminal completion is
+first-writer-wins. Once an assignment is completed, failed, or cancelled, later
+progress or terminal writes return `ErrConflict`. Completion preserves an
+existing `started_at`. A direct queued completion or failure records the
+transition as both start and finish for compatibility; cancelling queued work
+records only `completed_at`, so portable readers do not report that unstarted
+work began.
+
 ## Recommended MCP Pull Flow
 
 Hosts that want agent-neutral interoperability should start here:

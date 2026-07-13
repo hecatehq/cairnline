@@ -191,6 +191,7 @@ discovery; both were checked on July 4, 2026:
   - `assignments.create`
   - `assignments.update`
   - `assignments.claim`
+  - `assignments.prepare`
   - `assignments.release`
   - `assignments.update_status`
   - `assignments.context`

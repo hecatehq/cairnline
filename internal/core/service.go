@@ -824,78 +824,67 @@ func (s *Service) CreateAssignment(ctx context.Context, input Assignment) (Assig
 	return s.store.CreateAssignment(ctx, item)
 }
 
-func (s *Service) UpdateAssignment(ctx context.Context, input Assignment) (Assignment, error) {
-	projectID := strings.TrimSpace(input.ProjectID)
-	id := strings.TrimSpace(input.ID)
-	workItemID := strings.TrimSpace(input.WorkItemID)
-	roleID := strings.TrimSpace(input.RoleID)
-	rootID := strings.TrimSpace(input.RootID)
+// UpdateQueuedAssignment atomically replaces coordination metadata only when
+// the caller's expected values still match a pristine queued assignment. It
+// preserves lifecycle and execution fields so a stale editor cannot release or
+// overwrite a concurrent claim.
+func (s *Service) UpdateQueuedAssignment(ctx context.Context, projectID, id string, update QueuedAssignmentUpdate) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
 	if projectID == "" {
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
 	if id == "" {
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
 	}
-	if workItemID == "" {
-		return Assignment{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
-	}
-	if roleID == "" {
-		return Assignment{}, errors.Join(ErrInvalid, errors.New("role_id is required"))
-	}
-	existing, err := s.store.GetAssignment(ctx, projectID, id)
+	normalized, err := normalizeQueuedAssignmentUpdate(update)
 	if err != nil {
 		return Assignment{}, err
 	}
-	if _, err := s.store.GetWorkItem(ctx, projectID, workItemID); err != nil {
+	if err := s.validateProjectRoot(ctx, projectID, normalized.Replacement.RootID); err != nil {
 		return Assignment{}, err
 	}
-	if _, err := s.store.GetRole(ctx, projectID, roleID); err != nil {
+	if _, err := s.store.GetWorkItem(ctx, projectID, normalized.Replacement.WorkItemID); err != nil {
 		return Assignment{}, err
 	}
-	if err := s.validateProjectRoot(ctx, projectID, rootID); err != nil {
+	if _, err := s.store.GetRole(ctx, projectID, normalized.Replacement.RoleID); err != nil {
 		return Assignment{}, err
 	}
-	executionMode, err := normalizeExecutionMode(input.ExecutionMode, false)
+	return s.store.UpdateQueuedAssignment(ctx, projectID, id, normalized, s.now)
+}
+
+func normalizeQueuedAssignmentUpdate(update QueuedAssignmentUpdate) (QueuedAssignmentUpdate, error) {
+	if update.ExpectedUpdatedAt.IsZero() {
+		return QueuedAssignmentUpdate{}, errors.Join(ErrInvalid, errors.New("expected_updated_at is required"))
+	}
+	normalize := func(coordination AssignmentCoordination) (AssignmentCoordination, error) {
+		coordination.WorkItemID = strings.TrimSpace(coordination.WorkItemID)
+		coordination.RoleID = strings.TrimSpace(coordination.RoleID)
+		coordination.RootID = strings.TrimSpace(coordination.RootID)
+		if coordination.WorkItemID == "" {
+			return AssignmentCoordination{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+		}
+		if coordination.RoleID == "" {
+			return AssignmentCoordination{}, errors.Join(ErrInvalid, errors.New("role_id is required"))
+		}
+		executionMode, err := normalizeExecutionMode(coordination.ExecutionMode, false)
+		if err != nil {
+			return AssignmentCoordination{}, err
+		}
+		coordination.ExecutionMode = executionMode
+		coordination.DesiredAgent = normalizeDesiredAgent(coordination.DesiredAgent)
+		return coordination, nil
+	}
+	var err error
+	update.Expected, err = normalize(update.Expected)
 	if err != nil {
-		return Assignment{}, err
+		return QueuedAssignmentUpdate{}, err
 	}
-	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = existing.Status
+	update.Replacement, err = normalize(update.Replacement)
+	if err != nil {
+		return QueuedAssignmentUpdate{}, err
 	}
-	if !isAssignmentStatus(status) {
-		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment status is invalid"))
-	}
-	claimedBy := strings.TrimSpace(input.ClaimedBy)
-	if claimedBy == "" {
-		claimedBy = existing.ClaimedBy
-	}
-	startedAt := input.StartedAt
-	if startedAt.IsZero() {
-		startedAt = existing.StartedAt
-	}
-	completedAt := input.CompletedAt
-	if completedAt.IsZero() {
-		completedAt = existing.CompletedAt
-	}
-	item := Assignment{
-		ID:                id,
-		ProjectID:         projectID,
-		WorkItemID:        workItemID,
-		RoleID:            roleID,
-		RootID:            rootID,
-		ExecutionMode:     executionMode,
-		Status:            status,
-		DesiredAgent:      normalizeDesiredAgent(input.DesiredAgent),
-		ClaimedBy:         claimedBy,
-		ExecutionRef:      normalizeExecutionRef(input.ExecutionRef),
-		ContextSnapshotID: strings.TrimSpace(input.ContextSnapshotID),
-		CreatedAt:         existing.CreatedAt,
-		UpdatedAt:         s.now(),
-		StartedAt:         startedAt,
-		CompletedAt:       completedAt,
-	}
-	return s.store.UpdateAssignment(ctx, item)
+	return update, nil
 }
 
 func (s *Service) GetAssignment(ctx context.Context, projectID, id string) (Assignment, error) {
@@ -924,6 +913,30 @@ func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy 
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("claimed_by is required"))
 	}
 	return s.store.ClaimAssignment(ctx, projectID, id, claimedBy, s.now)
+}
+
+// PrepareAssignment attaches host-owned execution/context references to an
+// assignment that is still claimed by the expected worker. It does not mark
+// work as started.
+func (s *Service) PrepareAssignment(ctx context.Context, projectID, id string, preparation AssignmentPreparation) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	preparation.ClaimedBy = strings.TrimSpace(preparation.ClaimedBy)
+	preparation.ExecutionRef = normalizeExecutionRef(preparation.ExecutionRef)
+	preparation.ContextSnapshotID = strings.TrimSpace(preparation.ContextSnapshotID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if preparation.ClaimedBy == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claimed_by is required"))
+	}
+	if preparation.ExecutionRef.Empty() && preparation.ContextSnapshotID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("execution_ref or context_snapshot_id is required"))
+	}
+	return s.store.PrepareAssignment(ctx, projectID, id, preparation, s.now)
 }
 
 func (s *Service) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string) (Assignment, error) {
@@ -967,26 +980,7 @@ func (s *Service) UpdateAssignmentStatus(ctx context.Context, projectID, id, sta
 	if !isProgressAssignmentStatus(status) {
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment status must be running, awaiting_approval, or awaiting_review"))
 	}
-	item, err := s.store.GetAssignment(ctx, projectID, id)
-	if err != nil {
-		return Assignment{}, err
-	}
-	if isTerminalAssignmentStatus(item.Status) {
-		return Assignment{}, ErrConflict
-	}
-	if item.Status == AssignmentQueued {
-		return Assignment{}, ErrConflict
-	}
-	item.Status = status
-	now := s.now()
-	if item.StartedAt.IsZero() {
-		item.StartedAt = now
-	}
-	if ref := normalizeExecutionRef(executionRef); !ref.Empty() {
-		item.ExecutionRef = ref
-	}
-	item.UpdatedAt = now
-	return s.store.UpdateAssignment(ctx, item)
+	return s.store.UpdateAssignmentStatus(ctx, projectID, id, status, normalizeExecutionRef(executionRef), s.now)
 }
 
 func (s *Service) AssignmentContext(ctx context.Context, projectID, id string) (AssignmentContext, error) {
@@ -1113,26 +1107,7 @@ func (s *Service) CompleteAssignment(ctx context.Context, projectID, id, status 
 	if !isCompletionAssignmentStatus(status) {
 		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment status must be completed, failed, cancelled, or awaiting_review"))
 	}
-	item, err := s.store.GetAssignment(ctx, projectID, id)
-	if err != nil {
-		return Assignment{}, err
-	}
-	if isTerminalAssignmentStatus(item.Status) {
-		return Assignment{}, ErrConflict
-	}
-	item.Status = status
-	now := s.now()
-	if item.StartedAt.IsZero() {
-		item.StartedAt = now
-	}
-	if isTerminalAssignmentStatus(status) && item.CompletedAt.IsZero() {
-		item.CompletedAt = now
-	}
-	if ref := normalizeExecutionRef(executionRef); !ref.Empty() {
-		item.ExecutionRef = ref
-	}
-	item.UpdatedAt = now
-	return s.store.UpdateAssignment(ctx, item)
+	return s.store.CompleteAssignment(ctx, projectID, id, status, normalizeExecutionRef(executionRef), s.now)
 }
 
 func (s *Service) ListArtifacts(ctx context.Context, projectID, workItemID string) ([]Artifact, error) {
