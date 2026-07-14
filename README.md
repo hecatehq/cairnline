@@ -213,6 +213,7 @@ discovery; both were checked on July 4, 2026:
   - `handoffs.update`
   - `handoffs.update_status`
   - `handoffs.delete`
+  - `handoffs.accept_with_follow_up`
   - `memory_entries.list`
   - `memory_entries.get`
   - `memory_entries.create`

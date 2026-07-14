@@ -70,6 +70,12 @@ type Artifact = core.Artifact
 type Evidence = core.Evidence
 type Review = core.Review
 type Handoff = core.Handoff
+type HandoffPatch = core.HandoffPatch
+type HandoffUpdate = core.HandoffUpdate
+type HandoffStatusUpdate = core.HandoffStatusUpdate
+type HandoffDelete = core.HandoffDelete
+type AcceptHandoffWithFollowUpCommand = core.AcceptHandoffWithFollowUpCommand
+type HandoffFollowUpResult = core.HandoffFollowUpResult
 type MemoryEntry = core.MemoryEntry
 type MemoryCandidate = core.MemoryCandidate
 type MemoryCandidateSourceRef = core.MemoryCandidateSourceRef
@@ -99,6 +105,11 @@ const (
 	AssignmentCancelled        = core.AssignmentCancelled
 
 	DesiredAgentAny = core.DesiredAgentAny
+
+	HandoffFollowUpIntentAcceptAndEnsure = core.HandoffFollowUpIntentAcceptAndEnsure
+	HandoffFollowUpCreated               = core.HandoffFollowUpCreated
+	HandoffFollowUpLinkedExisting        = core.HandoffFollowUpLinkedExisting
+	HandoffFollowUpAlreadySatisfied      = core.HandoffFollowUpAlreadySatisfied
 
 	SkillFormatMarkdown  = core.SkillFormatMarkdown
 	SkillStatusAvailable = core.SkillStatusAvailable

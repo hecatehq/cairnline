@@ -291,7 +291,7 @@ func createIfMissingReview(ctx context.Context, store Store, item Review) error 
 func upsertHandoff(ctx context.Context, store Store, item Handoff) error {
 	if _, err := store.CreateHandoff(ctx, item); err != nil {
 		if errors.Is(err, ErrDuplicate) {
-			_, err = store.UpdateHandoff(ctx, item)
+			_, err = store.RestoreHandoffSnapshot(ctx, item)
 		}
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hecatehq/cairnline/internal/core"
 )
@@ -1432,12 +1433,13 @@ func TestMCPTools_HandoffLifecycle(t *testing.T) {
 	}
 
 	input = toolRequest(t, 4, "handoffs.update", map[string]any{
-		"project_id":   project.ID,
-		"work_item_id": work.ID,
-		"handoff_id":   handoffID,
-		"title":        "Accepted review handoff",
-		"body":         "Reviewer accepted the handoff.",
-		"status":       core.HandoffStatusAccepted,
+		"project_id":          project.ID,
+		"work_item_id":        work.ID,
+		"handoff_id":          handoffID,
+		"expected_updated_at": handoffs[0].UpdatedAt.Format(time.RFC3339Nano),
+		"title":               "Accepted review handoff",
+		"body":                "Reviewer accepted the handoff.",
+		"status":              core.HandoffStatusAccepted,
 	})
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -1446,12 +1448,17 @@ func TestMCPTools_HandoffLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "Updated handoff "+handoffID+": Accepted review handoff [accepted]") {
 		t.Fatalf("update handoff response = %s", output.String())
 	}
+	updatedAfterPatch, err := service.GetHandoff(ctx, project.ID, work.ID, handoffID)
+	if err != nil {
+		t.Fatalf("GetHandoff() after patch error = %v", err)
+	}
 
 	input = toolRequest(t, 5, "handoffs.update_status", map[string]any{
-		"project_id":   project.ID,
-		"work_item_id": work.ID,
-		"handoff_id":   handoffID,
-		"status":       core.HandoffStatusDismissed,
+		"project_id":          project.ID,
+		"work_item_id":        work.ID,
+		"handoff_id":          handoffID,
+		"expected_updated_at": updatedAfterPatch.UpdatedAt.Format(time.RFC3339Nano),
+		"status":              core.HandoffStatusDismissed,
 	})
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -1469,9 +1476,10 @@ func TestMCPTools_HandoffLifecycle(t *testing.T) {
 	}
 
 	input = toolRequest(t, 6, "handoffs.delete", map[string]any{
-		"project_id":   project.ID,
-		"work_item_id": work.ID,
-		"handoff_id":   handoffID,
+		"project_id":          project.ID,
+		"work_item_id":        work.ID,
+		"handoff_id":          handoffID,
+		"expected_updated_at": updated.UpdatedAt.Format(time.RFC3339Nano),
 	})
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

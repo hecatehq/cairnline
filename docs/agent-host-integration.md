@@ -87,6 +87,34 @@ host execution reference or context snapshot while verifying the expected
 claim owner. Snapshot import remains an administrative/offline workflow and is
 not exposed as a live whole-assignment mutation.
 
+Handoff editors follow the same rule. Use `Service.PatchHandoff`,
+`Service.UpdateHandoffStatus`, or `Service.DeleteHandoff` with the exact
+handoff `UpdatedAt` value that was read. Cairnline advances the revision
+monotonically and returns `ErrConflict` rather than overwriting a newer edit.
+Snapshot restore uses a separate store-only path.
+
+This is an intentional alpha contract break: the public Store/Service handoff
+mutation signatures and the corresponding MCP tools now require a revision
+token. Embedders with custom Store implementations must add the CAS, snapshot
+restore, and atomic follow-up methods before upgrading.
+Live assistant `update_handoff` proposal actions must likewise carry the exact
+`handoff.updated_at` revision; historical proposal ledgers remain importable,
+but a tokenless historical action cannot be applied.
+
+When an operator explicitly accepts a handoff and asks for follow-up work, use
+`Service.AcceptHandoffWithFollowUp` with the current handoff revision, the
+`accept_and_ensure_follow_up` intent, and one stable idempotency key for that
+operator action. Cairnline atomically ensures one linked portable assignment
+and marks the handoff accepted. When no assignment is linked, Cairnline creates
+one queued using defaults from the target work item and role; rootless work
+remains rootless. An existing linked assignment is returned in its current
+authoritative state, including a state that has already progressed or finished.
+The command records coordination only: it never launches newly created work,
+and hosts must make a separate policy-controlled launch or claim decision.
+An exact-key retry preserves the original outcome and assignment identity while
+returning current authoritative records. It conflicts if a later operator
+decision closed or relinked the handoff.
+
 Progress and completion transitions are also atomic, and terminal completion is
 first-writer-wins. Once an assignment is completed, failed, or cancelled, later
 progress or terminal writes return `ErrConflict`. Completion preserves an

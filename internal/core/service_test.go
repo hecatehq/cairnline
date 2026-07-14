@@ -325,12 +325,12 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHandoff() error = %v", err)
 	}
-	acceptedAt := time.Date(2026, 6, 3, 12, 30, 0, 0, time.UTC)
+	acceptedAt := got.UpdatedAt.Add(time.Minute)
 	got.Title = "Accepted for review"
 	got.Body = "Reviewer accepted the handoff."
 	got.Status = HandoffStatusAccepted
 	got.LinkedMemoryIDs = []string{"mem_1"}
-	got.UpdatedAt = acceptedAt
+	service.now = func() time.Time { return acceptedAt }
 	updated, err := service.UpdateHandoff(ctx, got)
 	if err != nil {
 		t.Fatalf("UpdateHandoff() error = %v", err)
@@ -341,9 +341,9 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	if !updated.StatusChangedAt.Equal(acceptedAt) {
 		t.Fatalf("updated status_changed_at = %s, want status update time %s", updated.StatusChangedAt, acceptedAt)
 	}
-	contentEditAt := time.Date(2026, 6, 3, 12, 35, 0, 0, time.UTC)
+	contentEditAt := acceptedAt.Add(time.Minute)
 	updated.Body = "Review context clarified."
-	updated.UpdatedAt = contentEditAt
+	service.now = func() time.Time { return contentEditAt }
 	contentUpdated, err := service.UpdateHandoff(ctx, updated)
 	if err != nil {
 		t.Fatalf("UpdateHandoff(content only) error = %v", err)
@@ -351,7 +351,12 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	if !contentUpdated.StatusChangedAt.Equal(acceptedAt) {
 		t.Fatalf("content-only status_changed_at = %s, want preserved %s", contentUpdated.StatusChangedAt, acceptedAt)
 	}
-	superseded, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, HandoffStatusSuperseded)
+	supersededAt := contentEditAt.Add(time.Minute)
+	service.now = func() time.Time { return supersededAt }
+	superseded, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, HandoffStatusUpdate{
+		ExpectedUpdatedAt: contentUpdated.UpdatedAt,
+		Status:            HandoffStatusSuperseded,
+	})
 	if err != nil {
 		t.Fatalf("UpdateHandoffStatus() error = %v", err)
 	}
@@ -361,10 +366,10 @@ func TestService_HandoffLifecycle(t *testing.T) {
 	if !superseded.StatusChangedAt.After(acceptedAt) {
 		t.Fatalf("superseded status_changed_at = %s, want after %s", superseded.StatusChangedAt, acceptedAt)
 	}
-	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, ErrInvalid) {
+	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, HandoffStatusUpdate{ExpectedUpdatedAt: superseded.UpdatedAt, Status: "unsupported"}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
 	}
-	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID); err != nil {
+	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID, HandoffDelete{ExpectedUpdatedAt: superseded.UpdatedAt}); err != nil {
 		t.Fatalf("DeleteHandoff() error = %v", err)
 	}
 	if _, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID); !errors.Is(err, ErrNotFound) {
@@ -410,7 +415,7 @@ func TestService_HandoffImportPreservesTimestamps(t *testing.T) {
 
 	nextUpdatedAt := time.Date(2026, 6, 3, 12, 8, 0, 0, time.UTC)
 	handoff.Body = "Updated source summary."
-	handoff.UpdatedAt = nextUpdatedAt
+	service.now = func() time.Time { return nextUpdatedAt }
 	updated, err := service.UpdateHandoff(ctx, handoff)
 	if err != nil {
 		t.Fatalf("UpdateHandoff() error = %v", err)
@@ -424,8 +429,7 @@ func TestService_HandoffImportPreservesTimestamps(t *testing.T) {
 
 	importedStatusChangedAt := time.Date(2026, 6, 3, 12, 8, 30, 0, time.UTC)
 	updated.Status = HandoffStatusAccepted
-	updated.UpdatedAt = nextUpdatedAt.Add(time.Minute)
-	updated.StatusChangedAt = importedStatusChangedAt
+	service.now = func() time.Time { return importedStatusChangedAt }
 	statusUpdated, err := service.UpdateHandoff(ctx, updated)
 	if err != nil {
 		t.Fatalf("UpdateHandoff(imported status change) error = %v", err)

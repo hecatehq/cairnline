@@ -122,6 +122,70 @@ func TestServiceSnapshotRejectsUnsupportedVersion(t *testing.T) {
 	}
 }
 
+func TestSnapshotImportPreservesHistoricalHandoffProposalWithoutCASToken(t *testing.T) {
+	ctx := context.Background()
+	source := NewService(NewMemoryStore())
+	project, err := source.CreateProject(ctx, Project{Name: "Historical proposal"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	work, err := source.CreateWorkItem(ctx, WorkItem{ProjectID: project.ID, Title: "Historical work"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	handoff, err := source.CreateHandoff(ctx, Handoff{ProjectID: project.ID, WorkItemID: work.ID, Title: "Historical handoff", Body: "Preserve the old proposal ledger."})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	historical := handoff
+	historical.Title = "Proposed historical edit"
+	historical.UpdatedAt = time.Time{}
+	record, err := source.ImportAssistantProposalRecord(ctx, AssistantProposalRecord{
+		ID:        "prop_historical_handoff",
+		ProjectID: project.ID,
+		Source:    AssistantProposalSourceAssistant,
+		Proposal: AssistantProposal{
+			ID:                   "prop_historical_handoff",
+			ProjectID:            project.ID,
+			Title:                "  Historical handoff edit  ",
+			RequiresConfirmation: true,
+			Actions: []AssistantAction{{
+				Kind:    "  " + AssistantActionUpdateHandoff + "  ",
+				Handoff: &historical,
+			}},
+		},
+		Status: AssistantProposalStatusProposed,
+	})
+	if err != nil {
+		t.Fatalf("ImportAssistantProposalRecord(source) error = %v", err)
+	}
+	snapshot, err := source.ExportSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("ExportSnapshot() error = %v", err)
+	}
+	target := NewService(NewMemoryStore())
+	if _, err := target.ImportSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("ImportSnapshot() error = %v", err)
+	}
+	imported, err := target.GetAssistantProposal(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("GetAssistantProposal() error = %v", err)
+	}
+	if len(imported.Proposal.Actions) != 1 || imported.Proposal.Actions[0].Kind != AssistantActionUpdateHandoff || imported.Proposal.Actions[0].Handoff == nil || !imported.Proposal.Actions[0].Handoff.UpdatedAt.IsZero() {
+		t.Fatalf("imported proposal = %+v, want historical zero-token action preserved", imported.Proposal)
+	}
+	if _, err := target.ApplyAssistantProposal(ctx, imported.Proposal, true); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("ApplyAssistantProposal(historical tokenless action) error = %v, want ErrInvalid", err)
+	}
+	current, err := target.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff() error = %v", err)
+	}
+	if current.Title != handoff.Title || !current.UpdatedAt.Equal(handoff.UpdatedAt) {
+		t.Fatalf("handoff after rejected historical apply = %+v, want unchanged", current)
+	}
+}
+
 type snapshotFixtureIDs struct {
 	projectID      string
 	proposalWorkID string

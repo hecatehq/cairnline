@@ -314,7 +314,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assistant.propose",
 		Title:       "Create assistant proposal",
-		Description: "Persist a typed proposal record for operator-confirmed apply. This mutates the proposal ledger only, not project coordination records.",
+		Description: "Persist a typed proposal record for operator-confirmed apply. This mutates the proposal ledger only, not project coordination records. An update_handoff action must include the current handoff.updated_at revision.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
@@ -356,7 +356,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assistant.apply",
 		Title:       "Apply assistant proposal",
-		Description: "Apply a confirmed typed project proposal record. Assignments are coordination records only and are not auto-dispatched.",
+		Description: "Apply a confirmed typed project proposal record. An update_handoff action must include the current handoff.updated_at revision. Assignments are coordination records only and are not auto-dispatched.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
@@ -1115,6 +1115,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				"project_id":{"type":"string","minLength":1},
 				"work_item_id":{"type":"string","minLength":1},
 				"handoff_id":{"type":"string","minLength":1},
+				"expected_updated_at":{"type":"string","format":"date-time"},
 				"source_assignment_id":{"type":"string"},
 				"source_run_id":{"type":"string"},
 				"source_chat_session_id":{"type":"string"},
@@ -1133,7 +1134,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				"provenance_kind":{"type":"string"},
 				"trust_label":{"type":"string"}
 			},
-			"required":["project_id","work_item_id","handoff_id"]
+			"required":["project_id","work_item_id","handoff_id","expected_updated_at"]
 		}`),
 	}, updateHandoff(service))
 
@@ -1147,9 +1148,10 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				"project_id":{"type":"string","minLength":1},
 				"work_item_id":{"type":"string","minLength":1},
 				"handoff_id":{"type":"string","minLength":1},
+				"expected_updated_at":{"type":"string","format":"date-time"},
 				"status":{"type":"string","enum":["open","accepted","superseded","dismissed"]}
 			},
-			"required":["project_id","work_item_id","handoff_id","status"]
+			"required":["project_id","work_item_id","handoff_id","expected_updated_at","status"]
 		}`),
 	}, updateHandoffStatus(service))
 
@@ -1162,11 +1164,34 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"work_item_id":{"type":"string","minLength":1},
-				"handoff_id":{"type":"string","minLength":1}
+				"handoff_id":{"type":"string","minLength":1},
+				"expected_updated_at":{"type":"string","format":"date-time"}
 			},
-			"required":["project_id","work_item_id","handoff_id"]
+			"required":["project_id","work_item_id","handoff_id","expected_updated_at"]
 		}`),
 	}, deleteHandoff(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "handoffs.accept_with_follow_up",
+		Title:       "Accept handoff with follow-up",
+		Description: "Atomically accept a handoff and ensure one linked follow-up assignment, creating it queued when absent without launching it.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"work_item_id":{"type":"string","minLength":1},
+				"handoff_id":{"type":"string","minLength":1},
+				"expected_updated_at":{"type":"string","format":"date-time"},
+				"idempotency_key":{"type":"string","minLength":1,"maxLength":128},
+				"intent":{"type":"string","const":"accept_and_ensure_follow_up"}
+			},
+			"required":["project_id","work_item_id","handoff_id","expected_updated_at","idempotency_key","intent"]
+		}`),
+		Annotations: &mcp.ToolAnnotations{
+			DestructiveHint: mcp.BoolPtr(true),
+			IdempotentHint:  mcp.BoolPtr(true),
+		},
+	}, acceptHandoffWithFollowUp(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "memory_entries.list",
@@ -3242,6 +3267,7 @@ func updateHandoff(service *core.Service) mcp.ToolHandler {
 		ProjectID             string    `json:"project_id"`
 		WorkItemID            string    `json:"work_item_id"`
 		HandoffID             string    `json:"handoff_id"`
+		ExpectedUpdatedAt     time.Time `json:"expected_updated_at"`
 		SourceAssignmentID    *string   `json:"source_assignment_id"`
 		SourceRunID           *string   `json:"source_run_id"`
 		SourceChatSessionID   *string   `json:"source_chat_session_id"`
@@ -3265,62 +3291,28 @@ func updateHandoff(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		existing, err := service.GetHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID)
-		if err != nil {
-			return mcp.CallToolResult{}, err
-		}
-		if input.SourceAssignmentID != nil {
-			existing.SourceAssignmentID = *input.SourceAssignmentID
-		}
-		if input.SourceRunID != nil {
-			existing.SourceRunID = *input.SourceRunID
-		}
-		if input.SourceChatSessionID != nil {
-			existing.SourceChatSessionID = *input.SourceChatSessionID
-		}
-		if input.SourceMessageID != nil {
-			existing.SourceMessageID = *input.SourceMessageID
-		}
-		if input.FromRoleID != nil {
-			existing.FromRoleID = *input.FromRoleID
-		}
-		if input.ToRoleID != nil {
-			existing.ToRoleID = *input.ToRoleID
-		}
-		if input.TargetAssignmentID != nil {
-			existing.TargetAssignmentID = *input.TargetAssignmentID
-		}
-		if input.TargetWorkItemID != nil {
-			existing.TargetWorkItemID = *input.TargetWorkItemID
-		}
-		if input.Title != nil {
-			existing.Title = *input.Title
-		}
-		if input.Body != nil {
-			existing.Body = *input.Body
-		}
-		if input.RecommendedNextAction != nil {
-			existing.RecommendedNextAction = *input.RecommendedNextAction
-		}
-		if input.LinkedArtifactIDs != nil {
-			existing.LinkedArtifactIDs = *input.LinkedArtifactIDs
-		}
-		if input.LinkedMemoryIDs != nil {
-			existing.LinkedMemoryIDs = *input.LinkedMemoryIDs
-		}
-		if input.ContextRefs != nil {
-			existing.ContextRefs = *input.ContextRefs
-		}
-		if input.Status != nil {
-			existing.Status = *input.Status
-		}
-		if input.ProvenanceKind != nil {
-			existing.ProvenanceKind = *input.ProvenanceKind
-		}
-		if input.TrustLabel != nil {
-			existing.TrustLabel = *input.TrustLabel
-		}
-		item, err := service.UpdateHandoff(ctx, existing)
+		item, err := service.PatchHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID, core.HandoffUpdate{
+			ExpectedUpdatedAt: input.ExpectedUpdatedAt,
+			Patch: core.HandoffPatch{
+				SourceAssignmentID:    input.SourceAssignmentID,
+				SourceRunID:           input.SourceRunID,
+				SourceChatSessionID:   input.SourceChatSessionID,
+				SourceMessageID:       input.SourceMessageID,
+				FromRoleID:            input.FromRoleID,
+				ToRoleID:              input.ToRoleID,
+				TargetAssignmentID:    input.TargetAssignmentID,
+				TargetWorkItemID:      input.TargetWorkItemID,
+				Title:                 input.Title,
+				Body:                  input.Body,
+				RecommendedNextAction: input.RecommendedNextAction,
+				LinkedArtifactIDs:     input.LinkedArtifactIDs,
+				LinkedMemoryIDs:       input.LinkedMemoryIDs,
+				ContextRefs:           input.ContextRefs,
+				Status:                input.Status,
+				ProvenanceKind:        input.ProvenanceKind,
+				TrustLabel:            input.TrustLabel,
+			},
+		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
@@ -3333,17 +3325,21 @@ func updateHandoff(service *core.Service) mcp.ToolHandler {
 
 func updateHandoffStatus(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID  string `json:"project_id"`
-		WorkItemID string `json:"work_item_id"`
-		HandoffID  string `json:"handoff_id"`
-		Status     string `json:"status"`
+		ProjectID         string    `json:"project_id"`
+		WorkItemID        string    `json:"work_item_id"`
+		HandoffID         string    `json:"handoff_id"`
+		ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+		Status            string    `json:"status"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.UpdateHandoffStatus(ctx, input.ProjectID, input.WorkItemID, input.HandoffID, input.Status)
+		item, err := service.UpdateHandoffStatus(ctx, input.ProjectID, input.WorkItemID, input.HandoffID, core.HandoffStatusUpdate{
+			ExpectedUpdatedAt: input.ExpectedUpdatedAt,
+			Status:            input.Status,
+		})
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
@@ -3356,20 +3352,56 @@ func updateHandoffStatus(service *core.Service) mcp.ToolHandler {
 
 func deleteHandoff(service *core.Service) mcp.ToolHandler {
 	type args struct {
-		ProjectID  string `json:"project_id"`
-		WorkItemID string `json:"work_item_id"`
-		HandoffID  string `json:"handoff_id"`
+		ProjectID         string    `json:"project_id"`
+		WorkItemID        string    `json:"work_item_id"`
+		HandoffID         string    `json:"handoff_id"`
+		ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		if err := service.DeleteHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID); err != nil {
+		if err := service.DeleteHandoff(ctx, input.ProjectID, input.WorkItemID, input.HandoffID, core.HandoffDelete{ExpectedUpdatedAt: input.ExpectedUpdatedAt}); err != nil {
 			return mcp.CallToolResult{}, err
 		}
 		return mcp.CallToolResult{
 			Content: mcp.TextContent(fmt.Sprintf("Deleted handoff %s", strings.TrimSpace(input.HandoffID))),
+		}, nil
+	}
+}
+
+func acceptHandoffWithFollowUp(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID         string    `json:"project_id"`
+		WorkItemID        string    `json:"work_item_id"`
+		HandoffID         string    `json:"handoff_id"`
+		ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+		IdempotencyKey    string    `json:"idempotency_key"`
+		Intent            string    `json:"intent"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, invalidArguments(err)
+		}
+		result, err := service.AcceptHandoffWithFollowUp(ctx, core.AcceptHandoffWithFollowUpCommand{
+			ProjectID:         input.ProjectID,
+			WorkItemID:        input.WorkItemID,
+			HandoffID:         input.HandoffID,
+			ExpectedUpdatedAt: input.ExpectedUpdatedAt,
+			IdempotencyKey:    input.IdempotencyKey,
+			Intent:            input.Intent,
+		})
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content: mcp.TextContent(fmt.Sprintf(
+				"Accepted handoff %s with follow-up assignment %s (%s)",
+				result.Handoff.ID, result.Assignment.ID, result.Outcome,
+			)),
+			StructuredContent: result,
 		}, nil
 	}
 }
