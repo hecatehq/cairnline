@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -666,6 +667,38 @@ func TestHandoffAuthorityAssistantUpdateRequiresCurrentRevision(t *testing.T) {
 	if afterConflict.Title != current.Title || !afterConflict.UpdatedAt.Equal(updated.UpdatedAt) {
 		t.Fatalf("handoff after stale proposal = %+v, want current authoritative state %+v", afterConflict, updated)
 	}
+}
+
+func TestHandoffAuthorityAcceptWithFollowUpUsesSchemaCharacterLimit(t *testing.T) {
+	t.Run("accepts 128 non-ASCII characters", func(t *testing.T) {
+		fixture := newHandoffAuthorityFixture(t, false, ExecutionMCPPull)
+		command := fixture.command(strings.Repeat("é", 128))
+		if _, err := fixture.service.AcceptHandoffWithFollowUp(fixture.ctx, command); err != nil {
+			t.Fatalf("AcceptHandoffWithFollowUp(128 characters) error = %v", err)
+		}
+	})
+
+	t.Run("rejects 129 characters without mutation", func(t *testing.T) {
+		fixture := newHandoffAuthorityFixture(t, false, ExecutionMCPPull)
+		command := fixture.command(strings.Repeat("é", 129))
+		if _, err := fixture.service.AcceptHandoffWithFollowUp(fixture.ctx, command); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("AcceptHandoffWithFollowUp(129 characters) error = %v, want ErrInvalid", err)
+		}
+		assignments, err := fixture.service.ListAssignments(fixture.ctx, fixture.project.ID)
+		if err != nil {
+			t.Fatalf("ListAssignments() error = %v", err)
+		}
+		if len(assignments) != 0 {
+			t.Fatalf("assignments = %+v, want none after invalid key", assignments)
+		}
+		current, err := fixture.service.GetHandoff(fixture.ctx, fixture.project.ID, fixture.sourceWork.ID, fixture.handoff.ID)
+		if err != nil {
+			t.Fatalf("GetHandoff() error = %v", err)
+		}
+		if current.Status != HandoffStatusOpen || current.TargetAssignmentID != "" || !current.UpdatedAt.Equal(fixture.handoff.UpdatedAt) {
+			t.Fatalf("handoff after invalid key = %+v, want unchanged open handoff", current)
+		}
+	})
 }
 
 func TestHandoffAuthorityAcceptWithFollowUpSerializesConcurrentRetries(t *testing.T) {

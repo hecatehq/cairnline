@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -1520,8 +1521,8 @@ func (s *Service) AcceptHandoffWithFollowUp(ctx context.Context, command AcceptH
 	if command.ExpectedUpdatedAt.IsZero() {
 		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("expected_updated_at is required"))
 	}
-	if command.IdempotencyKey == "" || len(command.IdempotencyKey) > 128 {
-		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("idempotency_key must be between 1 and 128 bytes"))
+	if command.IdempotencyKey == "" || !utf8.ValidString(command.IdempotencyKey) || utf8.RuneCountInString(command.IdempotencyKey) > 128 {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("idempotency_key must be between 1 and 128 Unicode characters"))
 	}
 	if command.Intent != HandoffFollowUpIntentAcceptAndEnsure {
 		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("unsupported handoff follow-up intent"))
