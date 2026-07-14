@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -1428,15 +1429,34 @@ func (s *Service) CreateHandoff(ctx context.Context, input Handoff) (Handoff, er
 }
 
 func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, error) {
-	projectID := strings.TrimSpace(input.ProjectID)
-	workItemID := strings.TrimSpace(input.WorkItemID)
-	id := strings.TrimSpace(input.ID)
-	title := strings.TrimSpace(input.Title)
-	body := strings.TrimSpace(input.Body)
-	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = HandoffStatusOpen
-	}
+	return s.PatchHandoff(ctx, input.ProjectID, input.WorkItemID, input.ID, HandoffUpdate{
+		ExpectedUpdatedAt: input.UpdatedAt,
+		Patch: HandoffPatch{
+			SourceAssignmentID:    &input.SourceAssignmentID,
+			SourceRunID:           &input.SourceRunID,
+			SourceChatSessionID:   &input.SourceChatSessionID,
+			SourceMessageID:       &input.SourceMessageID,
+			FromRoleID:            &input.FromRoleID,
+			ToRoleID:              &input.ToRoleID,
+			TargetAssignmentID:    &input.TargetAssignmentID,
+			TargetWorkItemID:      &input.TargetWorkItemID,
+			Title:                 &input.Title,
+			Body:                  &input.Body,
+			RecommendedNextAction: &input.RecommendedNextAction,
+			LinkedArtifactIDs:     &input.LinkedArtifactIDs,
+			LinkedMemoryIDs:       &input.LinkedMemoryIDs,
+			ContextRefs:           &input.ContextRefs,
+			Status:                &input.Status,
+			ProvenanceKind:        &input.ProvenanceKind,
+			TrustLabel:            &input.TrustLabel,
+		},
+	})
+}
+
+func (s *Service) PatchHandoff(ctx context.Context, projectID, workItemID, id string, update HandoffUpdate) (Handoff, error) {
+	projectID = strings.TrimSpace(projectID)
+	workItemID = strings.TrimSpace(workItemID)
+	id = strings.TrimSpace(id)
 	if projectID == "" {
 		return Handoff{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
 	}
@@ -1446,79 +1466,25 @@ func (s *Service) UpdateHandoff(ctx context.Context, input Handoff) (Handoff, er
 	if id == "" {
 		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff_id is required"))
 	}
-	if title == "" {
-		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff title is required"))
+	normalized, err := normalizeHandoffUpdate(update)
+	if err != nil {
+		return Handoff{}, err
 	}
-	if body == "" {
-		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff body is required"))
-	}
+	return s.store.UpdateHandoff(ctx, projectID, workItemID, id, normalized, s.now)
+}
+
+func (s *Service) UpdateHandoffStatus(ctx context.Context, projectID, workItemID, id string, update HandoffStatusUpdate) (Handoff, error) {
+	status := strings.TrimSpace(update.Status)
 	if !isHandoffStatus(status) {
 		return Handoff{}, errors.Join(ErrInvalid, errors.New("handoff status is invalid"))
 	}
-	existing, err := s.store.GetHandoff(ctx, projectID, workItemID, id)
-	if err != nil {
-		return Handoff{}, err
-	}
-	updatedAt := input.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = s.now()
-	}
-	statusChangedAt := input.StatusChangedAt
-	if statusChangedAt.IsZero() {
-		statusChangedAt = existing.StatusChangedAt
-	}
-	if statusChangedAt.IsZero() {
-		statusChangedAt = existing.CreatedAt
-	}
-	if status != existing.Status {
-		existingStatusChangedAt := existing.StatusChangedAt
-		if existingStatusChangedAt.IsZero() {
-			existingStatusChangedAt = existing.CreatedAt
-		}
-		if input.StatusChangedAt.IsZero() || input.StatusChangedAt.Equal(existingStatusChangedAt) {
-			statusChangedAt = updatedAt
-		} else {
-			statusChangedAt = input.StatusChangedAt
-		}
-	}
-	item := Handoff{
-		ID:                    id,
-		ProjectID:             projectID,
-		WorkItemID:            workItemID,
-		SourceAssignmentID:    strings.TrimSpace(input.SourceAssignmentID),
-		SourceRunID:           strings.TrimSpace(input.SourceRunID),
-		SourceChatSessionID:   strings.TrimSpace(input.SourceChatSessionID),
-		SourceMessageID:       strings.TrimSpace(input.SourceMessageID),
-		FromRoleID:            strings.TrimSpace(input.FromRoleID),
-		ToRoleID:              strings.TrimSpace(input.ToRoleID),
-		TargetAssignmentID:    strings.TrimSpace(input.TargetAssignmentID),
-		TargetWorkItemID:      strings.TrimSpace(input.TargetWorkItemID),
-		Title:                 title,
-		Body:                  body,
-		RecommendedNextAction: strings.TrimSpace(input.RecommendedNextAction),
-		LinkedArtifactIDs:     compactStrings(input.LinkedArtifactIDs),
-		LinkedMemoryIDs:       compactStrings(input.LinkedMemoryIDs),
-		ContextRefs:           compactStrings(input.ContextRefs),
-		Status:                status,
-		ProvenanceKind:        strings.TrimSpace(input.ProvenanceKind),
-		TrustLabel:            strings.TrimSpace(input.TrustLabel),
-		CreatedAt:             existing.CreatedAt,
-		UpdatedAt:             updatedAt,
-		StatusChangedAt:       statusChangedAt,
-	}
-	return s.store.UpdateHandoff(ctx, item)
+	return s.PatchHandoff(ctx, projectID, workItemID, id, HandoffUpdate{
+		ExpectedUpdatedAt: update.ExpectedUpdatedAt,
+		Patch:             HandoffPatch{Status: &status},
+	})
 }
 
-func (s *Service) UpdateHandoffStatus(ctx context.Context, projectID, workItemID, id, status string) (Handoff, error) {
-	existing, err := s.GetHandoff(ctx, projectID, workItemID, id)
-	if err != nil {
-		return Handoff{}, err
-	}
-	existing.Status = status
-	return s.UpdateHandoff(ctx, existing)
-}
-
-func (s *Service) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+func (s *Service) DeleteHandoff(ctx context.Context, projectID, workItemID, id string, deletion HandoffDelete) error {
 	projectID = strings.TrimSpace(projectID)
 	workItemID = strings.TrimSpace(workItemID)
 	id = strings.TrimSpace(id)
@@ -1531,7 +1497,83 @@ func (s *Service) DeleteHandoff(ctx context.Context, projectID, workItemID, id s
 	if id == "" {
 		return errors.Join(ErrInvalid, errors.New("handoff_id is required"))
 	}
-	return s.store.DeleteHandoff(ctx, projectID, workItemID, id)
+	if deletion.ExpectedUpdatedAt.IsZero() {
+		return errors.Join(ErrInvalid, errors.New("expected_updated_at is required"))
+	}
+	return s.store.DeleteHandoff(ctx, projectID, workItemID, id, deletion)
+}
+
+func (s *Service) AcceptHandoffWithFollowUp(ctx context.Context, command AcceptHandoffWithFollowUpCommand) (HandoffFollowUpResult, error) {
+	command.ProjectID = strings.TrimSpace(command.ProjectID)
+	command.WorkItemID = strings.TrimSpace(command.WorkItemID)
+	command.HandoffID = strings.TrimSpace(command.HandoffID)
+	command.IdempotencyKey = strings.TrimSpace(command.IdempotencyKey)
+	command.Intent = strings.TrimSpace(command.Intent)
+	if command.ProjectID == "" {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if command.WorkItemID == "" {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("work_item_id is required"))
+	}
+	if command.HandoffID == "" {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("handoff_id is required"))
+	}
+	if command.ExpectedUpdatedAt.IsZero() {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("expected_updated_at is required"))
+	}
+	if command.IdempotencyKey == "" || !utf8.ValidString(command.IdempotencyKey) || utf8.RuneCountInString(command.IdempotencyKey) > 128 {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("idempotency_key must be between 1 and 128 Unicode characters"))
+	}
+	if command.Intent != HandoffFollowUpIntentAcceptAndEnsure {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("unsupported handoff follow-up intent"))
+	}
+	return s.store.AcceptHandoffWithFollowUp(ctx, command, newID("asgn"), s.now)
+}
+
+func normalizeHandoffUpdate(update HandoffUpdate) (HandoffUpdate, error) {
+	if update.ExpectedUpdatedAt.IsZero() {
+		return HandoffUpdate{}, errors.Join(ErrInvalid, errors.New("expected_updated_at is required"))
+	}
+	trim := func(value **string) {
+		if *value == nil {
+			return
+		}
+		normalized := strings.TrimSpace(**value)
+		*value = &normalized
+	}
+	for _, value := range []**string{
+		&update.Patch.SourceAssignmentID, &update.Patch.SourceRunID,
+		&update.Patch.SourceChatSessionID, &update.Patch.SourceMessageID,
+		&update.Patch.FromRoleID, &update.Patch.ToRoleID,
+		&update.Patch.TargetAssignmentID, &update.Patch.TargetWorkItemID,
+		&update.Patch.Title, &update.Patch.Body,
+		&update.Patch.RecommendedNextAction, &update.Patch.Status,
+		&update.Patch.ProvenanceKind, &update.Patch.TrustLabel,
+	} {
+		trim(value)
+	}
+	if update.Patch.Title != nil && *update.Patch.Title == "" {
+		return HandoffUpdate{}, errors.Join(ErrInvalid, errors.New("handoff title is required"))
+	}
+	if update.Patch.Body != nil && *update.Patch.Body == "" {
+		return HandoffUpdate{}, errors.Join(ErrInvalid, errors.New("handoff body is required"))
+	}
+	if update.Patch.Status != nil && !isHandoffStatus(*update.Patch.Status) {
+		return HandoffUpdate{}, errors.Join(ErrInvalid, errors.New("handoff status is invalid"))
+	}
+	if update.Patch.LinkedArtifactIDs != nil {
+		items := compactStrings(*update.Patch.LinkedArtifactIDs)
+		update.Patch.LinkedArtifactIDs = &items
+	}
+	if update.Patch.LinkedMemoryIDs != nil {
+		items := compactStrings(*update.Patch.LinkedMemoryIDs)
+		update.Patch.LinkedMemoryIDs = &items
+	}
+	if update.Patch.ContextRefs != nil {
+		items := compactStrings(*update.Patch.ContextRefs)
+		update.Patch.ContextRefs = &items
+	}
+	return update, nil
 }
 
 func (s *Service) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error) {

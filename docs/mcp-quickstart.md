@@ -124,6 +124,35 @@ returns a conflict. Re-read before deciding whether the new state should be
 changed. Breaking (alpha): `assignments.update` now uses this nested
 compare-and-set shape and no longer changes lifecycle or execution fields.
 
+#### Optional: accept a handoff and queue its follow-up atomically
+
+Handoff edits, status changes, and deletes also require the exact
+`updated_at` returned by `handoffs.get`. To accept a handoff and ensure one
+follow-up assignment in a single durable operation, call:
+
+Breaking (alpha): `handoffs.update`, `handoffs.update_status`, and
+`handoffs.delete` now require `expected_updated_at`; stale or tokenless writes
+fail closed instead of replacing newer handoff state.
+The same guard applies to live assistant `update_handoff` actions: the embedded
+handoff must carry the exact `updated_at` revision that was read.
+
+```json
+{"jsonrpc":"2.0","id":"handoff-follow-up","method":"tools/call","params":{"name":"handoffs.accept_with_follow_up","arguments":{"project_id":"PROJECT_ID","work_item_id":"WORK_ITEM_ID","handoff_id":"HANDOFF_ID","expected_updated_at":"HANDOFF_UPDATED_AT","idempotency_key":"ONE-KEY-PER-OPERATOR-ACTION","intent":"accept_and_ensure_follow_up"}}}
+```
+
+The handoff must name a target role. Cairnline derives the target work item,
+root, execution mode, and role skills from portable project state. When no
+assignment is linked, it creates one pristine and queued, links it, and marks
+the handoff accepted in one transaction; it never claims or launches that new
+assignment. An existing linked assignment is reused and returned in its current
+authoritative state, even if it has already progressed or finished. Retry an
+uncertain request with the same idempotency key; Cairnline returns the original
+outcome and assignment identity with their current authoritative state instead
+of creating another assignment. If an operator later closes or changes that
+link, the replay conflicts rather than overriding the newer decision. Reusing a
+key for a different request, or writing from a stale `updated_at`, also
+conflicts.
+
 ### 5. Let A Compatible Agent Find Work
 
 An agent can ask for queued assignments matching its kind and skills:

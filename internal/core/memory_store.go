@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"time"
@@ -21,6 +22,18 @@ type MemoryStore struct {
 	entries     map[string]map[string]MemoryEntry
 	memory      map[string]map[string]MemoryCandidate
 	assistant   map[string]AssistantProposalRecord
+	receipts    map[handoffCommandReceiptKey]handoffCommandReceipt
+}
+
+type handoffCommandReceiptKey struct {
+	projectID      string
+	operation      string
+	idempotencyKey string
+}
+
+type handoffCommandReceipt struct {
+	requestHash string
+	result      HandoffFollowUpResult
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -37,6 +50,7 @@ func NewMemoryStore() *MemoryStore {
 		entries:     make(map[string]map[string]MemoryEntry),
 		memory:      make(map[string]map[string]MemoryCandidate),
 		assistant:   make(map[string]AssistantProposalRecord),
+		receipts:    make(map[handoffCommandReceiptKey]handoffCommandReceipt),
 	}
 }
 
@@ -103,6 +117,11 @@ func (s *MemoryStore) DeleteProject(ctx context.Context, id string) error {
 	delete(s.evidence, id)
 	delete(s.reviews, id)
 	delete(s.handoffs, id)
+	for key, receipt := range s.receipts {
+		if receipt.result.Handoff.ProjectID == id {
+			delete(s.receipts, key)
+		}
+	}
 	delete(s.entries, id)
 	delete(s.memory, id)
 	for proposalID, proposal := range s.assistant {
@@ -866,7 +885,7 @@ func (s *MemoryStore) ListHandoffs(ctx context.Context, projectID, workItemID st
 	items := make([]Handoff, 0, len(s.handoffs[projectID]))
 	for _, item := range s.handoffs[projectID] {
 		if item.WorkItemID == workItemID {
-			items = append(items, item)
+			items = append(items, cloneHandoff(item))
 		}
 	}
 	slices.SortFunc(items, func(a, b Handoff) int {
@@ -886,7 +905,7 @@ func (s *MemoryStore) GetHandoff(ctx context.Context, projectID, workItemID, id 
 	if !ok || item.WorkItemID != workItemID {
 		return Handoff{}, ErrNotFound
 	}
-	return item, nil
+	return cloneHandoff(item), nil
 }
 
 func (s *MemoryStore) CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error) {
@@ -902,11 +921,13 @@ func (s *MemoryStore) CreateHandoff(ctx context.Context, handoff Handoff) (Hando
 	if _, ok := s.handoffs[handoff.ProjectID][handoff.ID]; ok {
 		return Handoff{}, ErrDuplicate
 	}
-	s.handoffs[handoff.ProjectID][handoff.ID] = handoff
-	return handoff, nil
+	s.handoffs[handoff.ProjectID][handoff.ID] = cloneHandoff(handoff)
+	return cloneHandoff(handoff), nil
 }
 
-func (s *MemoryStore) UpdateHandoff(ctx context.Context, handoff Handoff) (Handoff, error) {
+// RestoreHandoffSnapshot atomically replaces a handoff during offline snapshot
+// import. Live callers must use the CAS transition methods below.
+func (s *MemoryStore) RestoreHandoffSnapshot(ctx context.Context, handoff Handoff) (Handoff, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -917,12 +938,45 @@ func (s *MemoryStore) UpdateHandoff(ctx context.Context, handoff Handoff) (Hando
 	if !ok || existing.WorkItemID != handoff.WorkItemID {
 		return Handoff{}, ErrNotFound
 	}
-	handoff.CreatedAt = existing.CreatedAt
-	s.handoffs[handoff.ProjectID][handoff.ID] = handoff
-	return handoff, nil
+	s.handoffs[handoff.ProjectID][handoff.ID] = cloneHandoff(handoff)
+	return cloneHandoff(handoff), nil
 }
 
-func (s *MemoryStore) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
+func (s *MemoryStore) UpdateHandoff(ctx context.Context, projectID, workItemID, id string, update HandoffUpdate, now func() time.Time) (Handoff, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.requireWorkItemLocked(projectID, workItemID); err != nil {
+		return Handoff{}, err
+	}
+	current, ok := s.handoffs[projectID][id]
+	if !ok || current.WorkItemID != workItemID {
+		return Handoff{}, ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(update.ExpectedUpdatedAt) {
+		return Handoff{}, ErrConflict
+	}
+	replacement := update.Patch.Apply(cloneHandoff(current))
+	if current.SameContent(replacement) {
+		return cloneHandoff(current), nil
+	}
+	if err := s.validateHandoffLocked(replacement); err != nil {
+		return Handoff{}, err
+	}
+	replacement.CreatedAt = current.CreatedAt
+	replacement.UpdatedAt = handoffTransitionTime(current, now)
+	replacement.StatusChangedAt = current.StatusChangedAt
+	if replacement.StatusChangedAt.IsZero() {
+		replacement.StatusChangedAt = current.CreatedAt
+	}
+	if replacement.Status != current.Status {
+		replacement.StatusChangedAt = replacement.UpdatedAt
+	}
+	s.handoffs[projectID][id] = cloneHandoff(replacement)
+	return cloneHandoff(replacement), nil
+}
+
+func (s *MemoryStore) DeleteHandoff(ctx context.Context, projectID, workItemID, id string, deletion HandoffDelete) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -933,8 +987,187 @@ func (s *MemoryStore) DeleteHandoff(ctx context.Context, projectID, workItemID, 
 	if !ok || item.WorkItemID != workItemID {
 		return ErrNotFound
 	}
+	if !item.UpdatedAt.Equal(deletion.ExpectedUpdatedAt) {
+		return ErrConflict
+	}
 	delete(s.handoffs[projectID], id)
 	return nil
+}
+
+func (s *MemoryStore) AcceptHandoffWithFollowUp(ctx context.Context, command AcceptHandoffWithFollowUpCommand, newAssignmentID string, now func() time.Time) (HandoffFollowUpResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	receiptKey := handoffCommandReceiptKey{
+		projectID:      command.ProjectID,
+		operation:      "accept_handoff_with_follow_up",
+		idempotencyKey: command.IdempotencyKey,
+	}
+	requestHash := command.RequestHash()
+	if receipt, ok := s.receipts[receiptKey]; ok {
+		if receipt.requestHash != requestHash {
+			return HandoffFollowUpResult{}, ErrConflict
+		}
+		result := cloneHandoffFollowUpResult(receipt.result)
+		currentHandoff, handoffOK := s.handoffs[command.ProjectID][result.Handoff.ID]
+		currentAssignment, assignmentOK := s.assignments[command.ProjectID][result.Assignment.ID]
+		if !handoffOK || !assignmentOK ||
+			currentHandoff.Status != HandoffStatusAccepted ||
+			currentHandoff.TargetAssignmentID != currentAssignment.ID ||
+			currentHandoff.TargetWorkItemID != currentAssignment.WorkItemID ||
+			currentHandoff.ToRoleID != currentAssignment.RoleID {
+			return HandoffFollowUpResult{}, ErrConflict
+		}
+		result.Handoff = cloneHandoff(currentHandoff)
+		result.Assignment = cloneAssignment(currentAssignment)
+		result.Replayed = true
+		return result, nil
+	}
+	current, ok := s.handoffs[command.ProjectID][command.HandoffID]
+	if !ok || current.WorkItemID != command.WorkItemID {
+		return HandoffFollowUpResult{}, ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
+		return HandoffFollowUpResult{}, ErrConflict
+	}
+	if current.Status == HandoffStatusDismissed || current.Status == HandoffStatusSuperseded {
+		return HandoffFollowUpResult{}, ErrConflict
+	}
+	if current.ToRoleID == "" {
+		return HandoffFollowUpResult{}, errors.Join(ErrInvalid, errors.New("handoff to_role_id is required"))
+	}
+	role, ok := s.roles[command.ProjectID][current.ToRoleID]
+	if !ok {
+		return HandoffFollowUpResult{}, ErrNotFound
+	}
+
+	assignment := Assignment{}
+	outcome := HandoffFollowUpCreated
+	if current.TargetAssignmentID != "" {
+		linked, ok := s.assignments[command.ProjectID][current.TargetAssignmentID]
+		if !ok {
+			return HandoffFollowUpResult{}, ErrConflict
+		}
+		if linked.RoleID != current.ToRoleID || (current.TargetWorkItemID != "" && linked.WorkItemID != current.TargetWorkItemID) {
+			return HandoffFollowUpResult{}, ErrConflict
+		}
+		if _, ok := s.workItems[command.ProjectID][linked.WorkItemID]; !ok {
+			return HandoffFollowUpResult{}, ErrConflict
+		}
+		assignment = cloneAssignment(linked)
+		if current.Status == HandoffStatusAccepted && current.TargetWorkItemID == linked.WorkItemID {
+			outcome = HandoffFollowUpAlreadySatisfied
+		} else {
+			outcome = HandoffFollowUpLinkedExisting
+		}
+		current.TargetWorkItemID = linked.WorkItemID
+	} else {
+		targetWorkItemID := current.TargetWorkItemID
+		if targetWorkItemID == "" {
+			targetWorkItemID = current.WorkItemID
+		}
+		workItem, ok := s.workItems[command.ProjectID][targetWorkItemID]
+		if !ok {
+			return HandoffFollowUpResult{}, ErrNotFound
+		}
+		if workItem.RootID != "" {
+			project, ok := s.projects[command.ProjectID]
+			if !ok || !projectHasRoot(project, workItem.RootID) {
+				return HandoffFollowUpResult{}, ErrNotFound
+			}
+		}
+		executionMode := role.DefaultExecutionMode
+		if executionMode == "" {
+			executionMode = ExecutionMCPPull
+		}
+		desiredKind := DesiredAgentAny
+		if executionMode == ExecutionManual {
+			desiredKind = "human"
+		}
+		stamp := time.Now().UTC()
+		if now != nil {
+			stamp = now()
+		}
+		assignment = Assignment{
+			ID:            newAssignmentID,
+			ProjectID:     command.ProjectID,
+			WorkItemID:    targetWorkItemID,
+			RoleID:        current.ToRoleID,
+			RootID:        workItem.RootID,
+			ExecutionMode: executionMode,
+			Status:        AssignmentQueued,
+			DesiredAgent: DesiredAgent{
+				Kind:     desiredKind,
+				SkillIDs: append([]string(nil), role.DefaultSkillIDs...),
+			},
+			CreatedAt: stamp,
+			UpdatedAt: stamp,
+		}
+		if s.assignments[command.ProjectID] == nil {
+			s.assignments[command.ProjectID] = make(map[string]Assignment)
+		}
+		if _, exists := s.assignments[command.ProjectID][assignment.ID]; exists {
+			return HandoffFollowUpResult{}, ErrDuplicate
+		}
+		s.assignments[command.ProjectID][assignment.ID] = cloneAssignment(assignment)
+		current.TargetAssignmentID = assignment.ID
+		current.TargetWorkItemID = targetWorkItemID
+	}
+
+	if outcome != HandoffFollowUpAlreadySatisfied {
+		previousStatus := current.Status
+		current.Status = HandoffStatusAccepted
+		current.UpdatedAt = handoffTransitionTime(current, now)
+		if previousStatus != current.Status {
+			current.StatusChangedAt = current.UpdatedAt
+		}
+		s.handoffs[command.ProjectID][command.HandoffID] = cloneHandoff(current)
+	}
+	result := HandoffFollowUpResult{
+		Handoff:    cloneHandoff(current),
+		Assignment: cloneAssignment(assignment),
+		Outcome:    outcome,
+	}
+	s.receipts[receiptKey] = handoffCommandReceipt{requestHash: requestHash, result: cloneHandoffFollowUpResult(result)}
+	return result, nil
+}
+
+func cloneHandoff(handoff Handoff) Handoff {
+	handoff.LinkedArtifactIDs = append([]string(nil), handoff.LinkedArtifactIDs...)
+	handoff.LinkedMemoryIDs = append([]string(nil), handoff.LinkedMemoryIDs...)
+	handoff.ContextRefs = append([]string(nil), handoff.ContextRefs...)
+	return handoff
+}
+
+func cloneHandoffFollowUpResult(result HandoffFollowUpResult) HandoffFollowUpResult {
+	result.Handoff = cloneHandoff(result.Handoff)
+	result.Assignment = cloneAssignment(result.Assignment)
+	return result
+}
+
+func handoffTransitionTime(current Handoff, now func() time.Time) time.Time {
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now()
+	}
+	for _, floor := range []time.Time{current.CreatedAt, current.UpdatedAt, current.StatusChangedAt} {
+		if stamp.Before(floor) {
+			stamp = floor
+		}
+	}
+	if !stamp.After(current.UpdatedAt) {
+		stamp = current.UpdatedAt.Add(time.Nanosecond)
+	}
+	return stamp
+}
+
+func projectHasRoot(project Project, rootID string) bool {
+	for _, root := range project.Roots {
+		if root.ID == rootID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) validateHandoffLocked(handoff Handoff) error {

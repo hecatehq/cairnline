@@ -10,18 +10,28 @@ import (
 
 func (s *Service) AssistantPropose(ctx context.Context, input AssistantProposal) (AssistantProposal, error) {
 	proposal := normalizeAssistantProposal(input, s.now)
+	if err := validateAssistantProposal(proposal, true); err != nil {
+		return AssistantProposal{}, err
+	}
+	return proposal, nil
+}
+
+func validateAssistantProposal(proposal AssistantProposal, requireHandoffToken bool) error {
 	if proposal.Title == "" {
-		return AssistantProposal{}, errors.Join(ErrInvalid, errors.New("proposal title is required"))
+		return errors.Join(ErrInvalid, errors.New("proposal title is required"))
 	}
 	if len(proposal.Actions) == 0 {
-		return AssistantProposal{}, errors.Join(ErrInvalid, errors.New("proposal actions are required"))
+		return errors.Join(ErrInvalid, errors.New("proposal actions are required"))
 	}
 	for idx, action := range proposal.Actions {
 		if err := validateAssistantAction(action); err != nil {
-			return AssistantProposal{}, fmt.Errorf("action %d: %w", idx, err)
+			return fmt.Errorf("action %d: %w", idx, err)
+		}
+		if requireHandoffToken && action.Kind == AssistantActionUpdateHandoff && action.Handoff.UpdatedAt.IsZero() {
+			return fmt.Errorf("action %d: %w", idx, errors.Join(ErrInvalid, errors.New("handoff updated_at is required for compare-and-set")))
 		}
 	}
-	return proposal, nil
+	return nil
 }
 
 func (s *Service) ListAssistantProposals(ctx context.Context, projectID string) ([]AssistantProposalRecord, error) {
@@ -323,7 +333,8 @@ func validateAssistantProposalRecord(record AssistantProposalRecord) error {
 	if strings.TrimSpace(record.Proposal.ID) != record.ID {
 		return errors.Join(ErrInvalid, errors.New("proposal record id mismatch"))
 	}
-	if _, err := (&Service{now: func() time.Time { return record.CreatedAt }}).AssistantPropose(context.Background(), record.Proposal); err != nil {
+	normalized := normalizeAssistantProposal(record.Proposal, func() time.Time { return record.CreatedAt })
+	if err := validateAssistantProposal(normalized, false); err != nil {
 		return err
 	}
 	for idx, attempt := range record.ApplyAttempts {

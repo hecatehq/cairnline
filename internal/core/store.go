@@ -64,8 +64,10 @@ type Store interface {
 	ListHandoffs(ctx context.Context, projectID, workItemID string) ([]Handoff, error)
 	GetHandoff(ctx context.Context, projectID, workItemID, id string) (Handoff, error)
 	CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
-	UpdateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
-	DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error
+	RestoreHandoffSnapshot(ctx context.Context, handoff Handoff) (Handoff, error)
+	UpdateHandoff(ctx context.Context, projectID, workItemID, id string, update HandoffUpdate, now func() time.Time) (Handoff, error)
+	DeleteHandoff(ctx context.Context, projectID, workItemID, id string, deletion HandoffDelete) error
+	AcceptHandoffWithFollowUp(ctx context.Context, command AcceptHandoffWithFollowUpCommand, newAssignmentID string, now func() time.Time) (HandoffFollowUpResult, error)
 
 	ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]MemoryEntry, error)
 	GetMemoryEntry(ctx context.Context, projectID, id string) (MemoryEntry, error)

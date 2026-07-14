@@ -204,9 +204,20 @@ func (s *Store) migrate(ctx context.Context) error {
 			trust_label TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
+			status_changed_at TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (project_id, id),
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS command_receipts (
+			project_id TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			idempotency_key TEXT NOT NULL,
+			request_hash TEXT NOT NULL,
+			response_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, operation, idempotency_key),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS memory_entries (
 			project_id TEXT NOT NULL,
@@ -1033,21 +1044,42 @@ type assignmentTransition struct {
 	active bool
 }
 
-func (s *Store) beginAssignmentTransition(ctx context.Context, projectID, id string) (*assignmentTransition, core.Assignment, error) {
+func (s *Store) beginImmediateTransition(ctx context.Context) (*assignmentTransition, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return nil, core.Assignment{}, err
+		return nil, err
 	}
 	transition := &assignmentTransition{conn: conn}
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		_ = conn.Close()
-		return nil, core.Assignment{}, mapSQLiteWriteError(err)
+		return nil, mapSQLiteWriteError(err)
 	}
 	transition.active = true
+	return transition, nil
+}
+
+func (s *Store) beginAssignmentTransition(ctx context.Context, projectID, id string) (*assignmentTransition, core.Assignment, error) {
+	transition, err := s.beginImmediateTransition(ctx)
+	if err != nil {
+		return nil, core.Assignment{}, err
+	}
 	current, err := scanAssignment(transition.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, projectID, id))
 	if err != nil {
 		_ = transition.Rollback()
 		return nil, core.Assignment{}, err
+	}
+	return transition, current, nil
+}
+
+func (s *Store) beginHandoffTransition(ctx context.Context, projectID, workItemID, id string) (*assignmentTransition, core.Handoff, error) {
+	transition, err := s.beginImmediateTransition(ctx)
+	if err != nil {
+		return nil, core.Handoff{}, err
+	}
+	current, err := scanHandoff(transition.QueryRowContext(ctx, handoffSelectSQL+` WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id))
+	if err != nil {
+		_ = transition.Rollback()
+		return nil, core.Handoff{}, err
 	}
 	return transition, current, nil
 }
@@ -1117,6 +1149,21 @@ func finishAssignmentTransition(transition *assignmentTransition, row *sql.Row) 
 	return item, nil
 }
 
+func finishHandoffTransition(transition *assignmentTransition, row *sql.Row, notFoundIsConflict bool) (core.Handoff, error) {
+	item, err := scanHandoff(row)
+	if err != nil {
+		_ = transition.Rollback()
+		if notFoundIsConflict && errors.Is(err, core.ErrNotFound) {
+			return core.Handoff{}, core.ErrConflict
+		}
+		return core.Handoff{}, mapSQLiteWriteError(err)
+	}
+	if err := transition.Commit(); err != nil {
+		return core.Handoff{}, mapSQLiteWriteError(err)
+	}
+	return item, nil
+}
+
 func assignmentTransitionTime(current core.Assignment, now func() time.Time) time.Time {
 	stamp := time.Now().UTC()
 	if now != nil {
@@ -1124,6 +1171,22 @@ func assignmentTransitionTime(current core.Assignment, now func() time.Time) tim
 	}
 	if stamp.Before(current.StartedAt) {
 		stamp = current.StartedAt
+	}
+	if !stamp.After(current.UpdatedAt) {
+		stamp = current.UpdatedAt.Add(time.Nanosecond)
+	}
+	return stamp
+}
+
+func handoffTransitionTime(current core.Handoff, now func() time.Time) time.Time {
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now()
+	}
+	for _, floor := range []time.Time{current.CreatedAt, current.UpdatedAt, current.StatusChangedAt} {
+		if stamp.Before(floor) {
+			stamp = floor
+		}
 	}
 	if !stamp.After(current.UpdatedAt) {
 		stamp = current.UpdatedAt.Add(time.Nanosecond)
@@ -1335,7 +1398,7 @@ func (s *Store) ListHandoffs(ctx context.Context, projectID, workItemID string) 
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at FROM handoffs WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
+	rows, err := s.db.QueryContext(ctx, handoffSelectSQL+` WHERE project_id = ? AND work_item_id = ? ORDER BY updated_at DESC`, projectID, workItemID)
 	if err != nil {
 		return nil, err
 	}
@@ -1356,7 +1419,7 @@ func (s *Store) GetHandoff(ctx context.Context, projectID, workItemID, id string
 	if err := s.requireWorkItem(ctx, projectID, workItemID); err != nil {
 		return core.Handoff{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+	row := s.db.QueryRowContext(ctx, handoffSelectSQL+` WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
 	return scanHandoff(row)
 }
 
@@ -1417,72 +1480,340 @@ func (s *Store) CreateHandoff(ctx context.Context, handoff core.Handoff) (core.H
 	return handoff, nil
 }
 
-func (s *Store) UpdateHandoff(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
-	if err := s.requireWorkItem(ctx, handoff.ProjectID, handoff.WorkItemID); err != nil {
-		return core.Handoff{}, err
-	}
+func validateHandoffTransition(ctx context.Context, transition *assignmentTransition, handoff core.Handoff) error {
 	if handoff.SourceAssignmentID != "" {
-		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.SourceAssignmentID)
+		assignment, err := scanAssignment(transition.conn.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, handoff.ProjectID, handoff.SourceAssignmentID))
 		if err != nil {
-			return core.Handoff{}, err
+			return err
 		}
 		if assignment.WorkItemID != handoff.WorkItemID {
-			return core.Handoff{}, core.ErrNotFound
+			return core.ErrNotFound
 		}
 	}
-	if handoff.FromRoleID != "" {
-		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.FromRoleID); err != nil {
-			return core.Handoff{}, err
+	for _, roleID := range []string{handoff.FromRoleID, handoff.ToRoleID} {
+		if roleID == "" {
+			continue
 		}
-	}
-	if handoff.ToRoleID != "" {
-		if _, err := s.GetRole(ctx, handoff.ProjectID, handoff.ToRoleID); err != nil {
-			return core.Handoff{}, err
+		if _, err := scanRole(transition.conn.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, handoff.ProjectID, roleID)); err != nil {
+			return err
 		}
 	}
 	if handoff.TargetAssignmentID != "" {
-		assignment, err := s.GetAssignment(ctx, handoff.ProjectID, handoff.TargetAssignmentID)
+		assignment, err := scanAssignment(transition.conn.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, handoff.ProjectID, handoff.TargetAssignmentID))
 		if err != nil {
-			return core.Handoff{}, err
+			return err
 		}
 		if handoff.TargetWorkItemID != "" && assignment.WorkItemID != handoff.TargetWorkItemID {
-			return core.Handoff{}, core.ErrNotFound
+			return core.ErrNotFound
 		}
 	}
 	if handoff.TargetWorkItemID != "" {
-		if err := s.requireWorkItem(ctx, handoff.ProjectID, handoff.TargetWorkItemID); err != nil {
-			return core.Handoff{}, err
+		if _, err := scanWorkItem(transition.conn.QueryRowContext(ctx, `SELECT project_id, id, title, brief, status, priority, owner_role_id, reviewer_role_ids_json, root_id, created_at, updated_at FROM work_items WHERE project_id = ? AND id = ?`, handoff.ProjectID, handoff.TargetWorkItemID)); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func updateHandoffRow(ctx context.Context, transition *assignmentTransition, handoff core.Handoff, expectedUpdatedAt string) (*sql.Row, error) {
 	linkedArtifactIDs, err := encodeJSON(handoff.LinkedArtifactIDs)
 	if err != nil {
-		return core.Handoff{}, err
+		return nil, err
 	}
 	linkedMemoryIDs, err := encodeJSON(handoff.LinkedMemoryIDs)
 	if err != nil {
-		return core.Handoff{}, err
+		return nil, err
 	}
 	contextRefs, err := encodeJSON(handoff.ContextRefs)
 	if err != nil {
-		return core.Handoff{}, err
+		return nil, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE handoffs SET source_assignment_id = ?, source_run_id = ?, source_chat_session_id = ?, source_message_id = ?, from_role_id = ?, to_role_id = ?, target_assignment_id = ?, target_work_item_id = ?, title = ?, body = ?, recommended_next_action = ?, linked_artifact_ids_json = ?, linked_memory_ids_json = ?, context_refs_json = ?, status = ?, provenance_kind = ?, trust_label = ?, created_at = ?, updated_at = ?, status_changed_at = ? WHERE project_id = ? AND work_item_id = ? AND id = ?`,
-		handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID, handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID, handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs, handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt), encodeTime(handoff.StatusChangedAt), handoff.ProjectID, handoff.WorkItemID, handoff.ID)
-	if err != nil {
-		return core.Handoff{}, mapSQLiteWriteError(err)
+	args := []any{
+		handoff.SourceAssignmentID, handoff.SourceRunID, handoff.SourceChatSessionID, handoff.SourceMessageID,
+		handoff.FromRoleID, handoff.ToRoleID, handoff.TargetAssignmentID, handoff.TargetWorkItemID,
+		handoff.Title, handoff.Body, handoff.RecommendedNextAction, linkedArtifactIDs, linkedMemoryIDs, contextRefs,
+		handoff.Status, handoff.ProvenanceKind, handoff.TrustLabel, encodeTime(handoff.CreatedAt), encodeTime(handoff.UpdatedAt),
+		encodeTime(handoff.StatusChangedAt), handoff.ProjectID, handoff.WorkItemID, handoff.ID,
 	}
-	if err := requireAffected(result); err != nil {
-		return core.Handoff{}, err
+	query := `UPDATE handoffs SET source_assignment_id = ?, source_run_id = ?, source_chat_session_id = ?, source_message_id = ?, from_role_id = ?, to_role_id = ?, target_assignment_id = ?, target_work_item_id = ?, title = ?, body = ?, recommended_next_action = ?, linked_artifact_ids_json = ?, linked_memory_ids_json = ?, context_refs_json = ?, status = ?, provenance_kind = ?, trust_label = ?, created_at = ?, updated_at = ?, status_changed_at = ? WHERE project_id = ? AND work_item_id = ? AND id = ?`
+	if expectedUpdatedAt != "" {
+		query += ` AND updated_at = ?`
+		args = append(args, expectedUpdatedAt)
 	}
-	return handoff, nil
+	query += ` RETURNING ` + handoffColumnsSQL
+	return transition.conn.QueryRowContext(ctx, query, args...), nil
 }
 
-func (s *Store) DeleteHandoff(ctx context.Context, projectID, workItemID, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ?`, projectID, workItemID, id)
+// RestoreHandoffSnapshot atomically replaces a handoff during offline snapshot
+// import. Live callers must use UpdateHandoff's compare-and-set contract.
+func (s *Store) RestoreHandoffSnapshot(ctx context.Context, handoff core.Handoff) (core.Handoff, error) {
+	transition, _, err := s.beginHandoffTransition(ctx, handoff.ProjectID, handoff.WorkItemID, handoff.ID)
 	if err != nil {
+		return core.Handoff{}, err
+	}
+	if err := validateHandoffTransition(ctx, transition, handoff); err != nil {
+		_ = transition.Rollback()
+		return core.Handoff{}, err
+	}
+	row, err := updateHandoffRow(ctx, transition, handoff, "")
+	if err != nil {
+		_ = transition.Rollback()
+		return core.Handoff{}, err
+	}
+	return finishHandoffTransition(transition, row, false)
+}
+
+func (s *Store) UpdateHandoff(ctx context.Context, projectID, workItemID, id string, update core.HandoffUpdate, now func() time.Time) (core.Handoff, error) {
+	transition, current, err := s.beginHandoffTransition(ctx, projectID, workItemID, id)
+	if err != nil {
+		return core.Handoff{}, err
+	}
+	if !current.UpdatedAt.Equal(update.ExpectedUpdatedAt) {
+		_ = transition.Rollback()
+		return core.Handoff{}, core.ErrConflict
+	}
+	replacement := update.Patch.Apply(current)
+	if current.SameContent(replacement) {
+		_ = transition.Rollback()
+		return current, nil
+	}
+	if err := validateHandoffTransition(ctx, transition, replacement); err != nil {
+		_ = transition.Rollback()
+		return core.Handoff{}, err
+	}
+	replacement.CreatedAt = current.CreatedAt
+	replacement.UpdatedAt = handoffTransitionTime(current, now)
+	replacement.StatusChangedAt = current.StatusChangedAt
+	if replacement.StatusChangedAt.IsZero() {
+		replacement.StatusChangedAt = current.CreatedAt
+	}
+	if replacement.Status != current.Status {
+		replacement.StatusChangedAt = replacement.UpdatedAt
+	}
+	row, err := updateHandoffRow(ctx, transition, replacement, encodeTime(update.ExpectedUpdatedAt))
+	if err != nil {
+		_ = transition.Rollback()
+		return core.Handoff{}, err
+	}
+	return finishHandoffTransition(transition, row, true)
+}
+
+func (s *Store) DeleteHandoff(ctx context.Context, projectID, workItemID, id string, deletion core.HandoffDelete) error {
+	transition, current, err := s.beginHandoffTransition(ctx, projectID, workItemID, id)
+	if err != nil {
+		return err
+	}
+	if !current.UpdatedAt.Equal(deletion.ExpectedUpdatedAt) {
+		_ = transition.Rollback()
+		return core.ErrConflict
+	}
+	result, err := transition.conn.ExecContext(ctx, `DELETE FROM handoffs WHERE project_id = ? AND work_item_id = ? AND id = ? AND updated_at = ?`, projectID, workItemID, id, encodeTime(deletion.ExpectedUpdatedAt))
+	if err != nil {
+		_ = transition.Rollback()
 		return mapSQLiteWriteError(err)
 	}
-	return requireAffected(result)
+	if err := requireAffected(result); err != nil {
+		_ = transition.Rollback()
+		return core.ErrConflict
+	}
+	if err := transition.Commit(); err != nil {
+		return mapSQLiteWriteError(err)
+	}
+	return nil
+}
+
+func (s *Store) AcceptHandoffWithFollowUp(ctx context.Context, command core.AcceptHandoffWithFollowUpCommand, newAssignmentID string, now func() time.Time) (core.HandoffFollowUpResult, error) {
+	transition, err := s.beginImmediateTransition(ctx)
+	if err != nil {
+		return core.HandoffFollowUpResult{}, err
+	}
+	rollback := func(err error) (core.HandoffFollowUpResult, error) {
+		_ = transition.Rollback()
+		return core.HandoffFollowUpResult{}, err
+	}
+
+	requestHash := command.RequestHash()
+	var storedHash, responseJSON string
+	receiptErr := transition.conn.QueryRowContext(ctx, `SELECT request_hash, response_json FROM command_receipts WHERE project_id = ? AND operation = ? AND idempotency_key = ?`, command.ProjectID, acceptHandoffWithFollowUpOperation, command.IdempotencyKey).Scan(&storedHash, &responseJSON)
+	switch {
+	case receiptErr == nil:
+		if storedHash != requestHash {
+			return rollback(core.ErrConflict)
+		}
+		var replay core.HandoffFollowUpResult
+		if err := json.Unmarshal([]byte(responseJSON), &replay); err != nil {
+			return rollback(fmt.Errorf("decode handoff command receipt: %w", err))
+		}
+		currentHandoff, err := scanHandoff(transition.conn.QueryRowContext(ctx, handoffSelectSQL+` WHERE project_id = ? AND work_item_id = ? AND id = ?`, command.ProjectID, command.WorkItemID, command.HandoffID))
+		if err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				err = core.ErrConflict
+			}
+			return rollback(err)
+		}
+		currentAssignment, err := scanAssignment(transition.conn.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, command.ProjectID, replay.Assignment.ID))
+		if err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				err = core.ErrConflict
+			}
+			return rollback(err)
+		}
+		if replay.Assignment.ID == "" || currentHandoff.Status != core.HandoffStatusAccepted || currentHandoff.TargetAssignmentID != replay.Assignment.ID || currentHandoff.TargetWorkItemID != currentAssignment.WorkItemID || currentHandoff.ToRoleID == "" || currentHandoff.ToRoleID != currentAssignment.RoleID {
+			return rollback(core.ErrConflict)
+		}
+		replay.Handoff = currentHandoff
+		replay.Assignment = currentAssignment
+		replay.Replayed = true
+		_ = transition.Rollback()
+		return replay, nil
+	case !errors.Is(receiptErr, sql.ErrNoRows):
+		return rollback(mapSQLiteReadError(receiptErr))
+	}
+
+	current, err := scanHandoff(transition.conn.QueryRowContext(ctx, handoffSelectSQL+` WHERE project_id = ? AND work_item_id = ? AND id = ?`, command.ProjectID, command.WorkItemID, command.HandoffID))
+	if err != nil {
+		return rollback(err)
+	}
+	if !current.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
+		return rollback(core.ErrConflict)
+	}
+	if current.Status == core.HandoffStatusDismissed || current.Status == core.HandoffStatusSuperseded {
+		return rollback(core.ErrConflict)
+	}
+	if current.ToRoleID == "" {
+		return rollback(errors.Join(core.ErrInvalid, errors.New("handoff to_role_id is required")))
+	}
+	role, err := scanRole(transition.conn.QueryRowContext(ctx, `SELECT project_id, id, name, description, instructions, default_skill_ids_json, default_execution_mode FROM roles WHERE project_id = ? AND id = ?`, command.ProjectID, current.ToRoleID))
+	if err != nil {
+		return rollback(err)
+	}
+
+	var assignment core.Assignment
+	outcome := core.HandoffFollowUpCreated
+	if current.TargetAssignmentID != "" {
+		assignment, err = scanAssignment(transition.conn.QueryRowContext(ctx, assignmentSelectSQL+` WHERE project_id = ? AND id = ?`, command.ProjectID, current.TargetAssignmentID))
+		if err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				err = core.ErrConflict
+			}
+			return rollback(err)
+		}
+		if assignment.RoleID != current.ToRoleID || (current.TargetWorkItemID != "" && assignment.WorkItemID != current.TargetWorkItemID) {
+			return rollback(core.ErrConflict)
+		}
+		if _, err := scanWorkItem(transition.conn.QueryRowContext(ctx, `SELECT project_id, id, title, brief, status, priority, owner_role_id, reviewer_role_ids_json, root_id, created_at, updated_at FROM work_items WHERE project_id = ? AND id = ?`, command.ProjectID, assignment.WorkItemID)); err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				err = core.ErrConflict
+			}
+			return rollback(err)
+		}
+		if current.Status == core.HandoffStatusAccepted && current.TargetWorkItemID == assignment.WorkItemID {
+			outcome = core.HandoffFollowUpAlreadySatisfied
+		} else {
+			outcome = core.HandoffFollowUpLinkedExisting
+		}
+		current.TargetWorkItemID = assignment.WorkItemID
+	} else {
+		targetWorkItemID := current.TargetWorkItemID
+		if targetWorkItemID == "" {
+			targetWorkItemID = current.WorkItemID
+		}
+		workItem, err := scanWorkItem(transition.conn.QueryRowContext(ctx, `SELECT project_id, id, title, brief, status, priority, owner_role_id, reviewer_role_ids_json, root_id, created_at, updated_at FROM work_items WHERE project_id = ? AND id = ?`, command.ProjectID, targetWorkItemID))
+		if err != nil {
+			return rollback(err)
+		}
+		if workItem.RootID != "" {
+			project, err := scanProject(transition.conn.QueryRowContext(ctx, `SELECT id, name, description, roots_json, default_root_id, context_sources_json, created_at, updated_at FROM projects WHERE id = ?`, command.ProjectID))
+			if err != nil {
+				return rollback(err)
+			}
+			rootFound := false
+			for _, root := range project.Roots {
+				if root.ID == workItem.RootID {
+					rootFound = true
+					break
+				}
+			}
+			if !rootFound {
+				return rollback(core.ErrNotFound)
+			}
+		}
+		executionMode := role.DefaultExecutionMode
+		if executionMode == "" {
+			executionMode = core.ExecutionMCPPull
+		}
+		desiredKind := core.DesiredAgentAny
+		if executionMode == core.ExecutionManual {
+			desiredKind = "human"
+		}
+		stamp := time.Now().UTC()
+		if now != nil {
+			stamp = now()
+		}
+		assignment = core.Assignment{
+			ID:            newAssignmentID,
+			ProjectID:     command.ProjectID,
+			WorkItemID:    targetWorkItemID,
+			RoleID:        current.ToRoleID,
+			RootID:        workItem.RootID,
+			ExecutionMode: executionMode,
+			Status:        core.AssignmentQueued,
+			DesiredAgent: core.DesiredAgent{
+				Kind:     desiredKind,
+				SkillIDs: append([]string(nil), role.DefaultSkillIDs...),
+			},
+			CreatedAt: stamp,
+			UpdatedAt: stamp,
+		}
+		desiredAgent, err := encodeJSON(assignment.DesiredAgent)
+		if err != nil {
+			return rollback(err)
+		}
+		_, err = transition.conn.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?, '', '')`,
+			assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt))
+		if err != nil {
+			return rollback(mapSQLiteWriteError(err))
+		}
+		current.TargetAssignmentID = assignment.ID
+		current.TargetWorkItemID = targetWorkItemID
+	}
+
+	if outcome != core.HandoffFollowUpAlreadySatisfied {
+		previousStatus := current.Status
+		current.Status = core.HandoffStatusAccepted
+		current.UpdatedAt = handoffTransitionTime(current, now)
+		if previousStatus != current.Status {
+			current.StatusChangedAt = current.UpdatedAt
+		}
+		row, err := updateHandoffRow(ctx, transition, current, encodeTime(command.ExpectedUpdatedAt))
+		if err != nil {
+			return rollback(err)
+		}
+		current, err = scanHandoff(row)
+		if err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				err = core.ErrConflict
+			}
+			return rollback(mapSQLiteWriteError(err))
+		}
+	}
+
+	result := core.HandoffFollowUpResult{Handoff: current, Assignment: assignment, Outcome: outcome}
+	encodedResult, err := json.Marshal(result)
+	if err != nil {
+		return rollback(fmt.Errorf("encode handoff command receipt: %w", err))
+	}
+	createdAt := time.Now().UTC()
+	if now != nil {
+		createdAt = now()
+	}
+	if _, err := transition.conn.ExecContext(ctx, `INSERT INTO command_receipts (project_id, operation, idempotency_key, request_hash, response_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`, command.ProjectID, acceptHandoffWithFollowUpOperation, command.IdempotencyKey, requestHash, string(encodedResult), encodeTime(createdAt)); err != nil {
+		return rollback(mapSQLiteWriteError(err))
+	}
+	if err := transition.Commit(); err != nil {
+		return core.HandoffFollowUpResult{}, mapSQLiteWriteError(err)
+	}
+	return result, nil
 }
 
 func (s *Store) ListMemoryEntries(ctx context.Context, projectID string, includeDisabled bool) ([]core.MemoryEntry, error) {
@@ -1741,6 +2072,11 @@ func (s *Store) UpdateAssistantProposal(ctx context.Context, record core.Assista
 
 const assignmentColumnsSQL = `project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at`
 const assignmentSelectSQL = `SELECT ` + assignmentColumnsSQL + ` FROM assignments`
+
+const handoffColumnsSQL = `project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at`
+const handoffSelectSQL = `SELECT ` + handoffColumnsSQL + ` FROM handoffs`
+
+const acceptHandoffWithFollowUpOperation = "accept_handoff_with_follow_up"
 
 const memoryCandidateSelectSQL = `SELECT project_id, id, title, body, suggested_kind, suggested_trust_label, suggested_source_kind, suggested_source_id, source_refs_json, status, status_reason, promoted_memory_id, created_at, updated_at FROM memory_candidates`
 

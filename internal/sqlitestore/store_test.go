@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -808,12 +810,18 @@ func TestStore_HandoffLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHandoff() error = %v", err)
 	}
-	acceptedAt := time.Date(2026, 6, 3, 13, 30, 0, 0, time.UTC)
-	got.Status = core.HandoffStatusAccepted
-	got.Title = "Accepted for review"
-	got.LinkedMemoryIDs = []string{"mem_1"}
-	got.UpdatedAt = acceptedAt
-	updated, err := service.UpdateHandoff(ctx, got)
+	acceptedAt := got.UpdatedAt.Add(time.Minute)
+	acceptedStatus := core.HandoffStatusAccepted
+	acceptedTitle := "Accepted for review"
+	linkedMemoryIDs := []string{"mem_1"}
+	updated, err := store.UpdateHandoff(ctx, project.ID, work.ID, handoff.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: got.UpdatedAt,
+		Patch: core.HandoffPatch{
+			Status:          &acceptedStatus,
+			Title:           &acceptedTitle,
+			LinkedMemoryIDs: &linkedMemoryIDs,
+		},
+	}, func() time.Time { return acceptedAt })
 	if err != nil {
 		t.Fatalf("UpdateHandoff() error = %v", err)
 	}
@@ -830,16 +838,18 @@ func TestStore_HandoffLifecycle(t *testing.T) {
 	if !reloaded.StatusChangedAt.Equal(acceptedAt) {
 		t.Fatalf("reloaded status_changed_at = %s, want %s", reloaded.StatusChangedAt, acceptedAt)
 	}
-	importedStatusChangedAt := time.Date(2026, 6, 3, 13, 40, 0, 0, time.UTC)
+	importedCreatedAt := reloaded.CreatedAt.Add(-time.Hour)
+	importedStatusChangedAt := reloaded.StatusChangedAt.Add(15 * time.Minute)
 	reloaded.Status = core.HandoffStatusSuperseded
+	reloaded.CreatedAt = importedCreatedAt
 	reloaded.UpdatedAt = acceptedAt.Add(15 * time.Minute)
 	reloaded.StatusChangedAt = importedStatusChangedAt
-	importedUpdate, err := service.UpdateHandoff(ctx, reloaded)
+	importedUpdate, err := store.RestoreHandoffSnapshot(ctx, reloaded)
 	if err != nil {
 		t.Fatalf("UpdateHandoff(imported status change) error = %v", err)
 	}
-	if !importedUpdate.StatusChangedAt.Equal(importedStatusChangedAt) {
-		t.Fatalf("imported status_changed_at = %s, want %s", importedUpdate.StatusChangedAt, importedStatusChangedAt)
+	if !importedUpdate.CreatedAt.Equal(importedCreatedAt) || !importedUpdate.StatusChangedAt.Equal(importedStatusChangedAt) {
+		t.Fatalf("imported timestamps = created %s / status %s, want %s / %s", importedUpdate.CreatedAt, importedUpdate.StatusChangedAt, importedCreatedAt, importedStatusChangedAt)
 	}
 	reloaded, err = service.GetHandoff(ctx, project.ID, work.ID, handoff.ID)
 	if err != nil {
@@ -848,15 +858,626 @@ func TestStore_HandoffLifecycle(t *testing.T) {
 	if !reloaded.StatusChangedAt.Equal(importedStatusChangedAt) {
 		t.Fatalf("reloaded imported status_changed_at = %s, want %s", reloaded.StatusChangedAt, importedStatusChangedAt)
 	}
-	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, "unsupported"); !errors.Is(err, core.ErrInvalid) {
+	if _, err := service.UpdateHandoffStatus(ctx, project.ID, work.ID, handoff.ID, core.HandoffStatusUpdate{ExpectedUpdatedAt: reloaded.UpdatedAt, Status: "unsupported"}); !errors.Is(err, core.ErrInvalid) {
 		t.Fatalf("UpdateHandoffStatus(unsupported) error = %v, want ErrInvalid", err)
 	}
-	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID); err != nil {
+	if err := service.DeleteHandoff(ctx, project.ID, work.ID, handoff.ID, core.HandoffDelete{ExpectedUpdatedAt: importedUpdate.UpdatedAt}); err != nil {
 		t.Fatalf("DeleteHandoff() error = %v", err)
 	}
 	if _, err := service.GetHandoff(ctx, project.ID, work.ID, handoff.ID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("GetHandoff(deleted) error = %v, want ErrNotFound", err)
 	}
+}
+
+func TestStore_HandoffCompareAndSetTransitions(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoff-cas.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	fixture := seedHandoffAuthorityFixture(t, store, core.ExecutionMCPPull)
+	original := fixture.handoff
+
+	accepted := core.HandoffStatusAccepted
+	fixedNow := func() time.Time { return original.UpdatedAt }
+	statusUpdate, err := store.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, original.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: original.UpdatedAt,
+		Patch:             core.HandoffPatch{Status: &accepted},
+	}, fixedNow)
+	if err != nil {
+		t.Fatalf("UpdateHandoff(status) error = %v", err)
+	}
+	if !statusUpdate.UpdatedAt.After(original.UpdatedAt) {
+		t.Fatalf("status update token = %s, want after %s", statusUpdate.UpdatedAt, original.UpdatedAt)
+	}
+	if !statusUpdate.StatusChangedAt.Equal(statusUpdate.UpdatedAt) {
+		t.Fatalf("status_changed_at = %s, want transition token %s", statusUpdate.StatusChangedAt, statusUpdate.UpdatedAt)
+	}
+
+	staleTitle := "Stale editor"
+	if _, err := store.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, original.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: original.UpdatedAt,
+		Patch:             core.HandoffPatch{Title: &staleTitle},
+	}, fixedNow); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("UpdateHandoff(stale content) error = %v, want ErrConflict", err)
+	}
+	if err := store.DeleteHandoff(ctx, fixture.project.ID, fixture.work.ID, original.ID, core.HandoffDelete{ExpectedUpdatedAt: original.UpdatedAt}); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("DeleteHandoff(stale) error = %v, want ErrConflict", err)
+	}
+
+	newTitle := "Authoritative editor"
+	contentUpdate, err := store.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, original.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: statusUpdate.UpdatedAt,
+		Patch:             core.HandoffPatch{Title: &newTitle},
+	}, func() time.Time { return statusUpdate.UpdatedAt })
+	if err != nil {
+		t.Fatalf("UpdateHandoff(content) error = %v", err)
+	}
+	if !contentUpdate.UpdatedAt.After(statusUpdate.UpdatedAt) {
+		t.Fatalf("content update token = %s, want after %s", contentUpdate.UpdatedAt, statusUpdate.UpdatedAt)
+	}
+	if !contentUpdate.StatusChangedAt.Equal(statusUpdate.StatusChangedAt) {
+		t.Fatalf("content update status_changed_at = %s, want unchanged %s", contentUpdate.StatusChangedAt, statusUpdate.StatusChangedAt)
+	}
+	noOp, err := store.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, original.ID, core.HandoffUpdate{ExpectedUpdatedAt: contentUpdate.UpdatedAt}, fixedNow)
+	if err != nil {
+		t.Fatalf("UpdateHandoff(no-op) error = %v", err)
+	}
+	if !noOp.UpdatedAt.Equal(contentUpdate.UpdatedAt) {
+		t.Fatalf("no-op token = %s, want unchanged %s", noOp.UpdatedAt, contentUpdate.UpdatedAt)
+	}
+	if err := store.DeleteHandoff(ctx, fixture.project.ID, fixture.work.ID, original.ID, core.HandoffDelete{ExpectedUpdatedAt: contentUpdate.UpdatedAt}); err != nil {
+		t.Fatalf("DeleteHandoff(current) error = %v", err)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpIsAtomicAndDurablyIdempotent(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "handoff-follow-up.db")
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	fixture := seedHandoffAuthorityFixture(t, store, core.ExecutionManual)
+	command := core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         fixture.project.ID,
+		WorkItemID:        fixture.work.ID,
+		HandoffID:         fixture.handoff.ID,
+		ExpectedUpdatedAt: fixture.handoff.UpdatedAt,
+		IdempotencyKey:    "follow-up-retry",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}
+	fixedNow := fixture.handoff.UpdatedAt
+	result, err := store.AcceptHandoffWithFollowUp(ctx, command, "asgn_follow_up", func() time.Time { return fixedNow })
+	if err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp() error = %v", err)
+	}
+	if result.Outcome != core.HandoffFollowUpCreated || result.Replayed {
+		t.Fatalf("first result = %+v, want newly created outcome", result)
+	}
+	if result.Handoff.Status != core.HandoffStatusAccepted || result.Handoff.TargetAssignmentID != result.Assignment.ID || result.Handoff.TargetWorkItemID != fixture.work.ID {
+		t.Fatalf("accepted handoff = %+v, want linked follow-up", result.Handoff)
+	}
+	if !result.Handoff.UpdatedAt.After(fixture.handoff.UpdatedAt) {
+		t.Fatalf("handoff token = %s, want after %s", result.Handoff.UpdatedAt, fixture.handoff.UpdatedAt)
+	}
+	if result.Assignment.ID != "asgn_follow_up" || result.Assignment.Status != core.AssignmentQueued || result.Assignment.ExecutionMode != core.ExecutionManual || result.Assignment.DesiredAgent.Kind != "human" || len(result.Assignment.DesiredAgent.SkillIDs) != 2 {
+		t.Fatalf("follow-up assignment = %+v, want queued manual role defaults", result.Assignment)
+	}
+	if result.Assignment.RootID != "" || result.Assignment.ClaimedBy != "" || !result.Assignment.ExecutionRef.Empty() || result.Assignment.ContextSnapshotID != "" || !result.Assignment.StartedAt.IsZero() || !result.Assignment.CompletedAt.IsZero() {
+		t.Fatalf("rootless follow-up execution state = %+v, want portable queued coordination only", result.Assignment)
+	}
+
+	claimed, err := store.ClaimAssignment(ctx, fixture.project.ID, result.Assignment.ID, "operator-a", func() time.Time { return result.Assignment.UpdatedAt.Add(time.Second) })
+	if err != nil {
+		t.Fatalf("ClaimAssignment() error = %v", err)
+	}
+	currentTitle := "Continue with current evidence"
+	currentHandoff, err := store.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: result.Handoff.UpdatedAt,
+		Patch:             core.HandoffPatch{Title: &currentTitle},
+	}, func() time.Time { return result.Handoff.UpdatedAt.Add(2 * time.Second) })
+	if err != nil {
+		t.Fatalf("UpdateHandoff(after follow-up) error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+
+	replayed, err := reopened.AcceptHandoffWithFollowUp(ctx, command, "asgn_retry_must_not_exist", time.Now)
+	if err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp(replay) error = %v", err)
+	}
+	if !replayed.Replayed || replayed.Outcome != result.Outcome || replayed.Handoff.Title != currentTitle || !replayed.Handoff.UpdatedAt.Equal(currentHandoff.UpdatedAt) || replayed.Assignment.ID != result.Assignment.ID || replayed.Assignment.Status != core.AssignmentClaimed || replayed.Assignment.ClaimedBy != claimed.ClaimedBy || !replayed.Assignment.UpdatedAt.Equal(claimed.UpdatedAt) {
+		t.Fatalf("replayed result = %+v, want original outcome/identity with current claimed assignment", replayed)
+	}
+	assignments, err := reopened.ListAssignments(ctx, fixture.project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != result.Assignment.ID {
+		t.Fatalf("assignments after replay = %+v, want exactly one follow-up", assignments)
+	}
+
+	changedRequest := command
+	changedRequest.ExpectedUpdatedAt = result.Handoff.UpdatedAt
+	if _, err := reopened.AcceptHandoffWithFollowUp(ctx, changedRequest, "asgn_changed_request", time.Now); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("AcceptHandoffWithFollowUp(reused key with changed request) error = %v, want ErrConflict", err)
+	}
+	staleNewKey := command
+	staleNewKey.IdempotencyKey = "stale-new-command"
+	if _, err := reopened.AcceptHandoffWithFollowUp(ctx, staleNewKey, "asgn_stale_request", time.Now); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("AcceptHandoffWithFollowUp(stale new key) error = %v, want ErrConflict", err)
+	}
+	dismissed := core.HandoffStatusDismissed
+	if _, err := reopened.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: replayed.Handoff.UpdatedAt,
+		Patch:             core.HandoffPatch{Status: &dismissed},
+	}, time.Now); err != nil {
+		t.Fatalf("UpdateHandoff(dismiss after receipt) error = %v", err)
+	}
+	if _, err := reopened.AcceptHandoffWithFollowUp(ctx, command, "asgn_receipt_must_not_override_close", time.Now); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("AcceptHandoffWithFollowUp(replay after dismissal) error = %v, want ErrConflict", err)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpSerializesSameKey(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "handoff-follow-up-race.db")
+	firstStore, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(first) error = %v", err)
+	}
+	defer firstStore.Close()
+	fixture := seedHandoffAuthorityFixture(t, firstStore, core.ExecutionMCPPull)
+	secondStore, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(second) error = %v", err)
+	}
+	defer secondStore.Close()
+	command := core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         fixture.project.ID,
+		WorkItemID:        fixture.work.ID,
+		HandoffID:         fixture.handoff.ID,
+		ExpectedUpdatedAt: fixture.handoff.UpdatedAt,
+		IdempotencyKey:    "concurrent-retry",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}
+	type commandResult struct {
+		result core.HandoffFollowUpResult
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan commandResult, 2)
+	for index, candidate := range []*Store{firstStore, secondStore} {
+		index, candidate := index, candidate
+		go func() {
+			<-start
+			result, err := candidate.AcceptHandoffWithFollowUp(ctx, command, fmt.Sprintf("asgn_racer_%d", index), func() time.Time { return fixture.handoff.UpdatedAt })
+			results <- commandResult{result: result, err: err}
+		}()
+	}
+	close(start)
+	first := <-results
+	second := <-results
+	for index, result := range []commandResult{first, second} {
+		if result.err != nil {
+			t.Fatalf("concurrent result %d error = %v", index, result.err)
+		}
+	}
+	if first.result.Assignment.ID != second.result.Assignment.ID || first.result.Outcome != core.HandoffFollowUpCreated || second.result.Outcome != core.HandoffFollowUpCreated || first.result.Replayed == second.result.Replayed {
+		t.Fatalf("concurrent results = %+v / %+v, want one creation and one replay of same identity", first.result, second.result)
+	}
+	assignments, err := firstStore.ListAssignments(ctx, fixture.project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments after concurrent retry = %+v, want exactly one", assignments)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpDifferentKeysCompeteOnToken(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "handoff-follow-up-compete.db")
+	firstStore, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(first) error = %v", err)
+	}
+	defer firstStore.Close()
+	fixture := seedHandoffAuthorityFixture(t, firstStore, core.ExecutionMCPPull)
+	secondStore, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(second) error = %v", err)
+	}
+	defer secondStore.Close()
+	baseCommand := core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         fixture.project.ID,
+		WorkItemID:        fixture.work.ID,
+		HandoffID:         fixture.handoff.ID,
+		ExpectedUpdatedAt: fixture.handoff.UpdatedAt,
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}
+	type commandResult struct {
+		result core.HandoffFollowUpResult
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan commandResult, 2)
+	for index, candidate := range []*Store{firstStore, secondStore} {
+		index, candidate := index, candidate
+		go func() {
+			<-start
+			command := baseCommand
+			command.IdempotencyKey = fmt.Sprintf("distinct-command-%d", index)
+			result, err := candidate.AcceptHandoffWithFollowUp(ctx, command, fmt.Sprintf("asgn_distinct_%d", index), func() time.Time { return fixture.handoff.UpdatedAt })
+			results <- commandResult{result: result, err: err}
+		}()
+	}
+	close(start)
+	first := <-results
+	second := <-results
+	successes := 0
+	conflicts := 0
+	var createdID string
+	for _, result := range []commandResult{first, second} {
+		switch {
+		case result.err == nil:
+			successes++
+			createdID = result.result.Assignment.ID
+		case errors.Is(result.err, core.ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("different-key race error = %v, want nil or ErrConflict", result.err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("different-key race results = %+v / %+v, want one success and one conflict", first, second)
+	}
+	assignments, err := firstStore.ListAssignments(ctx, fixture.project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != createdID {
+		t.Fatalf("assignments after different-key race = %+v, want sole winner %s", assignments, createdID)
+	}
+}
+
+func TestStore_HandoffUpdateAndDeleteSerializeAcrossHandles(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "handoff-update-delete-race.db")
+	firstStore, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(first) error = %v", err)
+	}
+	defer firstStore.Close()
+	fixture := seedHandoffAuthorityFixture(t, firstStore, core.ExecutionMCPPull)
+	secondStore, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open(second) error = %v", err)
+	}
+	defer secondStore.Close()
+
+	start := make(chan struct{})
+	updateResult := make(chan error, 1)
+	deleteResult := make(chan error, 1)
+	updatedTitle := "Concurrent authoritative edit"
+	go func() {
+		<-start
+		_, err := firstStore.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID, core.HandoffUpdate{
+			ExpectedUpdatedAt: fixture.handoff.UpdatedAt,
+			Patch:             core.HandoffPatch{Title: &updatedTitle},
+		}, func() time.Time { return fixture.handoff.UpdatedAt })
+		updateResult <- err
+	}()
+	go func() {
+		<-start
+		deleteResult <- secondStore.DeleteHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID, core.HandoffDelete{ExpectedUpdatedAt: fixture.handoff.UpdatedAt})
+	}()
+	close(start)
+	updateErr := <-updateResult
+	deleteErr := <-deleteResult
+	if updateErr == nil {
+		if !errors.Is(deleteErr, core.ErrConflict) {
+			t.Fatalf("delete after winning update error = %v, want ErrConflict", deleteErr)
+		}
+		current, err := firstStore.GetHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID)
+		if err != nil {
+			t.Fatalf("GetHandoff(after update win) error = %v", err)
+		}
+		if current.Title != updatedTitle || !current.UpdatedAt.After(fixture.handoff.UpdatedAt) {
+			t.Fatalf("handoff after update win = %+v, want monotonic authoritative edit", current)
+		}
+		return
+	}
+	if deleteErr != nil {
+		t.Fatalf("update/delete race errors = update %v / delete %v, want exactly one success", updateErr, deleteErr)
+	}
+	if !errors.Is(updateErr, core.ErrNotFound) && !errors.Is(updateErr, core.ErrConflict) {
+		t.Fatalf("update after winning delete error = %v, want ErrNotFound or ErrConflict", updateErr)
+	}
+	if _, err := firstStore.GetHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetHandoff(after delete win) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpDerivesCrossWorkRootAndRoleDefaults(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoff-follow-up-cross-work.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{
+		Name: "Cross-work follow-up",
+		Roots: []core.Root{
+			{ID: "root_source", Path: "/tmp/source", Kind: "workspace", Active: true},
+			{ID: "root_target", Path: "/tmp/target", Kind: "workspace", Active: true},
+		},
+		DefaultRootID: "root_source",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{
+		ProjectID:            project.ID,
+		Name:                 "Cross-work owner",
+		DefaultSkillIDs:      []string{"investigate", "report"},
+		DefaultExecutionMode: core.ExecutionMCPPull,
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	sourceWork, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Source work", RootID: "root_source"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(source) error = %v", err)
+	}
+	targetWork, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Target work", RootID: "root_target"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem(target) error = %v", err)
+	}
+	handoff, err := service.CreateHandoff(ctx, core.Handoff{
+		ProjectID:        project.ID,
+		WorkItemID:       sourceWork.ID,
+		ToRoleID:         role.ID,
+		TargetWorkItemID: targetWork.ID,
+		Title:            "Continue in target work",
+		Body:             "Use the target work root and role defaults.",
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	result, err := store.AcceptHandoffWithFollowUp(ctx, core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         project.ID,
+		WorkItemID:        sourceWork.ID,
+		HandoffID:         handoff.ID,
+		ExpectedUpdatedAt: handoff.UpdatedAt,
+		IdempotencyKey:    "cross-work-root",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}, "asgn_cross_work", func() time.Time { return handoff.UpdatedAt })
+	if err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp() error = %v", err)
+	}
+	if result.Assignment.WorkItemID != targetWork.ID || result.Assignment.RootID != "root_target" || result.Assignment.RoleID != role.ID || result.Assignment.ExecutionMode != core.ExecutionMCPPull || result.Assignment.DesiredAgent.Kind != core.DesiredAgentAny || !slices.Equal(result.Assignment.DesiredAgent.SkillIDs, role.DefaultSkillIDs) {
+		t.Fatalf("cross-work assignment = %+v, want target root and role defaults", result.Assignment)
+	}
+	if result.Handoff.TargetWorkItemID != targetWork.ID || result.Handoff.TargetAssignmentID != result.Assignment.ID {
+		t.Fatalf("cross-work handoff = %+v, want explicit target links", result.Handoff)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpRejectsRemovedTargetRoot(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoff-follow-up-removed-root.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{
+		Name:          "Removed target root",
+		Roots:         []core.Root{{ID: "root_target", Path: "/tmp/target", Kind: "workspace", Active: true}},
+		DefaultRootID: "root_target",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{ProjectID: project.ID, Name: "Owner"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Stale rooted work", RootID: "root_target"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	handoff, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, ToRoleID: role.ID, Title: "Continue", Body: "Do not copy a stale root."})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if _, _, err := service.DeleteRoot(ctx, project.ID, "root_target"); err != nil {
+		t.Fatalf("DeleteRoot() error = %v", err)
+	}
+	_, err = store.AcceptHandoffWithFollowUp(ctx, core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         project.ID,
+		WorkItemID:        work.ID,
+		HandoffID:         handoff.ID,
+		ExpectedUpdatedAt: handoff.UpdatedAt,
+		IdempotencyKey:    "removed-root",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}, "asgn_must_not_exist", time.Now)
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("AcceptHandoffWithFollowUp() error = %v, want ErrNotFound", err)
+	}
+	assignments, err := store.ListAssignments(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 0 {
+		t.Fatalf("assignments = %+v, want none after removed-root rejection", assignments)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpLinksExistingAssignment(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoff-follow-up-existing.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	fixture := seedHandoffAuthorityFixture(t, store, core.ExecutionMCPPull)
+	service := core.NewService(store)
+	existing, err := service.CreateAssignment(ctx, core.Assignment{
+		ProjectID:     fixture.project.ID,
+		WorkItemID:    fixture.work.ID,
+		RoleID:        fixture.role.ID,
+		ExecutionMode: core.ExecutionMCPPull,
+	})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	existing, err = service.CompleteAssignment(ctx, fixture.project.ID, existing.ID, core.AssignmentCompleted, core.ExecutionRef{})
+	if err != nil {
+		t.Fatalf("CompleteAssignment(existing) error = %v", err)
+	}
+	linked, err := store.UpdateHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID, core.HandoffUpdate{
+		ExpectedUpdatedAt: fixture.handoff.UpdatedAt,
+		Patch:             core.HandoffPatch{TargetAssignmentID: &existing.ID},
+	}, func() time.Time { return fixture.handoff.UpdatedAt.Add(time.Second) })
+	if err != nil {
+		t.Fatalf("UpdateHandoff(link target) error = %v", err)
+	}
+	command := core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         fixture.project.ID,
+		WorkItemID:        fixture.work.ID,
+		HandoffID:         fixture.handoff.ID,
+		ExpectedUpdatedAt: linked.UpdatedAt,
+		IdempotencyKey:    "link-existing",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}
+	result, err := store.AcceptHandoffWithFollowUp(ctx, command, "asgn_must_not_be_created", func() time.Time { return linked.UpdatedAt.Add(time.Second) })
+	if err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp() error = %v", err)
+	}
+	if result.Outcome != core.HandoffFollowUpLinkedExisting || result.Assignment.ID != existing.ID || result.Assignment.Status != core.AssignmentCompleted || result.Handoff.TargetWorkItemID != existing.WorkItemID || result.Handoff.Status != core.HandoffStatusAccepted {
+		t.Fatalf("linked result = %+v, want accepted current completed assignment", result)
+	}
+	assignments, err := store.ListAssignments(ctx, fixture.project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].ID != existing.ID {
+		t.Fatalf("assignments after linking = %+v, want only existing assignment", assignments)
+	}
+
+	alreadyCommand := command
+	alreadyCommand.ExpectedUpdatedAt = result.Handoff.UpdatedAt
+	alreadyCommand.IdempotencyKey = "already-linked"
+	already, err := store.AcceptHandoffWithFollowUp(ctx, alreadyCommand, "asgn_still_must_not_be_created", func() time.Time { return result.Handoff.UpdatedAt.Add(time.Second) })
+	if err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp(already linked) error = %v", err)
+	}
+	if already.Outcome != core.HandoffFollowUpAlreadySatisfied || already.Assignment.ID != existing.ID || !already.Handoff.UpdatedAt.Equal(result.Handoff.UpdatedAt) {
+		t.Fatalf("already-linked result = %+v, want unchanged authoritative link", already)
+	}
+}
+
+func TestStore_AcceptHandoffWithFollowUpRollsBackAfterAssignmentInsert(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "handoff-follow-up-rollback.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer store.Close()
+	fixture := seedHandoffAuthorityFixture(t, store, core.ExecutionMCPPull)
+	if _, err := store.db.ExecContext(ctx, `CREATE TRIGGER reject_follow_up_handoff BEFORE UPDATE ON handoffs WHEN NEW.status = 'accepted' BEGIN SELECT RAISE(ABORT, 'forced handoff failure'); END`); err != nil {
+		t.Fatalf("create failure trigger error = %v", err)
+	}
+	command := core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         fixture.project.ID,
+		WorkItemID:        fixture.work.ID,
+		HandoffID:         fixture.handoff.ID,
+		ExpectedUpdatedAt: fixture.handoff.UpdatedAt,
+		IdempotencyKey:    "rollback-retry",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}
+	if _, err := store.AcceptHandoffWithFollowUp(ctx, command, "asgn_rolled_back", time.Now); err == nil {
+		t.Fatal("AcceptHandoffWithFollowUp() error = nil, want forced failure")
+	}
+	assignments, err := store.ListAssignments(ctx, fixture.project.ID)
+	if err != nil {
+		t.Fatalf("ListAssignments() error = %v", err)
+	}
+	if len(assignments) != 0 {
+		t.Fatalf("assignments after rollback = %+v, want none", assignments)
+	}
+	reloaded, err := store.GetHandoff(ctx, fixture.project.ID, fixture.work.ID, fixture.handoff.ID)
+	if err != nil {
+		t.Fatalf("GetHandoff() error = %v", err)
+	}
+	if reloaded.Status != core.HandoffStatusOpen || reloaded.TargetAssignmentID != "" || !reloaded.UpdatedAt.Equal(fixture.handoff.UpdatedAt) {
+		t.Fatalf("handoff after rollback = %+v, want untouched open handoff", reloaded)
+	}
+	var receiptCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM command_receipts WHERE project_id = ?`, fixture.project.ID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count receipts error = %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("receipt count after rollback = %d, want 0", receiptCount)
+	}
+	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER reject_follow_up_handoff`); err != nil {
+		t.Fatalf("drop failure trigger error = %v", err)
+	}
+	if _, err := store.AcceptHandoffWithFollowUp(ctx, command, "asgn_after_rollback", time.Now); err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp(retry after rollback) error = %v", err)
+	}
+}
+
+type handoffAuthorityFixture struct {
+	project core.Project
+	work    core.WorkItem
+	role    core.Role
+	handoff core.Handoff
+}
+
+func seedHandoffAuthorityFixture(t *testing.T, store *Store, executionMode string) handoffAuthorityFixture {
+	t.Helper()
+	ctx := context.Background()
+	service := core.NewService(store)
+	project, err := service.CreateProject(ctx, core.Project{Name: "Handoff authority"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, core.Role{
+		ProjectID:            project.ID,
+		Name:                 "Follow-up owner",
+		DefaultSkillIDs:      []string{"triage", "evidence"},
+		DefaultExecutionMode: executionMode,
+	})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, core.WorkItem{ProjectID: project.ID, Title: "Rootless follow-up"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	handoff, err := service.CreateHandoff(ctx, core.Handoff{
+		ProjectID:  project.ID,
+		WorkItemID: work.ID,
+		ToRoleID:   role.ID,
+		Title:      "Continue the work",
+		Body:       "Create the next portable assignment.",
+	})
+	if err != nil {
+		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	return handoffAuthorityFixture{project: project, work: work, role: role, handoff: handoff}
 }
 
 func TestStore_MemoryCandidateDecisionLifecycle(t *testing.T) {
@@ -1930,14 +2551,7 @@ func TestStore_CreateRecordsValidateReferences(t *testing.T) {
 	}); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("store.CreateHandoff(missing work) error = %v, want ErrNotFound", err)
 	}
-	if _, err := store.UpdateHandoff(ctx, core.Handoff{
-		ID:         "handoff_direct_missing_work",
-		ProjectID:  project.ID,
-		WorkItemID: "work_missing",
-		Title:      "Missing work handoff",
-		Body:       "Missing work handoff should be rejected.",
-		Status:     core.HandoffStatusOpen,
-	}); !errors.Is(err, core.ErrNotFound) {
+	if _, err := store.UpdateHandoff(ctx, project.ID, "work_missing", "handoff_direct_missing_work", core.HandoffUpdate{}, time.Now); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("store.UpdateHandoff(missing work) error = %v, want ErrNotFound", err)
 	}
 }

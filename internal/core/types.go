@@ -1,6 +1,13 @@
 package core
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"slices"
+	"strings"
+	"time"
+)
 
 type Project struct {
 	ID             string    `json:"id"`
@@ -580,6 +587,159 @@ type Handoff struct {
 	StatusChangedAt       time.Time `json:"status_changed_at,omitempty"`
 }
 
+// HandoffPatch describes the fields a live editor intends to change. A nil
+// pointer preserves the authoritative value; a pointer to an empty value
+// clears it where the field permits that.
+type HandoffPatch struct {
+	SourceAssignmentID    *string   `json:"source_assignment_id,omitempty"`
+	SourceRunID           *string   `json:"source_run_id,omitempty"`
+	SourceChatSessionID   *string   `json:"source_chat_session_id,omitempty"`
+	SourceMessageID       *string   `json:"source_message_id,omitempty"`
+	FromRoleID            *string   `json:"from_role_id,omitempty"`
+	ToRoleID              *string   `json:"to_role_id,omitempty"`
+	TargetAssignmentID    *string   `json:"target_assignment_id,omitempty"`
+	TargetWorkItemID      *string   `json:"target_work_item_id,omitempty"`
+	Title                 *string   `json:"title,omitempty"`
+	Body                  *string   `json:"body,omitempty"`
+	RecommendedNextAction *string   `json:"recommended_next_action,omitempty"`
+	LinkedArtifactIDs     *[]string `json:"linked_artifact_ids,omitempty"`
+	LinkedMemoryIDs       *[]string `json:"linked_memory_ids,omitempty"`
+	ContextRefs           *[]string `json:"context_refs,omitempty"`
+	Status                *string   `json:"status,omitempty"`
+	ProvenanceKind        *string   `json:"provenance_kind,omitempty"`
+	TrustLabel            *string   `json:"trust_label,omitempty"`
+}
+
+type HandoffUpdate struct {
+	ExpectedUpdatedAt time.Time    `json:"expected_updated_at"`
+	Patch             HandoffPatch `json:"patch"`
+}
+
+func (patch HandoffPatch) Apply(current Handoff) Handoff {
+	if patch.SourceAssignmentID != nil {
+		current.SourceAssignmentID = *patch.SourceAssignmentID
+	}
+	if patch.SourceRunID != nil {
+		current.SourceRunID = *patch.SourceRunID
+	}
+	if patch.SourceChatSessionID != nil {
+		current.SourceChatSessionID = *patch.SourceChatSessionID
+	}
+	if patch.SourceMessageID != nil {
+		current.SourceMessageID = *patch.SourceMessageID
+	}
+	if patch.FromRoleID != nil {
+		current.FromRoleID = *patch.FromRoleID
+	}
+	if patch.ToRoleID != nil {
+		current.ToRoleID = *patch.ToRoleID
+	}
+	if patch.TargetAssignmentID != nil {
+		current.TargetAssignmentID = *patch.TargetAssignmentID
+	}
+	if patch.TargetWorkItemID != nil {
+		current.TargetWorkItemID = *patch.TargetWorkItemID
+	}
+	if patch.Title != nil {
+		current.Title = *patch.Title
+	}
+	if patch.Body != nil {
+		current.Body = *patch.Body
+	}
+	if patch.RecommendedNextAction != nil {
+		current.RecommendedNextAction = *patch.RecommendedNextAction
+	}
+	if patch.LinkedArtifactIDs != nil {
+		current.LinkedArtifactIDs = append([]string(nil), (*patch.LinkedArtifactIDs)...)
+	}
+	if patch.LinkedMemoryIDs != nil {
+		current.LinkedMemoryIDs = append([]string(nil), (*patch.LinkedMemoryIDs)...)
+	}
+	if patch.ContextRefs != nil {
+		current.ContextRefs = append([]string(nil), (*patch.ContextRefs)...)
+	}
+	if patch.Status != nil {
+		current.Status = *patch.Status
+	}
+	if patch.ProvenanceKind != nil {
+		current.ProvenanceKind = *patch.ProvenanceKind
+	}
+	if patch.TrustLabel != nil {
+		current.TrustLabel = *patch.TrustLabel
+	}
+	return current
+}
+
+func (handoff Handoff) SameContent(other Handoff) bool {
+	return handoff.ID == other.ID &&
+		handoff.ProjectID == other.ProjectID &&
+		handoff.WorkItemID == other.WorkItemID &&
+		handoff.SourceAssignmentID == other.SourceAssignmentID &&
+		handoff.SourceRunID == other.SourceRunID &&
+		handoff.SourceChatSessionID == other.SourceChatSessionID &&
+		handoff.SourceMessageID == other.SourceMessageID &&
+		handoff.FromRoleID == other.FromRoleID &&
+		handoff.ToRoleID == other.ToRoleID &&
+		handoff.TargetAssignmentID == other.TargetAssignmentID &&
+		handoff.TargetWorkItemID == other.TargetWorkItemID &&
+		handoff.Title == other.Title &&
+		handoff.Body == other.Body &&
+		handoff.RecommendedNextAction == other.RecommendedNextAction &&
+		slices.Equal(handoff.LinkedArtifactIDs, other.LinkedArtifactIDs) &&
+		slices.Equal(handoff.LinkedMemoryIDs, other.LinkedMemoryIDs) &&
+		slices.Equal(handoff.ContextRefs, other.ContextRefs) &&
+		handoff.Status == other.Status &&
+		handoff.ProvenanceKind == other.ProvenanceKind &&
+		handoff.TrustLabel == other.TrustLabel
+}
+
+type HandoffStatusUpdate struct {
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+	Status            string    `json:"status"`
+}
+
+type HandoffDelete struct {
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+}
+
+type AcceptHandoffWithFollowUpCommand struct {
+	ProjectID         string    `json:"project_id"`
+	WorkItemID        string    `json:"work_item_id"`
+	HandoffID         string    `json:"handoff_id"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+	IdempotencyKey    string    `json:"idempotency_key"`
+	Intent            string    `json:"intent"`
+}
+
+// RequestHash fingerprints the normalized semantic request while deliberately
+// excluding the retry key itself.
+func (command AcceptHandoffWithFollowUpCommand) RequestHash() string {
+	payload, _ := json.Marshal(struct {
+		Operation         string `json:"operation"`
+		ProjectID         string `json:"project_id"`
+		WorkItemID        string `json:"work_item_id"`
+		HandoffID         string `json:"handoff_id"`
+		ExpectedUpdatedAt string `json:"expected_updated_at"`
+		Intent            string `json:"intent"`
+	}{
+		Operation:         "accept_handoff_with_follow_up",
+		ProjectID:         strings.TrimSpace(command.ProjectID),
+		WorkItemID:        strings.TrimSpace(command.WorkItemID),
+		HandoffID:         strings.TrimSpace(command.HandoffID),
+		ExpectedUpdatedAt: command.ExpectedUpdatedAt.UTC().Format(time.RFC3339Nano),
+		Intent:            strings.TrimSpace(command.Intent),
+	})
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
+}
+
+type HandoffFollowUpResult struct {
+	Handoff    Handoff    `json:"handoff"`
+	Assignment Assignment `json:"assignment"`
+	Outcome    string     `json:"outcome"`
+	Replayed   bool       `json:"replayed"`
+}
+
 type MemoryEntry struct {
 	ID         string    `json:"id"`
 	ProjectID  string    `json:"project_id"`
@@ -698,6 +858,11 @@ const (
 	HandoffStatusAccepted   = "accepted"
 	HandoffStatusSuperseded = "superseded"
 	HandoffStatusDismissed  = "dismissed"
+
+	HandoffFollowUpIntentAcceptAndEnsure = "accept_and_ensure_follow_up"
+	HandoffFollowUpCreated               = "created"
+	HandoffFollowUpLinkedExisting        = "linked_existing"
+	HandoffFollowUpAlreadySatisfied      = "already_satisfied"
 
 	MemoryCandidatePending  = "pending"
 	MemoryCandidatePromoted = "promoted"
