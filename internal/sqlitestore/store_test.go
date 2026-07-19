@@ -612,8 +612,26 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 	if _, err := service.CreateReview(ctx, core.Review{ProjectID: project.ID, WorkItemID: work.ID, AssignmentID: assignment.ID, Body: "Pass", Verdict: core.ReviewVerdictApproved}); err != nil {
 		t.Fatalf("CreateReview() error = %v", err)
 	}
-	if _, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, SourceAssignmentID: assignment.ID, Title: "Handoff", Body: "Follow up"}); err != nil {
+	handoff, err := service.CreateHandoff(ctx, core.Handoff{ProjectID: project.ID, WorkItemID: work.ID, SourceAssignmentID: assignment.ID, ToRoleID: role.ID, Title: "Handoff", Body: "Follow up"})
+	if err != nil {
 		t.Fatalf("CreateHandoff() error = %v", err)
+	}
+	if _, err := store.AcceptHandoffWithFollowUp(ctx, core.AcceptHandoffWithFollowUpCommand{
+		ProjectID:         project.ID,
+		WorkItemID:        work.ID,
+		HandoffID:         handoff.ID,
+		ExpectedUpdatedAt: handoff.UpdatedAt,
+		IdempotencyKey:    "delete-project-receipt",
+		Intent:            core.HandoffFollowUpIntentAcceptAndEnsure,
+	}, "asgn_delete_follow_up", time.Now); err != nil {
+		t.Fatalf("AcceptHandoffWithFollowUp() error = %v", err)
+	}
+	var receiptCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM command_receipts WHERE project_id = ?`, project.ID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count command receipts before delete error = %v", err)
+	}
+	if receiptCount != 1 {
+		t.Fatalf("command receipt count before delete = %d, want 1", receiptCount)
 	}
 	if _, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{ProjectID: project.ID, Title: "Accepted memory", Body: "Remember this"}); err != nil {
 		t.Fatalf("CreateMemoryEntry() error = %v", err)
@@ -622,8 +640,19 @@ func TestStore_DeleteProjectCascadesProjectScopedRows(t *testing.T) {
 		t.Fatalf("CreateMemoryCandidate() error = %v", err)
 	}
 
+	// DeleteProject explicitly removes every project-scoped table rather than
+	// relying on connection-local foreign-key cascade enforcement.
+	if _, err := store.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatalf("disable foreign keys error = %v", err)
+	}
 	if err := service.DeleteProject(ctx, project.ID); err != nil {
 		t.Fatalf("DeleteProject() error = %v", err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM command_receipts WHERE project_id = ?`, project.ID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count command receipts after delete error = %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("command receipt count after delete = %d, want 0", receiptCount)
 	}
 	if _, err := service.GetProject(ctx, project.ID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("GetProject() after delete error = %v, want ErrNotFound", err)
