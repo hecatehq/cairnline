@@ -519,6 +519,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		_ = tx.Rollback()
 	}
 	for _, table := range []string{
+		"command_receipts",
 		"artifacts",
 		"evidence",
 		"reviews",
