@@ -233,8 +233,8 @@ snapshot without marking work as started:
 {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claim_id":"CLAIM_ID","execution_ref":{"kind":"task_run","run_id":"local-run-1"},"context_snapshot_id":"HOST_CONTEXT_SNAPSHOT_ID"}}}
 ```
 
-Preparation returns a conflict if the claim id is missing, expired, or no
-longer current.
+Preparation returns an invalid-arguments error if the claim id is missing, and
+a conflict if it is expired or no longer current.
 
 ### 8. Mark It Running
 

@@ -106,7 +106,8 @@ queued ── claim ──> claimed (lease active) ── start ──> running 
    with a one-second minimum.
 3. Pass the exact claim id to `PrepareAssignmentWithClaim`,
    `ReleaseAssignmentWithClaim`, `UpdateAssignmentStatusWithClaim`, and
-   `CompleteAssignmentWithClaim`. Missing, expired, or superseded ids conflict.
+   `CompleteAssignmentWithClaim`. Missing ids are invalid; expired or
+   superseded ids conflict.
 4. When work advances out of `claimed`, Cairnline retires the reservation
    expiry but retains its id as a fencing generation for later worker writes.
 
