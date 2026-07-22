@@ -323,6 +323,8 @@ type ProjectOperationItem struct {
 	Status            string    `json:"status,omitempty"`
 	Title             string    `json:"title"`
 	Detail            string    `json:"detail,omitempty"`
+	ActionKind        string    `json:"action_kind,omitempty"`
+	ActionLabel       string    `json:"action_label,omitempty"`
 	WorkItemID        string    `json:"work_item_id,omitempty"`
 	AssignmentID      string    `json:"assignment_id,omitempty"`
 	ArtifactID        string    `json:"artifact_id,omitempty"`
@@ -424,21 +426,34 @@ func (ref ExecutionRef) Empty() bool {
 }
 
 type Assignment struct {
-	ID                string       `json:"id"`
-	ProjectID         string       `json:"project_id"`
-	WorkItemID        string       `json:"work_item_id"`
-	RoleID            string       `json:"role_id"`
-	RootID            string       `json:"root_id,omitempty"`
-	ExecutionMode     string       `json:"execution_mode"`
-	Status            string       `json:"status"`
-	DesiredAgent      DesiredAgent `json:"desired_agent,omitempty"`
-	ClaimedBy         string       `json:"claimed_by,omitempty"`
-	ExecutionRef      ExecutionRef `json:"execution_ref,omitzero"`
-	ContextSnapshotID string       `json:"context_snapshot_id,omitempty"`
-	CreatedAt         time.Time    `json:"created_at"`
-	UpdatedAt         time.Time    `json:"updated_at"`
-	StartedAt         time.Time    `json:"started_at,omitempty"`
-	CompletedAt       time.Time    `json:"completed_at,omitempty"`
+	ID                string                `json:"id"`
+	ProjectID         string                `json:"project_id"`
+	WorkItemID        string                `json:"work_item_id"`
+	RoleID            string                `json:"role_id"`
+	RootID            string                `json:"root_id,omitempty"`
+	ExecutionMode     string                `json:"execution_mode"`
+	Status            string                `json:"status"`
+	DesiredAgent      DesiredAgent          `json:"desired_agent,omitempty"`
+	ClaimedBy         string                `json:"claimed_by,omitempty"`
+	Claim             *AssignmentClaimLease `json:"claim,omitempty"`
+	ExecutionRef      ExecutionRef          `json:"execution_ref,omitzero"`
+	ContextSnapshotID string                `json:"context_snapshot_id,omitempty"`
+	CreatedAt         time.Time             `json:"created_at"`
+	UpdatedAt         time.Time             `json:"updated_at"`
+	StartedAt         time.Time             `json:"started_at,omitempty"`
+	CompletedAt       time.Time             `json:"completed_at,omitempty"`
+}
+
+// AssignmentClaimLease is a server-issued fencing generation for a portable
+// worker claim. ID is deliberately not an authentication credential: agent
+// hosts still own access control and tool policy. ExpiresAt only bounds the
+// pre-start claimed reservation. Once work advances beyond claimed, Cairnline
+// clears ExpiresAt but retains ID so stale workers remain fenced from later
+// lifecycle writes.
+type AssignmentClaimLease struct {
+	ID         string    `json:"id"`
+	AcquiredAt time.Time `json:"acquired_at"`
+	ExpiresAt  time.Time `json:"expires_at,omitzero"`
 }
 
 type AssignmentCoordination struct {
@@ -456,6 +471,7 @@ type QueuedAssignmentUpdate struct {
 }
 
 type AssignmentPreparation struct {
+	ClaimID           string       `json:"claim_id,omitempty"`
 	ClaimedBy         string       `json:"claimed_by"`
 	ExecutionRef      ExecutionRef `json:"execution_ref,omitzero"`
 	ContextSnapshotID string       `json:"context_snapshot_id,omitempty"`
@@ -925,6 +941,7 @@ const (
 	ProjectOperationKindProjectSetup    = "project_setup"
 	ProjectOperationKindSkill           = "skill"
 	ProjectOperationKindWorkItem        = "work_item"
+	ProjectOperationActionRecoverClaim  = "recover_assignment_claim"
 
 	ProjectOperationSeverityBlocked = "blocked"
 	ProjectOperationSeverityAction  = "action"

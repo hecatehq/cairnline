@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hecatehq/cairnline"
 )
@@ -84,6 +85,45 @@ func TestPublicAPIEmbedsCoordinationCore(t *testing.T) {
 	var typedActivity cairnline.ProjectActivity = activity
 	if typedActivity.Counts.Active != 1 || len(typedActivity.Buckets.Active) != 1 || typedActivity.Buckets.Active[0].Bucket != cairnline.ProjectActivityBucketActive {
 		t.Fatalf("activity = %+v, want public active assignment bucket", typedActivity)
+	}
+}
+
+func TestPublicAPIExposesFencedAssignmentClaims(t *testing.T) {
+	if cairnline.ProjectOperationActionRecoverClaim != "recover_assignment_claim" {
+		t.Fatalf("ProjectOperationActionRecoverClaim = %q, want stable public action", cairnline.ProjectOperationActionRecoverClaim)
+	}
+	ctx := context.Background()
+	service := cairnline.NewService(cairnline.NewMemoryStore(), cairnline.WithAssignmentClaimLeaseTTL(90*time.Second))
+	project, err := service.CreateProject(ctx, cairnline.Project{Name: "Portable claim"})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	role, err := service.CreateRole(ctx, cairnline.Role{ProjectID: project.ID, Name: "Worker"})
+	if err != nil {
+		t.Fatalf("CreateRole() error = %v", err)
+	}
+	work, err := service.CreateWorkItem(ctx, cairnline.WorkItem{ProjectID: project.ID, Title: "Fence worker"})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	assignment, err := service.CreateAssignment(ctx, cairnline.Assignment{ProjectID: project.ID, WorkItemID: work.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("CreateAssignment() error = %v", err)
+	}
+	claimed, err := service.ClaimAssignmentWithLease(ctx, project.ID, assignment.ID, "portable-worker")
+	if err != nil {
+		t.Fatalf("ClaimAssignmentWithLease() error = %v", err)
+	}
+	var claim *cairnline.AssignmentClaimLease = claimed.Claim
+	if claim == nil || claim.ID == "" || claim.ExpiresAt.Sub(claim.AcquiredAt) != 90*time.Second {
+		t.Fatalf("claim = %+v, want public 90-second fence", claim)
+	}
+	running, err := service.UpdateAssignmentStatusWithClaim(ctx, project.ID, assignment.ID, cairnline.AssignmentRunning, cairnline.ExecutionRef{}, claim.ID)
+	if err != nil {
+		t.Fatalf("UpdateAssignmentStatusWithClaim() error = %v", err)
+	}
+	if running.Claim == nil || running.Claim.ID != claim.ID || !running.Claim.ExpiresAt.IsZero() {
+		t.Fatalf("running claim = %+v, want retained public fence", running.Claim)
 	}
 }
 

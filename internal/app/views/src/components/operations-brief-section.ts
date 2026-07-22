@@ -57,6 +57,8 @@ export class OperationsBriefSection extends BaseComponent {
         const li = this.el("li", "item");
         const row = this.el("div", "row");
         row.append(this.badge(item.severity, item.severity), this.el("span", "title", item.title));
+        // Inert affordance: action_label is a plain badge, not a button.
+        if (item.action_label) row.append(this.badge(item.action_label, "action-label"));
         li.append(row);
         if (item.detail) li.append(this.el("div", "detail", item.detail));
         list.append(li);

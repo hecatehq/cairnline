@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const SnapshotVersion = 1
+const (
+	SnapshotVersion       = 2
+	legacySnapshotVersion = 1
+)
 
 // Snapshot is an embeddable export/import boundary for migration rehearsals.
 //
@@ -102,8 +105,16 @@ func (s *Service) ExportSnapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func (s *Service) ImportSnapshot(ctx context.Context, snapshot Snapshot) (Snapshot, error) {
-	if snapshot.Version != SnapshotVersion {
+	if snapshot.Version != SnapshotVersion && snapshot.Version != legacySnapshotVersion {
 		return Snapshot{}, errors.Join(ErrInvalid, fmt.Errorf("snapshot version %d is unsupported", snapshot.Version))
+	}
+	for _, item := range snapshot.Assignments {
+		if snapshot.Version == legacySnapshotVersion && item.Claim != nil {
+			return Snapshot{}, errors.Join(ErrInvalid, errors.New("snapshot version 1 cannot contain assignment claim leases"))
+		}
+		if err := ValidateAssignmentClaimState(item); err != nil {
+			return Snapshot{}, fmt.Errorf("validate assignment %q claim state: %w", item.ID, err)
+		}
 	}
 	for _, item := range snapshot.Projects {
 		if err := upsertProject(ctx, s.store, item); err != nil {

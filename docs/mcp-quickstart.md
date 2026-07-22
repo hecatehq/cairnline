@@ -54,8 +54,9 @@ contract:
 ```
 
 The response includes `structuredContent` with supported `execution_modes`,
-`assignment_statuses`, skill metadata paths, the recommended MCP-pull flow, and
-the runtime responsibilities that remain owned by the consuming agent host.
+`assignment_statuses`, the effective assignment-claim lease TTL and recovery
+tools, skill metadata paths, the recommended MCP-pull flow, and the runtime
+responsibilities that remain owned by the consuming agent host.
 
 Generated IDs are returned in tool response text. Copy the `proj_...`,
 `role_...`, `work_...`, and `asgn_...` IDs into later calls.
@@ -174,7 +175,44 @@ a stable local label for the claiming agent or host session.
 ```
 
 Claiming prevents another compatible agent from picking the same queued work. It
-does not grant tools, writes, network access, credentials, or model access.
+does not grant tools, writes, network access, credentials, or model access. The
+structured result contains `claim.id`, `claim.acquired_at`, and
+`claim.expires_at`. Save `claim.id` as `CLAIM_ID` and pass it to every later
+assignment lifecycle mutation. It is a concurrency fence, not an authentication
+secret.
+After a host restart, `assignments.get` and `assignments.list` expose the active
+`claim_id` and `claim_expires_at` in fallback text as well as structured data;
+after start they expose the retained `claim_fence` instead.
+
+The default pre-start lease is five minutes; read the effective `ttl_seconds`
+from `coordination.capabilities`. Positive custom TTLs are rounded up to whole
+seconds with a one-second minimum. If context or host preparation takes longer,
+renew before expiry:
+
+```json
+{"jsonrpc":"2.0","id":"6-renew","method":"tools/call","params":{"name":"assignments.renew_claim","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claim_id":"CLAIM_ID"}}}
+```
+
+Renewal at or after `claim.expires_at` conflicts. An expired claim remains
+visible and claimed until an authorized host reconciles any prepared resources
+and explicitly requeues it:
+
+```json
+{"jsonrpc":"2.0","id":"6-recover","method":"tools/call","params":{"name":"assignments.recover_claim","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","expected_claim_id":"CLAIM_ID"}}}
+```
+
+Recovery is only for expired pre-start `claimed` reservations. Cairnline never
+uses a timer to cancel, steal, or requeue running, approval-blocked, or review
+work.
+
+Breaking (alpha): existing MCP pull clients must migrate to fenced claims.
+`assignments.prepare` and `assignments.release` now take `claim_id` instead of
+`claimed_by`, while `assignments.update_status` and `assignments.complete`
+require `claim_id`. Read it from either the text or structured
+`assignments.claim` result. Embedders with custom Go stores must also implement
+the seven new claim-lease methods, and snapshot producers should emit version 2
+to preserve claim generations; version 1 remains importable as unleased
+host-authoritative history.
 
 ### 7. Read Assignment Context
 
@@ -192,16 +230,16 @@ After claiming, a host may attach its execution reference or generated context
 snapshot without marking work as started:
 
 ```json
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claimed_by":"local-agent-reviewer","execution_ref":{"kind":"task_run","run_id":"local-run-1"},"context_snapshot_id":"HOST_CONTEXT_SNAPSHOT_ID"}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claim_id":"CLAIM_ID","execution_ref":{"kind":"task_run","run_id":"local-run-1"},"context_snapshot_id":"HOST_CONTEXT_SNAPSHOT_ID"}}}
 ```
 
-Preparation returns a conflict if the assignment is no longer claimed by that
-exact worker.
+Preparation returns an invalid-arguments error if the claim id is missing, and
+a conflict if it is expired or no longer current.
 
 ### 8. Mark It Running
 
 ```json
-{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"running","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
+{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claim_id":"CLAIM_ID","status":"running","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
 ```
 
 `execution_ref` is a structured, host-neutral reference to the execution the
@@ -217,6 +255,11 @@ Cairnline:
 - `pending_approvals`: count of host-side approval gates currently blocking the
   execution.
 
+Starting work retires the pre-start expiry, but the assignment retains the same
+claim id as a fencing generation. Continue passing it to progress and
+completion calls so a worker from an older recovered claim cannot overwrite the
+current run.
+
 Breaking (alpha): `execution_ref` must be an object. The pre-structured
 bare-string form is rejected with an invalid-arguments error, and stores that
 still hold string refs must be rebuilt or re-seeded from the host's
@@ -225,7 +268,7 @@ authoritative data.
 When the host pauses the execution on a human approval gate, report it:
 
 ```json
-{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"awaiting_approval","execution_ref":{"kind":"task_run","run_id":"local-run-1","pending_approvals":1}}}}
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claim_id":"CLAIM_ID","status":"awaiting_approval","execution_ref":{"kind":"task_run","run_id":"local-run-1","pending_approvals":1}}}}
 ```
 
 `awaiting_approval` is a first-class assignment status so portable readers can
@@ -245,7 +288,7 @@ rendering locators as links or opening them.
 ### 10. Complete The Assignment
 
 ```json
-{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","status":"completed","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
+{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"PROJECT_ID","assignment_id":"ASSIGNMENT_ID","claim_id":"CLAIM_ID","status":"completed","execution_ref":{"kind":"task_run","run_id":"local-run-1"}}}}
 ```
 
 Use `status:"failed"` when the agent cannot complete the work. The work item

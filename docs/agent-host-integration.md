@@ -82,10 +82,73 @@ updated, err := service.UpdateQueuedAssignment(ctx, projectID, assignment.ID,
 The update is compare-and-set: it preserves lifecycle/execution fields and
 returns `ErrConflict` if another writer changed or claimed the assignment.
 This prevents a stale editor from releasing a claim that may already have
-started execution. After a claim, use `Service.PrepareAssignment` to attach a
-host execution reference or context snapshot while verifying the expected
-claim owner. Snapshot import remains an administrative/offline workflow and is
-not exposed as a live whole-assignment mutation.
+started execution. Snapshot import remains an administrative/offline workflow
+and is not exposed as a live whole-assignment mutation.
+
+### Portable worker claims and host authority
+
+Portable MCP workers use a fenced pre-start claim rather than relying on the
+caller-chosen `claimed_by` label:
+
+```text
+queued ── claim ──> claimed (lease active) ── start ──> running (fence retained)
+                       │
+                       └── expiry + explicit recover ──> queued
+```
+
+1. `Service.ClaimAssignmentWithLease` returns an assignment whose `claim`
+   contains a server-generated `id`, `acquired_at`, and `expires_at`.
+2. While status is `claimed`, call `Service.RenewAssignmentClaim` before the
+   expiry when provisioning or context preparation may take longer than the
+   configured TTL. `WithAssignmentClaimLeaseTTL` changes the default five
+   minutes for an embedding server; `coordination.capabilities` reports the
+   effective value. Positive custom values are rounded up to whole seconds
+   with a one-second minimum.
+3. Pass the exact claim id to `PrepareAssignmentWithClaim`,
+   `ReleaseAssignmentWithClaim`, `UpdateAssignmentStatusWithClaim`, and
+   `CompleteAssignmentWithClaim`. Missing ids are invalid; expired or
+   superseded ids conflict.
+4. When work advances out of `claimed`, Cairnline retires the reservation
+   expiry but retains its id as a fencing generation for later worker writes.
+
+Claim ids are concurrency values, not authentication credentials. They may be
+stored in portable snapshots and returned in assignment reads. Hosts still
+decide which principals may invoke these methods or their MCP tools. For
+content-only MCP clients, `assignments.get` and `assignments.list` include
+`claim_id` plus `claim_expires_at` while the reservation is active, or
+`claim_fence` after work starts.
+
+If a pre-start claim expires, it stays `claimed` until an authorized host or
+operator calls `RecoverAssignmentClaim` with the exact expired id. Recovery
+requeues it and clears prepared execution/context references. This operation is
+explicit so the host can reconcile any resources it created during preparation.
+`projects.operations_brief` and `projects.health` expose the stable
+`recover_assignment_claim` action hint for this state.
+It is never valid for `running`, `awaiting_approval`, or `awaiting_review` work:
+Cairnline cannot determine that host execution is dead and never cancels or
+requeues it automatically.
+
+The original `ClaimAssignment`, `PrepareAssignment`, `ReleaseAssignment`,
+`UpdateAssignmentStatus`, and `CompleteAssignment` methods remain
+embedding-host authority surfaces for trusted reconciliation and existing
+Hecate integration. They bypass worker fencing by design and must not be
+exposed directly as agent tools. Embedders with custom `Store`
+implementations must implement the new claim-lease methods before upgrading.
+
+Breaking (alpha): the portable worker claim contract is now fenced.
+`assignments.prepare` and `assignments.release` take `claim_id` instead of
+`claimed_by`; `assignments.update_status` and `assignments.complete` also
+require the current `claim_id`. `assignments.claim` returns that id in both its
+text and structured result. The public `Store` interface adds the seven leased
+claim/renew/recover and fenced mutation methods, so custom stores must implement
+them. Snapshot version 2 persists claim generations; version 1 imports remain
+supported only as unleased host-authoritative history.
+
+SQLite migration and v1 snapshot import preserve existing claimed rows as
+unleased host-authoritative state; they do not invent an expiry or silently
+make old work stealable. Before handing one of those rows to an MCP worker, a
+trusted embedding host must reconcile/release it and let the worker claim it
+again under the leased contract.
 
 Handoff editors follow the same rule. Use `Service.PatchHandoff`,
 `Service.UpdateHandoffStatus`, or `Service.DeleteHandoff` with the exact
@@ -131,6 +194,7 @@ Hosts that want agent-neutral interoperability should start here:
 coordination.capabilities
 assignments.next
 assignments.claim
+assignments.renew_claim (only while still claimed and nearing expiry)
 assignments.context
 assignments.launch_packet
 evidence.record
@@ -140,15 +204,22 @@ assignments.complete
 1. Call `coordination.capabilities` once during setup or health checks to learn
    the server contract and boundaries.
 2. Poll `assignments.next` with the host's available kind and skill ids.
-3. Claim one assignment with `assignments.claim`.
+3. Claim one assignment with `assignments.claim` and retain the returned
+   `structuredContent.claim.id` fencing value.
 4. Read `assignments.context` and/or `assignments.launch_packet`. Both include
    the project's enabled durable memory entries.
-5. Build the host-native prompt/run packet from the structured metadata.
-6. Record evidence as the run produces useful proof.
-7. Complete, fail, or cancel the assignment explicitly.
+5. Renew with `assignments.renew_claim` if the assignment remains `claimed` as
+   expiry approaches. Pass the claim id to prepare, progress, and completion
+   mutations.
+6. Build the host-native prompt/run packet from the structured metadata.
+7. Record evidence as the run produces useful proof.
+8. Complete, fail, or cancel the assignment explicitly.
 
-If the host crashes after claim, it should either resume by `execution_ref` or
-release the claim when it knows work will not continue.
+If the host crashes before work starts, another authorized host may explicitly
+call `assignments.recover_claim` once the reservation expires, then claim the
+queued assignment again. If it crashes after work starts, the executing host
+must reconcile or resume through its `execution_ref`; claim expiry never makes
+runtime work stealable.
 
 ## Execution Ref And Approval Signal
 
@@ -410,11 +481,14 @@ Before exposing Cairnline tools to an agent, a host should decide:
 
 - Which mutating tools the agent may call.
 - Whether assignments can be claimed automatically or require operator review.
+- Which component renews pre-start claims, how it retains the non-secret claim
+  id, and how it stops stale workers after a conflict.
 - Whether evidence locators are only stored, rendered as text, or opened as
   links after scheme validation.
 - Whether local roots are readable by the host, and under what path boundary.
 - Whether skill metadata may trigger host-native instruction loading.
-- How to recover or release claimed assignments after crashes.
+- How to reconcile prepared host resources before recovering an expired claim,
+  and how to handle running work separately through host supervision.
 - How to show operator confirmation for memory promotion and destructive
   project changes.
 - Whether to render `ui://` app views, and if so, only inside a sandboxed
@@ -428,6 +502,8 @@ A minimal useful integration does not need orchestration. It only needs:
 - `projects.list`
 - `assignments.next`
 - `assignments.claim`
+- `assignments.renew_claim` when pre-start work approaches expiry
+- `assignments.recover_claim` for explicit expired-claim recovery
 - `assignments.context`
 - `assignments.launch_packet`
 - `evidence.record`

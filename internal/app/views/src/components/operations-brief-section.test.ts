@@ -22,11 +22,13 @@ describe("OperationsBriefSection", () => {
 
     expect(text).toContain("Operations brief");
     expect(text).toContain("Next: unblock deploy approval");
-    expect(text).toContain("1 blocked assignment leads the queue.");
+    expect(text).toContain("2 blocked assignments lead the queue.");
     expect(text).toContain("Open work items");
     expect(text).toContain("Closeout ready");
     expect(text).toContain("Deploy to staging");
     expect(text).toContain("Address review follow-up");
+    expect(text).toContain("Recover expired claim for browser checks");
+    expect(text).toContain("Recover claim");
   });
 
   it("renders from the projects.operations_brief golden structuredContent", () => {
