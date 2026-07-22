@@ -20,7 +20,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 		Description: "Describe Cairnline's portable coordination contract, supported execution modes, and host-owned execution boundaries.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
 		Annotations: readOnly,
-	}, coordinationCapabilities(version))
+	}, coordinationCapabilities(service, version))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "projects.list",
@@ -733,7 +733,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.claim",
 		Title:       "Claim assignment",
-		Description: "Atomically claim a queued assignment for an MCP-capable agent or operator.",
+		Description: "Atomically claim a queued assignment with a server-expiring pre-start lease and fencing id.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
@@ -746,15 +746,45 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	}, claimAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
-		Name:        "assignments.prepare",
-		Title:       "Prepare claimed assignment",
-		Description: "Attach host execution or context references while the assignment is still claimed by the expected worker. This does not mark work as started.",
+		Name:        "assignments.renew_claim",
+		Title:       "Renew assignment claim",
+		Description: "Extend an unexpired pre-start assignment claim. Renewal does not change assignment activity ordering.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
-				"claimed_by":{"type":"string","minLength":1},
+				"claim_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id","claim_id"]
+		}`),
+	}, renewAssignmentClaim(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.recover_claim",
+		Title:       "Recover expired assignment claim",
+		Description: "Explicitly requeue an expired pre-start claim and fence its former worker. Running work is never recovered by this tool.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1},
+				"expected_claim_id":{"type":"string","minLength":1}
+			},
+			"required":["project_id","assignment_id","expected_claim_id"]
+		}`),
+	}, recoverAssignmentClaim(service))
+
+	server.RegisterTool(mcp.Tool{
+		Name:        "assignments.prepare",
+		Title:       "Prepare claimed assignment",
+		Description: "Attach host execution or context references while an unexpired fenced claim is current. This does not mark work as started.",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"project_id":{"type":"string","minLength":1},
+				"assignment_id":{"type":"string","minLength":1},
+				"claim_id":{"type":"string","minLength":1},
 				"execution_ref":{
 					"type":"object",
 					"properties":{
@@ -768,7 +798,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 				},
 				"context_snapshot_id":{"type":"string","minLength":1}
 			},
-			"required":["project_id","assignment_id","claimed_by"],
+			"required":["project_id","assignment_id","claim_id"],
 			"anyOf":[
 				{"required":["execution_ref"]},
 				{"required":["context_snapshot_id"]}
@@ -779,27 +809,28 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.release",
 		Title:       "Release assignment claim",
-		Description: "Release a claimed assignment back to queued state before execution starts.",
+		Description: "Release an unexpired fenced claim back to queued state before execution starts.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
-				"claimed_by":{"type":"string","minLength":1}
+				"claim_id":{"type":"string","minLength":1}
 			},
-			"required":["project_id","assignment_id","claimed_by"]
+			"required":["project_id","assignment_id","claim_id"]
 		}`),
 	}, releaseAssignment(service))
 
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.update_status",
 		Title:       "Update assignment progress status",
-		Description: "Mark a claimed assignment running, awaiting approval, or awaiting review.",
+		Description: "Mark a fenced assignment running, awaiting approval, or awaiting review.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
+				"claim_id":{"type":"string","minLength":1},
 				"status":{"type":"string","enum":["running","awaiting_approval","awaiting_review"]},
 				"execution_ref":{
 					"type":"object",
@@ -813,7 +844,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 					}
 				}
 			},
-			"required":["project_id","assignment_id","status"]
+			"required":["project_id","assignment_id","claim_id","status"]
 		}`),
 	}, updateAssignmentStatus(service))
 
@@ -850,12 +881,13 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 	server.RegisterTool(mcp.Tool{
 		Name:        "assignments.complete",
 		Title:       "Complete assignment",
-		Description: "Mark an assignment completed, failed, cancelled, or awaiting review.",
+		Description: "Mark a fenced assignment completed, failed, cancelled, or awaiting review. A current claim id is always required on this worker-facing tool.",
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
 				"project_id":{"type":"string","minLength":1},
 				"assignment_id":{"type":"string","minLength":1},
+				"claim_id":{"type":"string","minLength":1},
 				"status":{"type":"string","enum":["completed","failed","cancelled","awaiting_review"]},
 				"execution_ref":{
 					"type":"object",
@@ -869,7 +901,7 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 					}
 				}
 			},
-			"required":["project_id","assignment_id"]
+			"required":["project_id","assignment_id","claim_id"]
 		}`),
 	}, completeAssignment(service))
 
@@ -1382,19 +1414,29 @@ func RegisterTools(server *mcp.Server, service *core.Service, version string) {
 }
 
 type coordinationCapabilitiesContent struct {
-	ServerName             string   `json:"server_name"`
-	ServerVersion          string   `json:"server_version"`
-	Product                string   `json:"product"`
-	CoreRule               string   `json:"core_rule"`
-	ExecutionModes         []string `json:"execution_modes"`
-	AssignmentStatuses     []string `json:"assignment_statuses"`
-	DesiredAgentKindHints  []string `json:"desired_agent_kind_hints"`
-	SkillMetadataPaths     []string `json:"skill_metadata_paths"`
-	AgentHostOwns          []string `json:"agent_host_owns"`
-	RecommendedMCPPullFlow []string `json:"recommended_mcp_pull_flow"`
+	ServerName             string                           `json:"server_name"`
+	ServerVersion          string                           `json:"server_version"`
+	Product                string                           `json:"product"`
+	CoreRule               string                           `json:"core_rule"`
+	ExecutionModes         []string                         `json:"execution_modes"`
+	AssignmentStatuses     []string                         `json:"assignment_statuses"`
+	AssignmentClaimLeases  assignmentClaimLeaseCapabilities `json:"assignment_claim_leases"`
+	DesiredAgentKindHints  []string                         `json:"desired_agent_kind_hints"`
+	SkillMetadataPaths     []string                         `json:"skill_metadata_paths"`
+	AgentHostOwns          []string                         `json:"agent_host_owns"`
+	RecommendedMCPPullFlow []string                         `json:"recommended_mcp_pull_flow"`
 }
 
-func coordinationCapabilities(version string) mcp.ToolHandler {
+type assignmentClaimLeaseCapabilities struct {
+	TTLSeconds            int64    `json:"ttl_seconds"`
+	FencingID             bool     `json:"fencing_id"`
+	RenewalTool           string   `json:"renewal_tool"`
+	RecoveryTool          string   `json:"recovery_tool"`
+	RecoverableStatuses   []string `json:"recoverable_statuses"`
+	RuntimeExpiryBehavior string   `json:"runtime_expiry_behavior"`
+}
+
+func coordinationCapabilities(service *core.Service, version string) mcp.ToolHandler {
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		capabilities := coordinationCapabilitiesContent{
 			ServerName:    "cairnline",
@@ -1416,6 +1458,14 @@ func coordinationCapabilities(version string) mcp.ToolHandler {
 				core.AssignmentCompleted,
 				core.AssignmentFailed,
 				core.AssignmentCancelled,
+			},
+			AssignmentClaimLeases: assignmentClaimLeaseCapabilities{
+				TTLSeconds:            int64(service.AssignmentClaimLeaseTTL() / time.Second),
+				FencingID:             true,
+				RenewalTool:           "assignments.renew_claim",
+				RecoveryTool:          "assignments.recover_claim",
+				RecoverableStatuses:   []string{core.AssignmentClaimed},
+				RuntimeExpiryBehavior: "expiry never requeues or cancels running, awaiting approval, or awaiting review work",
 			},
 			DesiredAgentKindHints: []string{
 				core.DesiredAgentAny,
@@ -1444,6 +1494,7 @@ func coordinationCapabilities(version string) mcp.ToolHandler {
 			RecommendedMCPPullFlow: []string{
 				"assignments.next",
 				"assignments.claim",
+				"assignments.renew_claim",
 				"assignments.context",
 				"assignments.launch_packet",
 				"evidence.record",
@@ -1457,7 +1508,7 @@ func coordinationCapabilities(version string) mcp.ToolHandler {
 			Content: mcp.TextContent(strings.Join([]string{
 				"Cairnline coordinates project work; it does not launch or authorize agents.",
 				capabilities.CoreRule,
-				"Use assignments.next/claim/context/launch_packet for MCP-pull agents, then record evidence and complete the assignment.",
+				"Use assignments.next/claim/context/launch_packet for MCP-pull agents, renew while still claimed if needed, then record evidence and complete with the claim fence.",
 			}, "\n")),
 			StructuredContent: capabilities,
 		}, nil
@@ -2601,9 +2652,7 @@ func listAssignments(service *core.Service) mcp.ToolHandler {
 			if item.RootID != "" {
 				fmt.Fprintf(&b, " root=%s", item.RootID)
 			}
-			if item.ClaimedBy != "" {
-				fmt.Fprintf(&b, " claimed_by=%s", item.ClaimedBy)
-			}
+			appendAssignmentClaimText(&b, item)
 			b.WriteByte('\n')
 		}
 		return mcp.CallToolResult{Content: mcp.TextContent(b.String()), StructuredContent: items}, nil
@@ -2753,12 +2802,57 @@ func claimAssignment(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.ClaimAssignment(ctx, input.ProjectID, input.AssignmentID, input.ClaimedBy)
+		item, err := service.ClaimAssignmentWithLease(ctx, input.ProjectID, input.AssignmentID, input.ClaimedBy)
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
 		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Claimed assignment %s by %s", item.ID, item.ClaimedBy)),
+			Content:           mcp.TextContent(fmt.Sprintf("Claimed assignment %s by %s with claim %s until %s", item.ID, item.ClaimedBy, item.Claim.ID, item.Claim.ExpiresAt.Format(time.RFC3339Nano))),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func renewAssignmentClaim(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID    string `json:"project_id"`
+		AssignmentID string `json:"assignment_id"`
+		ClaimID      string `json:"claim_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, invalidArguments(err)
+		}
+		item, err := service.RenewAssignmentClaim(ctx, input.ProjectID, input.AssignmentID, input.ClaimID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Renewed assignment %s claim until %s", item.ID, item.Claim.ExpiresAt.Format(time.RFC3339Nano))),
+			StructuredContent: item,
+		}, nil
+	}
+}
+
+func recoverAssignmentClaim(service *core.Service) mcp.ToolHandler {
+	type args struct {
+		ProjectID       string `json:"project_id"`
+		AssignmentID    string `json:"assignment_id"`
+		ExpectedClaimID string `json:"expected_claim_id"`
+	}
+	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
+		var input args
+		if err := json.Unmarshal(raw, &input); err != nil {
+			return mcp.CallToolResult{}, invalidArguments(err)
+		}
+		item, err := service.RecoverAssignmentClaim(ctx, input.ProjectID, input.AssignmentID, input.ExpectedClaimID)
+		if err != nil {
+			return mcp.CallToolResult{}, err
+		}
+		return mcp.CallToolResult{
+			Content:           mcp.TextContent(fmt.Sprintf("Recovered expired claim and requeued assignment %s", item.ID)),
+			StructuredContent: item,
 		}, nil
 	}
 }
@@ -2767,7 +2861,7 @@ func prepareAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID         string            `json:"project_id"`
 		AssignmentID      string            `json:"assignment_id"`
-		ClaimedBy         string            `json:"claimed_by"`
+		ClaimID           string            `json:"claim_id"`
 		ExecutionRef      core.ExecutionRef `json:"execution_ref"`
 		ContextSnapshotID string            `json:"context_snapshot_id"`
 	}
@@ -2776,8 +2870,8 @@ func prepareAssignment(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.PrepareAssignment(ctx, input.ProjectID, input.AssignmentID, core.AssignmentPreparation{
-			ClaimedBy:         input.ClaimedBy,
+		item, err := service.PrepareAssignmentWithClaim(ctx, input.ProjectID, input.AssignmentID, core.AssignmentPreparation{
+			ClaimID:           input.ClaimID,
 			ExecutionRef:      input.ExecutionRef,
 			ContextSnapshotID: input.ContextSnapshotID,
 		})
@@ -2795,19 +2889,20 @@ func releaseAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID    string `json:"project_id"`
 		AssignmentID string `json:"assignment_id"`
-		ClaimedBy    string `json:"claimed_by"`
+		ClaimID      string `json:"claim_id"`
 	}
 	return func(ctx context.Context, raw json.RawMessage) (mcp.CallToolResult, error) {
 		var input args
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.ReleaseAssignment(ctx, input.ProjectID, input.AssignmentID, input.ClaimedBy)
+		item, err := service.ReleaseAssignmentWithClaim(ctx, input.ProjectID, input.AssignmentID, input.ClaimID)
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
 		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Released assignment %s", item.ID)),
+			Content:           mcp.TextContent(fmt.Sprintf("Released assignment %s", item.ID)),
+			StructuredContent: item,
 		}, nil
 	}
 }
@@ -2816,6 +2911,7 @@ func updateAssignmentStatus(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID    string            `json:"project_id"`
 		AssignmentID string            `json:"assignment_id"`
+		ClaimID      string            `json:"claim_id"`
 		Status       string            `json:"status"`
 		ExecutionRef core.ExecutionRef `json:"execution_ref"`
 	}
@@ -2824,12 +2920,13 @@ func updateAssignmentStatus(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.UpdateAssignmentStatus(ctx, input.ProjectID, input.AssignmentID, input.Status, input.ExecutionRef)
+		item, err := service.UpdateAssignmentStatusWithClaim(ctx, input.ProjectID, input.AssignmentID, input.Status, input.ExecutionRef, input.ClaimID)
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
 		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Updated assignment %s: %s", item.ID, item.Status)),
+			Content:           mcp.TextContent(fmt.Sprintf("Updated assignment %s: %s", item.ID, item.Status)),
+			StructuredContent: item,
 		}, nil
 	}
 }
@@ -2880,6 +2977,7 @@ func completeAssignment(service *core.Service) mcp.ToolHandler {
 	type args struct {
 		ProjectID    string            `json:"project_id"`
 		AssignmentID string            `json:"assignment_id"`
+		ClaimID      string            `json:"claim_id"`
 		Status       string            `json:"status"`
 		ExecutionRef core.ExecutionRef `json:"execution_ref"`
 	}
@@ -2888,12 +2986,13 @@ func completeAssignment(service *core.Service) mcp.ToolHandler {
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return mcp.CallToolResult{}, invalidArguments(err)
 		}
-		item, err := service.CompleteAssignment(ctx, input.ProjectID, input.AssignmentID, input.Status, input.ExecutionRef)
+		item, err := service.CompleteAssignmentWithClaim(ctx, input.ProjectID, input.AssignmentID, input.Status, input.ExecutionRef, input.ClaimID)
 		if err != nil {
 			return mcp.CallToolResult{}, err
 		}
 		return mcp.CallToolResult{
-			Content: mcp.TextContent(fmt.Sprintf("Updated assignment %s: %s", item.ID, item.Status)),
+			Content:           mcp.TextContent(fmt.Sprintf("Updated assignment %s: %s", item.ID, item.Status)),
+			StructuredContent: item,
 		}, nil
 	}
 }
@@ -3952,9 +4051,24 @@ func formatAssignments(title string, items []core.Assignment) string {
 		if len(item.DesiredAgent.SkillIDs) > 0 {
 			fmt.Fprintf(&b, " skills=%s", strings.Join(item.DesiredAgent.SkillIDs, ","))
 		}
+		appendAssignmentClaimText(&b, item)
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func appendAssignmentClaimText(b *strings.Builder, item core.Assignment) {
+	if item.ClaimedBy != "" {
+		fmt.Fprintf(b, " claimed_by=%s", item.ClaimedBy)
+	}
+	if item.Claim == nil {
+		return
+	}
+	if item.Status == core.AssignmentClaimed && !item.Claim.ExpiresAt.IsZero() {
+		fmt.Fprintf(b, " claim_id=%s claim_expires_at=%s", item.Claim.ID, item.Claim.ExpiresAt.Format(time.RFC3339Nano))
+		return
+	}
+	fmt.Fprintf(b, " claim_fence=%s", item.Claim.ID)
 }
 
 func formatArtifacts(title string, items []core.Artifact) string {

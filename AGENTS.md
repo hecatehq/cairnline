@@ -18,6 +18,9 @@ alpha and not stable.
 - Keep tool registration/application wiring in `internal/app`.
 - Assignment records are coordination state; execution and launch authority stay
   outside core.
+- Portable worker claims use server-issued fencing ids. Never add claim expiry
+  without fencing prepare/progress/completion writes, and never infer that an
+  expired reservation means host runtime execution is dead.
 - Skill metadata never grants tools, writes, network, or approval bypass.
 
 ## Skills

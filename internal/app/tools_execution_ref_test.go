@@ -31,15 +31,17 @@ func TestMCPTools_StructuredExecutionRefAndAwaitingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAssignment() error = %v", err)
 	}
-	if _, err := service.ClaimAssignment(ctx, project.ID, assignment.ID, "agent-a"); err != nil {
-		t.Fatalf("ClaimAssignment() error = %v", err)
+	claimed, err := service.ClaimAssignmentWithLease(ctx, project.ID, assignment.ID, "agent-a")
+	if err != nil {
+		t.Fatalf("ClaimAssignmentWithLease() error = %v", err)
 	}
+	claimID := claimed.Claim.ID
 	if _, err := service.CreateMemoryEntry(ctx, core.MemoryEntry{ProjectID: project.ID, Title: "Timeout invariant", Body: "Never lower the gateway timeout."}); err != nil {
 		t.Fatalf("CreateMemoryEntry() error = %v", err)
 	}
 
 	input := strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignment.ID + `","status":"awaiting_approval","execution_ref":{"kind":"task_run","task_id":"task-1","run_id":"run-1","session_id":"sess-1","trace_id":"trace-1","pending_approvals":2}}}}` + "\n",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignment.ID + `","claim_id":"` + claimID + `","status":"awaiting_approval","execution_ref":{"kind":"task_run","task_id":"task-1","run_id":"run-1","session_id":"sess-1","trace_id":"trace-1","pending_approvals":2}}}}` + "\n",
 	)
 	var output bytes.Buffer
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -60,7 +62,7 @@ func TestMCPTools_StructuredExecutionRefAndAwaitingApproval(t *testing.T) {
 	// A bare-string execution_ref is the pre-structured contract; it fails
 	// argument decode as a tool error and leaves the assignment untouched.
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignment.ID + `","status":"running","execution_ref":"legacy-run-9"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignment.ID + `","claim_id":"` + claimID + `","status":"running","execution_ref":"legacy-run-9"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

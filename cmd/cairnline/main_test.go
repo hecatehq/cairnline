@@ -126,11 +126,32 @@ func TestCommand_StandaloneMCPPullSmoke(t *testing.T) {
 	if !strings.Contains(nextText, assignmentID) {
 		t.Fatalf("assignments.next text = %q, want assignment %s", nextText, assignmentID)
 	}
-	claimText := request.toolText(7, "assignments.claim", map[string]any{
-		"project_id":    projectID,
-		"assignment_id": assignmentID,
-		"claimed_by":    "standalone-smoke-agent",
+	claimResponse := request.raw(7, "tools/call", map[string]any{
+		"name": "assignments.claim",
+		"arguments": map[string]any{
+			"project_id":    projectID,
+			"assignment_id": assignmentID,
+			"claimed_by":    "standalone-smoke-agent",
+		},
 	})
+	var claimResult struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		StructuredContent struct {
+			Claim *struct {
+				ID string `json:"id"`
+			} `json:"claim"`
+		} `json:"structuredContent"`
+	}
+	if err := json.Unmarshal(claimResponse.Result, &claimResult); err != nil {
+		t.Fatalf("claim response did not unmarshal: %v\n%s", err, string(claimResponse.Result))
+	}
+	if len(claimResult.Content) == 0 || claimResult.StructuredContent.Claim == nil {
+		t.Fatalf("claim response missing content or lease: %s", string(claimResponse.Result))
+	}
+	claimText := claimResult.Content[0].Text
+	claimID := claimResult.StructuredContent.Claim.ID
 	if !strings.Contains(claimText, "Claimed assignment "+assignmentID+" by standalone-smoke-agent") {
 		t.Fatalf("claim text = %q, want claimed assignment", claimText)
 	}
@@ -157,6 +178,7 @@ func TestCommand_StandaloneMCPPullSmoke(t *testing.T) {
 	completeText := request.toolText(10, "assignments.complete", map[string]any{
 		"project_id":    projectID,
 		"assignment_id": assignmentID,
+		"claim_id":      claimID,
 		"status":        "completed",
 		"execution_ref": map[string]any{"run_id": "standalone-smoke-run"},
 	})

@@ -8,6 +8,7 @@ package cairnline
 
 import (
 	"context"
+	"time"
 
 	"github.com/hecatehq/cairnline/internal/app"
 	"github.com/hecatehq/cairnline/internal/core"
@@ -24,6 +25,7 @@ var (
 
 type Store = core.Store
 type Service = core.Service
+type ServiceOption = core.ServiceOption
 type MemoryStore = core.MemoryStore
 type SQLiteStore = sqlitestore.Store
 
@@ -60,6 +62,7 @@ type ReviewFollowUpReadiness = core.ReviewFollowUpReadiness
 type DesiredAgent = core.DesiredAgent
 type ExecutionRef = core.ExecutionRef
 type Assignment = core.Assignment
+type AssignmentClaimLease = core.AssignmentClaimLease
 type AssignmentCoordination = core.AssignmentCoordination
 type QueuedAssignmentUpdate = core.QueuedAssignmentUpdate
 type AssignmentPreparation = core.AssignmentPreparation
@@ -84,7 +87,8 @@ type MemoryCandidatePromotion = core.MemoryCandidatePromotion
 type Snapshot = core.Snapshot
 
 const (
-	SnapshotVersion = core.SnapshotVersion
+	SnapshotVersion                = core.SnapshotVersion
+	DefaultAssignmentClaimLeaseTTL = core.DefaultAssignmentClaimLeaseTTL
 
 	WorkStatusReady = core.WorkStatusReady
 	WorkStatusDone  = core.WorkStatusDone
@@ -207,6 +211,7 @@ const (
 	ProjectOperationKindProjectSetup    = core.ProjectOperationKindProjectSetup
 	ProjectOperationKindSkill           = core.ProjectOperationKindSkill
 	ProjectOperationKindWorkItem        = core.ProjectOperationKindWorkItem
+	ProjectOperationActionRecoverClaim  = core.ProjectOperationActionRecoverClaim
 
 	ProjectOperationSeverityBlocked = core.ProjectOperationSeverityBlocked
 	ProjectOperationSeverityAction  = core.ProjectOperationSeverityAction
@@ -222,8 +227,15 @@ const (
 	LaunchPacketKindAssignment = core.LaunchPacketKindAssignment
 )
 
-func NewService(store Store) *Service {
-	return core.NewService(store)
+func NewService(store Store, options ...ServiceOption) *Service {
+	return core.NewService(store, options...)
+}
+
+// WithAssignmentClaimLeaseTTL configures the pre-start lease used by portable
+// worker claims created through ClaimAssignmentWithLease and MCP. Positive
+// values are rounded up to whole seconds with a one-second minimum.
+func WithAssignmentClaimLeaseTTL(ttl time.Duration) ServiceOption {
+	return core.WithAssignmentClaimLeaseTTL(ttl)
 }
 
 func NewMemoryStore() *MemoryStore {

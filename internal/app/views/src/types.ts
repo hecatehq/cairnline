@@ -55,6 +55,8 @@ export interface ProjectOperationItem {
   status?: string;
   title: string;
   detail?: string;
+  action_kind?: string;
+  action_label?: string;
 }
 
 export interface ProjectOperationsBrief {

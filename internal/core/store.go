@@ -42,6 +42,17 @@ type Store interface {
 	CreateAssignment(ctx context.Context, assignment Assignment) (Assignment, error)
 	RestoreAssignmentSnapshot(ctx context.Context, assignment Assignment) (Assignment, error)
 	UpdateQueuedAssignment(ctx context.Context, projectID, id string, update QueuedAssignmentUpdate, now func() time.Time) (Assignment, error)
+	ClaimAssignmentWithLease(ctx context.Context, projectID, id, claimedBy string, lease AssignmentClaimLease, leaseTTL time.Duration, now func() time.Time) (Assignment, error)
+	RenewAssignmentClaim(ctx context.Context, projectID, id, claimID string, leaseTTL time.Duration, now func() time.Time) (Assignment, error)
+	RecoverAssignmentClaim(ctx context.Context, projectID, id, expectedClaimID string, now func() time.Time) (Assignment, error)
+	PrepareAssignmentWithClaim(ctx context.Context, projectID, id string, preparation AssignmentPreparation, now func() time.Time) (Assignment, error)
+	ReleaseAssignmentWithClaim(ctx context.Context, projectID, id, claimID string, now func() time.Time) (Assignment, error)
+	UpdateAssignmentStatusWithClaim(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, claimID string, now func() time.Time) (Assignment, error)
+	CompleteAssignmentWithClaim(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, claimID string, now func() time.Time) (Assignment, error)
+
+	// The methods below are embedding-host authority surfaces. They deliberately
+	// bypass portable worker claim fencing and must not be exposed directly as
+	// agent tools.
 	ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)
 	PrepareAssignment(ctx context.Context, projectID, id string, preparation AssignmentPreparation, now func() time.Time) (Assignment, error)
 	ReleaseAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error)

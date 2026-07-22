@@ -75,6 +75,13 @@ policy, credential handling, or logged-in session boundaries. Secrets, cookies,
 provider credentials, and external-agent private memory are outside Cairnline's
 core model.
 
+MCP assignment claims carry a server-issued `claim.id`. It is a concurrency
+fence, not a bearer credential or proof of identity. Hosts must still decide who
+may call mutation tools. The pre-start reservation expires after the TTL
+advertised by `coordination.capabilities`; expiry only makes an explicit
+`assignments.recover_claim` possible. Cairnline never treats a running agent as
+dead, cancels host execution, or requeues running work automatically.
+
 Cairnline assignment metadata is not authorization. Agent hosts and
 orchestrators must enforce their own policy boundaries even when an assignment
 asks for a particular execution mode, desired agent kind, or skill id.
@@ -102,6 +109,9 @@ Implemented now:
   collaboration artifacts
 - SQLite store for durable projects, project roles, work items, assignments,
   skill metadata, assistant proposal records, and collaboration artifacts
+- expiring, renewable MCP assignment reservations with server-issued fencing
+  ids; expired pre-start claims can be explicitly recovered without allowing a
+  stale worker to prepare, start, or complete a later claim generation
 - project skill discovery from interoperable `.agents/skills`,
   Cairnline-native `.cairnline/skills`, Claude-compatible `.claude/skills`,
   Gemini-compatible `.gemini/skills`, compatibility `.hecate/skills`, and
@@ -131,6 +141,8 @@ discovery; both were checked on July 4, 2026:
   snapshots cover projects, skills, roles, work,
   assignments, artifacts, evidence, reviews, handoffs, memory entries,
   memory candidates, and assistant proposal records
+  (snapshot v2 preserves claim fences and still accepts v1 imports as
+  host-authoritative unleased historical claims)
 - stdio MCP server with JSON-RPC framing
 - MCP protocol structs carry the spec fields a richer tool surface needs: tool
   `outputSchema`, `_meta` passthrough on tools, resources, resource content, and
@@ -191,6 +203,8 @@ discovery; both were checked on July 4, 2026:
   - `assignments.create`
   - `assignments.update`
   - `assignments.claim`
+  - `assignments.renew_claim`
+  - `assignments.recover_claim`
   - `assignments.prepare`
   - `assignments.release`
   - `assignments.update_status`
@@ -231,11 +245,12 @@ discovery; both were checked on July 4, 2026:
 - read-only work-item closeout readiness summaries derived from assignment,
   evidence, review, and handoff metadata
 - read-only project operations briefs for attention routing across active
-  assignments, blocked closeout, review follow-up, memory candidates, and open
-  work
+  assignments, expired pre-start claims, blocked closeout, review follow-up,
+  memory candidates, and open work
 - read-only project activity projections grouped by active, blocked, completed,
   and recent assignment state; queued assignments are attention items until
-  claimed, while claimed/running/review assignments are active
+  claimed, unexpired claimed/running/review assignments are active, and expired
+  pre-start claims are blocked recovery items
 - read-only project setup-readiness and health summaries for onboarding,
   context/skill gaps, and bounded operator attention
 - deterministic assistant proposal/apply tools with durable proposal records,

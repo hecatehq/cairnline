@@ -21,7 +21,36 @@ const (
 	maxGuidanceMetadataBytes = 64 * 1024
 	maxSkillMetadataBytes    = 64 * 1024
 	suggestedToolsMaxItems   = 16
+
+	DefaultAssignmentClaimLeaseTTL = 5 * time.Minute
 )
+
+type ServiceOption func(*Service)
+
+// WithAssignmentClaimLeaseTTL configures the server-owned lifetime of a
+// portable worker's pre-start claimed reservation. Positive values are rounded
+// up to whole-second precision with a one-second minimum so capability
+// discovery reports the exact effective TTL. Non-positive values leave the
+// five-minute default in place. Runtime execution is never leased by this
+// option; once an assignment starts, its host remains responsible for recovery.
+func WithAssignmentClaimLeaseTTL(ttl time.Duration) ServiceOption {
+	return func(service *Service) {
+		if ttl > 0 {
+			service.assignmentClaimLeaseTTL = normalizeAssignmentClaimLeaseTTL(ttl)
+		}
+	}
+}
+
+func normalizeAssignmentClaimLeaseTTL(ttl time.Duration) time.Duration {
+	if ttl <= 0 {
+		return 0
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	if ttl > maxDuration-(time.Second-1) {
+		return maxDuration.Truncate(time.Second)
+	}
+	return ((ttl + time.Second - 1) / time.Second) * time.Second
+}
 
 type skillDiscoveryBase struct {
 	path       string
@@ -29,13 +58,31 @@ type skillDiscoveryBase struct {
 }
 
 type Service struct {
-	store       Store
-	now         func() time.Time
-	assistantMu sync.Mutex
+	store                   Store
+	now                     func() time.Time
+	newAssignmentClaimID    func() (string, error)
+	assignmentClaimLeaseTTL time.Duration
+	assistantMu             sync.Mutex
 }
 
-func NewService(store Store) *Service {
-	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+func NewService(store Store, options ...ServiceOption) *Service {
+	service := &Service{
+		store:                   store,
+		now:                     func() time.Time { return time.Now().UTC() },
+		newAssignmentClaimID:    secureAssignmentClaimID,
+		assignmentClaimLeaseTTL: DefaultAssignmentClaimLeaseTTL,
+	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
+}
+
+// AssignmentClaimLeaseTTL returns the effective whole-second pre-start lease.
+func (s *Service) AssignmentClaimLeaseTTL() time.Duration {
+	return s.assignmentClaimLeaseTTL
 }
 
 func (s *Service) ListProjects(ctx context.Context) ([]Project, error) {
@@ -900,6 +947,163 @@ func (s *Service) GetAssignment(ctx context.Context, projectID, id string) (Assi
 	return s.store.GetAssignment(ctx, projectID, id)
 }
 
+// ClaimAssignmentWithLease acquires a portable worker claim. The returned
+// claim id is a fencing generation, not an authentication credential. MCP and
+// other untrusted worker surfaces must use the corresponding WithClaim methods
+// for every later lifecycle mutation.
+func (s *Service) ClaimAssignmentWithLease(ctx context.Context, projectID, id, claimedBy string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	claimedBy = strings.TrimSpace(claimedBy)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if claimedBy == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claimed_by is required"))
+	}
+	claimID, err := s.newAssignmentClaimID()
+	if err != nil {
+		return Assignment{}, fmt.Errorf("generate assignment claim fence: %w", err)
+	}
+	return s.store.ClaimAssignmentWithLease(ctx, projectID, id, claimedBy, AssignmentClaimLease{ID: claimID}, s.assignmentClaimLeaseTTL, s.now)
+}
+
+// RenewAssignmentClaim renews an unexpired pre-start reservation without ever
+// shortening its current deadline. Renewal intentionally does not advance
+// assignment.updated_at, so heartbeats do not reorder project activity or
+// interfere with coordination CAS revisions.
+func (s *Service) RenewAssignmentClaim(ctx context.Context, projectID, id, claimID string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	claimID = strings.TrimSpace(claimID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if claimID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claim_id is required"))
+	}
+	return s.store.RenewAssignmentClaim(ctx, projectID, id, claimID, s.assignmentClaimLeaseTTL, s.now)
+}
+
+// RecoverAssignmentClaim explicitly requeues an expired pre-start claim and
+// fences its former worker. Cairnline never applies this operation to running,
+// approval-blocked, or review work because execution recovery is host-owned.
+func (s *Service) RecoverAssignmentClaim(ctx context.Context, projectID, id, expectedClaimID string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	expectedClaimID = strings.TrimSpace(expectedClaimID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if expectedClaimID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("expected_claim_id is required"))
+	}
+	return s.store.RecoverAssignmentClaim(ctx, projectID, id, expectedClaimID, s.now)
+}
+
+// PrepareAssignmentWithClaim attaches host references only while the supplied
+// portable claim is current and its pre-start lease remains unexpired.
+func (s *Service) PrepareAssignmentWithClaim(ctx context.Context, projectID, id string, preparation AssignmentPreparation) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	preparation.ClaimID = strings.TrimSpace(preparation.ClaimID)
+	preparation.ClaimedBy = ""
+	preparation.ExecutionRef = normalizeExecutionRef(preparation.ExecutionRef)
+	preparation.ContextSnapshotID = strings.TrimSpace(preparation.ContextSnapshotID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if preparation.ClaimID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claim_id is required"))
+	}
+	if preparation.ExecutionRef.Empty() && preparation.ContextSnapshotID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("execution_ref or context_snapshot_id is required"))
+	}
+	return s.store.PrepareAssignmentWithClaim(ctx, projectID, id, preparation, s.now)
+}
+
+// ReleaseAssignmentWithClaim returns an unexpired pre-start claim to queued
+// state and clears its worker/runtime preparation metadata.
+func (s *Service) ReleaseAssignmentWithClaim(ctx context.Context, projectID, id, claimID string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	claimID = strings.TrimSpace(claimID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if claimID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claim_id is required"))
+	}
+	return s.store.ReleaseAssignmentWithClaim(ctx, projectID, id, claimID, s.now)
+}
+
+// UpdateAssignmentStatusWithClaim advances portable worker progress under the
+// current claim fence. Leaving claimed retires the lease expiry but retains the
+// fence for subsequent lifecycle writes.
+func (s *Service) UpdateAssignmentStatusWithClaim(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, claimID string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	status = strings.TrimSpace(status)
+	claimID = strings.TrimSpace(claimID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if claimID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claim_id is required"))
+	}
+	if err := ValidateAssignmentProgressStatus(status); err != nil {
+		return Assignment{}, err
+	}
+	return s.store.UpdateAssignmentStatusWithClaim(ctx, projectID, id, status, normalizeExecutionRef(executionRef), claimID, s.now)
+}
+
+// CompleteAssignmentWithClaim is the portable worker completion surface. A
+// current claim id is always mandatory; direct terminal updates to queued work
+// belong on the trusted embedding-host CompleteAssignment surface.
+func (s *Service) CompleteAssignmentWithClaim(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, claimID string) (Assignment, error) {
+	projectID = strings.TrimSpace(projectID)
+	id = strings.TrimSpace(id)
+	claimID = strings.TrimSpace(claimID)
+	if projectID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("project_id is required"))
+	}
+	if id == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("assignment_id is required"))
+	}
+	if claimID == "" {
+		return Assignment{}, errors.Join(ErrInvalid, errors.New("claim_id is required"))
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = AssignmentCompleted
+	}
+	if err := ValidateAssignmentCompletionStatus(status); err != nil {
+		return Assignment{}, err
+	}
+	return s.store.CompleteAssignmentWithClaim(ctx, projectID, id, status, normalizeExecutionRef(executionRef), claimID, s.now)
+}
+
+// ClaimAssignment is an embedding-host authority surface. It creates an
+// unleased claim and must not be exposed directly to untrusted workers. Use
+// ClaimAssignmentWithLease for MCP or other portable worker flows.
 func (s *Service) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string) (Assignment, error) {
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)
@@ -923,6 +1127,7 @@ func (s *Service) PrepareAssignment(ctx context.Context, projectID, id string, p
 	projectID = strings.TrimSpace(projectID)
 	id = strings.TrimSpace(id)
 	preparation.ClaimedBy = strings.TrimSpace(preparation.ClaimedBy)
+	preparation.ClaimID = ""
 	preparation.ExecutionRef = normalizeExecutionRef(preparation.ExecutionRef)
 	preparation.ContextSnapshotID = strings.TrimSpace(preparation.ContextSnapshotID)
 	if projectID == "" {
@@ -2975,4 +3180,12 @@ func newID(prefix string) string {
 		return prefix + "_" + strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
 	}
 	return prefix + "_" + hex.EncodeToString(b[:])
+}
+
+func secureAssignmentClaimID() (string, error) {
+	var b [16]byte
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		return "", err
+	}
+	return "claim_" + hex.EncodeToString(b[:]), nil
 }

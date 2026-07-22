@@ -129,7 +129,7 @@ func (s *Service) ProjectHealth(ctx context.Context, projectID string) (ProjectH
 		Detail:    detail,
 		Summary:   summary,
 		Attention: attention,
-		CreatedAt: s.now(),
+		CreatedAt: operations.CreatedAt,
 	}, nil
 }
 
@@ -235,6 +235,9 @@ func projectOperationHealthAttention(projectID string, item ProjectOperationItem
 }
 
 func projectOperationHealthAction(item ProjectOperationItem) (string, string) {
+	if item.ActionKind != "" {
+		return item.ActionKind, item.ActionLabel
+	}
 	switch item.Kind {
 	case ProjectOperationKindAssignment:
 		switch item.Status {

@@ -410,6 +410,9 @@ func (s *MemoryStore) CreateAssignment(ctx context.Context, assignment Assignmen
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := ValidateAssignmentClaimState(assignment); err != nil {
+		return Assignment{}, err
+	}
 	if _, ok := s.projects[assignment.ProjectID]; !ok {
 		return Assignment{}, ErrNotFound
 	}
@@ -438,6 +441,9 @@ func (s *MemoryStore) RestoreAssignmentSnapshot(ctx context.Context, assignment 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := ValidateAssignmentClaimState(assignment); err != nil {
+		return Assignment{}, err
+	}
 	if _, ok := s.projects[assignment.ProjectID]; !ok {
 		return Assignment{}, ErrNotFound
 	}
@@ -508,14 +514,25 @@ func cloneDesiredAgent(agent DesiredAgent) DesiredAgent {
 
 func cloneAssignment(assignment Assignment) Assignment {
 	assignment.DesiredAgent = cloneDesiredAgent(assignment.DesiredAgent)
+	if assignment.Claim != nil {
+		claim := *assignment.Claim
+		assignment.Claim = &claim
+	}
 	return assignment
 }
 
 func assignmentTransitionTime(current Assignment, now func() time.Time) time.Time {
-	stamp := time.Now().UTC()
+	return assignmentTransitionTimeAt(current, assignmentOperationTime(now))
+}
+
+func assignmentOperationTime(now func() time.Time) time.Time {
 	if now != nil {
-		stamp = now()
+		return now().UTC()
 	}
+	return time.Now().UTC()
+}
+
+func assignmentTransitionTimeAt(current Assignment, stamp time.Time) time.Time {
 	if stamp.Before(current.UpdatedAt) {
 		stamp = current.UpdatedAt
 	}
@@ -526,6 +543,247 @@ func assignmentTransitionTime(current Assignment, now func() time.Time) time.Tim
 		stamp = current.UpdatedAt.Add(time.Nanosecond)
 	}
 	return stamp
+}
+
+func assignmentClaimAllowsMutation(item Assignment, claimID string, now time.Time) bool {
+	if item.Claim == nil || claimID == "" || item.Claim.ID != claimID {
+		return false
+	}
+	if item.Status != AssignmentClaimed {
+		return true
+	}
+	return !item.Claim.ExpiresAt.IsZero() && item.Claim.ExpiresAt.After(now)
+}
+
+func clearAssignmentClaimReservation(assignment *Assignment) {
+	if assignment.Claim == nil {
+		return
+	}
+	claim := *assignment.Claim
+	claim.ExpiresAt = time.Time{}
+	assignment.Claim = &claim
+}
+
+func (s *MemoryStore) ClaimAssignmentWithLease(ctx context.Context, projectID, id, claimedBy string, lease AssignmentClaimLease, leaseTTL time.Duration, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if lease.ID == "" || leaseTTL <= 0 {
+		return Assignment{}, ErrInvalid
+	}
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	if item.Status != AssignmentQueued {
+		return Assignment{}, ErrConflict
+	}
+	operationTime := assignmentOperationTime(now)
+	stamp := assignmentTransitionTimeAt(item, operationTime)
+	lease.AcquiredAt = operationTime
+	lease.ExpiresAt = operationTime.Add(leaseTTL)
+	item.Status = AssignmentClaimed
+	item.ClaimedBy = claimedBy
+	item.Claim = &lease
+	item.UpdatedAt = stamp
+	if err := ValidateAssignmentClaimState(item); err != nil {
+		return Assignment{}, err
+	}
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) RenewAssignmentClaim(ctx context.Context, projectID, id, claimID string, leaseTTL time.Duration, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if leaseTTL <= 0 {
+		return Assignment{}, ErrInvalid
+	}
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	operationTime := assignmentOperationTime(now)
+	if item.Status != AssignmentClaimed || !assignmentClaimAllowsMutation(item, claimID, operationTime) {
+		return Assignment{}, ErrConflict
+	}
+	claim := *item.Claim
+	candidateExpiry := operationTime.Add(leaseTTL)
+	if claim.ExpiresAt.After(candidateExpiry) {
+		candidateExpiry = claim.ExpiresAt
+	}
+	claim.ExpiresAt = candidateExpiry
+	item.Claim = &claim
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) RecoverAssignmentClaim(ctx context.Context, projectID, id, expectedClaimID string, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	operationTime := assignmentOperationTime(now)
+	if item.Status != AssignmentClaimed || item.Claim == nil || item.Claim.ID != expectedClaimID || item.Claim.ExpiresAt.IsZero() || item.Claim.ExpiresAt.After(operationTime) {
+		return Assignment{}, ErrConflict
+	}
+	item.Status = AssignmentQueued
+	item.ClaimedBy = ""
+	item.Claim = nil
+	item.ExecutionRef = ExecutionRef{}
+	item.ContextSnapshotID = ""
+	item.StartedAt = time.Time{}
+	item.CompletedAt = time.Time{}
+	item.UpdatedAt = assignmentTransitionTimeAt(item, operationTime)
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) PrepareAssignmentWithClaim(ctx context.Context, projectID, id string, preparation AssignmentPreparation, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	operationTime := assignmentOperationTime(now)
+	if item.Status != AssignmentClaimed || !assignmentClaimAllowsMutation(item, preparation.ClaimID, operationTime) {
+		return Assignment{}, ErrConflict
+	}
+	if !preparation.ExecutionRef.Empty() {
+		item.ExecutionRef = preparation.ExecutionRef
+	}
+	if preparation.ContextSnapshotID != "" {
+		item.ContextSnapshotID = preparation.ContextSnapshotID
+	}
+	item.UpdatedAt = assignmentTransitionTimeAt(item, operationTime)
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) ReleaseAssignmentWithClaim(ctx context.Context, projectID, id, claimID string, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	operationTime := assignmentOperationTime(now)
+	if item.Status != AssignmentClaimed || !assignmentClaimAllowsMutation(item, claimID, operationTime) {
+		return Assignment{}, ErrConflict
+	}
+	item.Status = AssignmentQueued
+	item.ClaimedBy = ""
+	item.Claim = nil
+	item.ExecutionRef = ExecutionRef{}
+	item.ContextSnapshotID = ""
+	item.StartedAt = time.Time{}
+	item.CompletedAt = time.Time{}
+	item.UpdatedAt = assignmentTransitionTimeAt(item, operationTime)
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) UpdateAssignmentStatusWithClaim(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, claimID string, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ValidateAssignmentProgressStatus(status); err != nil {
+		return Assignment{}, err
+	}
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	operationTime := assignmentOperationTime(now)
+	if item.Status == AssignmentQueued || isTerminalAssignmentStatus(item.Status) || !assignmentClaimAllowsMutation(item, claimID, operationTime) {
+		return Assignment{}, ErrConflict
+	}
+	previousStatus := item.Status
+	item.Status = status
+	if item.StartedAt.IsZero() {
+		item.StartedAt = assignmentTransitionTimeAt(item, operationTime)
+	}
+	if !executionRef.Empty() {
+		item.ExecutionRef = executionRef
+	}
+	if previousStatus == AssignmentClaimed {
+		clearAssignmentClaimReservation(&item)
+	}
+	item.UpdatedAt = assignmentTransitionTimeAt(item, operationTime)
+	if err := ValidateAssignmentClaimState(item); err != nil {
+		return Assignment{}, err
+	}
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
+}
+
+func (s *MemoryStore) CompleteAssignmentWithClaim(ctx context.Context, projectID, id, status string, executionRef ExecutionRef, claimID string, now func() time.Time) (Assignment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ValidateAssignmentCompletionStatus(status); err != nil {
+		return Assignment{}, err
+	}
+	if _, ok := s.projects[projectID]; !ok {
+		return Assignment{}, ErrNotFound
+	}
+	item, ok := s.assignments[projectID][id]
+	if !ok {
+		return Assignment{}, ErrNotFound
+	}
+	operationTime := assignmentOperationTime(now)
+	if isTerminalAssignmentStatus(item.Status) {
+		return Assignment{}, ErrConflict
+	}
+	if item.Status == AssignmentQueued || !assignmentClaimAllowsMutation(item, claimID, operationTime) {
+		return Assignment{}, ErrConflict
+	}
+	stamp := assignmentTransitionTimeAt(item, operationTime)
+	previousStatus := item.Status
+	item.Status = status
+	if item.StartedAt.IsZero() && !(previousStatus == AssignmentQueued && status == AssignmentCancelled) {
+		item.StartedAt = stamp
+	}
+	if isTerminalAssignmentStatus(status) && item.CompletedAt.IsZero() {
+		item.CompletedAt = stamp
+	}
+	if !executionRef.Empty() {
+		item.ExecutionRef = executionRef
+	}
+	if previousStatus == AssignmentClaimed {
+		clearAssignmentClaimReservation(&item)
+	}
+	item.UpdatedAt = stamp
+	if err := ValidateAssignmentClaimState(item); err != nil {
+		return Assignment{}, err
+	}
+	s.assignments[projectID][id] = cloneAssignment(item)
+	return cloneAssignment(item), nil
 }
 
 func (s *MemoryStore) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (Assignment, error) {
@@ -545,6 +803,7 @@ func (s *MemoryStore) ClaimAssignment(ctx context.Context, projectID, id, claime
 	stamp := assignmentTransitionTime(item, now)
 	item.Status = AssignmentClaimed
 	item.ClaimedBy = claimedBy
+	item.Claim = nil
 	item.UpdatedAt = stamp
 	s.assignments[projectID][id] = cloneAssignment(item)
 	return cloneAssignment(item), nil
@@ -592,6 +851,7 @@ func (s *MemoryStore) ReleaseAssignment(ctx context.Context, projectID, id, clai
 	stamp := assignmentTransitionTime(item, now)
 	item.Status = AssignmentQueued
 	item.ClaimedBy = ""
+	item.Claim = nil
 	item.ExecutionRef = ExecutionRef{}
 	item.ContextSnapshotID = ""
 	item.StartedAt = time.Time{}
@@ -605,6 +865,9 @@ func (s *MemoryStore) CompleteAssignment(ctx context.Context, projectID, id, sta
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := ValidateAssignmentCompletionStatus(status); err != nil {
+		return Assignment{}, err
+	}
 	if _, ok := s.projects[projectID]; !ok {
 		return Assignment{}, ErrNotFound
 	}
@@ -627,7 +890,13 @@ func (s *MemoryStore) CompleteAssignment(ctx context.Context, projectID, id, sta
 	if !executionRef.Empty() {
 		item.ExecutionRef = executionRef
 	}
+	if previousStatus == AssignmentClaimed {
+		clearAssignmentClaimReservation(&item)
+	}
 	item.UpdatedAt = stamp
+	if err := ValidateAssignmentClaimState(item); err != nil {
+		return Assignment{}, err
+	}
 	s.assignments[projectID][id] = cloneAssignment(item)
 	return cloneAssignment(item), nil
 }
@@ -636,6 +905,9 @@ func (s *MemoryStore) UpdateAssignmentStatus(ctx context.Context, projectID, id,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := ValidateAssignmentProgressStatus(status); err != nil {
+		return Assignment{}, err
+	}
 	if _, ok := s.projects[projectID]; !ok {
 		return Assignment{}, ErrNotFound
 	}
@@ -647,6 +919,7 @@ func (s *MemoryStore) UpdateAssignmentStatus(ctx context.Context, projectID, id,
 		return Assignment{}, ErrConflict
 	}
 	stamp := assignmentTransitionTime(item, now)
+	previousStatus := item.Status
 	item.Status = status
 	if item.StartedAt.IsZero() {
 		item.StartedAt = stamp
@@ -654,7 +927,13 @@ func (s *MemoryStore) UpdateAssignmentStatus(ctx context.Context, projectID, id,
 	if !executionRef.Empty() {
 		item.ExecutionRef = executionRef
 	}
+	if previousStatus == AssignmentClaimed {
+		clearAssignmentClaimReservation(&item)
+	}
 	item.UpdatedAt = stamp
+	if err := ValidateAssignmentClaimState(item); err != nil {
+		return Assignment{}, err
+	}
 	s.assignments[projectID][id] = cloneAssignment(item)
 	return cloneAssignment(item), nil
 }

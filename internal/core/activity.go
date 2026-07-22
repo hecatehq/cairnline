@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (s *Service) ProjectActivity(ctx context.Context, projectID string) (ProjectActivity, error) {
@@ -35,12 +36,13 @@ func (s *Service) ProjectActivity(ctx context.Context, projectID string) (Projec
 	for _, role := range roles {
 		rolesByID[role.ID] = role
 	}
+	now := s.now()
 	activity := ProjectActivity{
 		ProjectID: projectID,
-		CreatedAt: s.now(),
+		CreatedAt: now,
 	}
 	for _, assignment := range assignments {
-		item := projectActivityItem(assignment, workItemsByID[assignment.WorkItemID], rolesByID[assignment.RoleID])
+		item := projectActivityItem(assignment, workItemsByID[assignment.WorkItemID], rolesByID[assignment.RoleID], now)
 		activity.Counts.Assignments++
 		countProjectActivityStatus(&activity.Counts, item.Status)
 		switch item.Bucket {
@@ -67,8 +69,8 @@ func (s *Service) ProjectActivity(ctx context.Context, projectID string) (Projec
 	return activity, nil
 }
 
-func projectActivityItem(assignment Assignment, workItem WorkItem, role Role) ProjectActivityItem {
-	return ProjectActivityItem{
+func projectActivityItem(assignment Assignment, workItem WorkItem, role Role, now time.Time) ProjectActivityItem {
+	item := ProjectActivityItem{
 		Bucket:           projectActivityBucket(assignment.Status),
 		AssignmentID:     assignment.ID,
 		WorkItemID:       assignment.WorkItemID,
@@ -83,6 +85,10 @@ func projectActivityItem(assignment Assignment, workItem WorkItem, role Role) Pr
 		CreatedAt:        assignment.CreatedAt,
 		UpdatedAt:        assignment.UpdatedAt,
 	}
+	if assignment.Status == AssignmentClaimed && assignment.Claim != nil && !assignment.Claim.ExpiresAt.IsZero() && !assignment.Claim.ExpiresAt.After(now) {
+		item.Bucket = ProjectActivityBucketBlocked
+	}
+	return item
 }
 
 func projectActivityBucket(status string) string {

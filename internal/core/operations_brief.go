@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (s *Service) ProjectOperationsBrief(ctx context.Context, projectID string) (ProjectOperationsBrief, error) {
@@ -69,7 +70,7 @@ func (s *Service) ProjectOperationsBrief(ctx context.Context, projectID string) 
 			return ProjectOperationsBrief{}, err
 		}
 		for _, assignment := range workAssignments {
-			item, ok := projectAssignmentOperationItem(workItem, assignment)
+			item, ok := projectAssignmentOperationItem(workItem, assignment, now)
 			if !ok {
 				continue
 			}
@@ -184,7 +185,7 @@ func (s *Service) evaluateWorkItemOperationsReadiness(ctx context.Context, workI
 	return EvaluateWorkItemCloseoutReadiness(workItem, assignments, evidence, reviews, handoffs), nil
 }
 
-func projectAssignmentOperationItem(workItem WorkItem, assignment Assignment) (ProjectOperationItem, bool) {
+func projectAssignmentOperationItem(workItem WorkItem, assignment Assignment, now time.Time) (ProjectOperationItem, bool) {
 	status := assignmentCloseoutStatus(assignment)
 	switch status {
 	case AssignmentQueued:
@@ -220,7 +221,23 @@ func projectAssignmentOperationItem(workItem WorkItem, assignment Assignment) (P
 			AssignmentID: assignment.ID,
 			UpdatedAt:    assignment.UpdatedAt,
 		}, true
-	case AssignmentClaimed, AssignmentRunning, AssignmentReview:
+	case AssignmentClaimed:
+		if assignment.Claim != nil && !assignment.Claim.ExpiresAt.IsZero() && !assignment.Claim.ExpiresAt.After(now) {
+			return ProjectOperationItem{
+				Kind:         ProjectOperationKindAssignment,
+				Severity:     ProjectOperationSeverityBlocked,
+				Status:       status,
+				Title:        "Recover expired claim for " + workItem.Title,
+				Detail:       "The pre-start claim expired. Reconcile any prepared host resources, then recover the assignment claim.",
+				ActionKind:   ProjectOperationActionRecoverClaim,
+				ActionLabel:  "Recover claim",
+				WorkItemID:   workItem.ID,
+				AssignmentID: assignment.ID,
+				UpdatedAt:    assignment.UpdatedAt,
+			}, true
+		}
+		fallthrough
+	case AssignmentRunning, AssignmentReview:
 		return ProjectOperationItem{
 			Kind:         ProjectOperationKindAssignment,
 			Severity:     ProjectOperationSeverityActive,

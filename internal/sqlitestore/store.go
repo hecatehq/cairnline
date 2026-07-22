@@ -118,6 +118,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			status TEXT NOT NULL,
 			desired_agent_json TEXT NOT NULL DEFAULT '{}',
 			claimed_by TEXT NOT NULL DEFAULT '',
+			claim_id TEXT NOT NULL DEFAULT '',
+			claimed_at TEXT NOT NULL DEFAULT '',
+			claim_expires_at TEXT NOT NULL DEFAULT '',
 			execution_ref TEXT NOT NULL DEFAULT '',
 			context_snapshot_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
@@ -282,6 +285,11 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "assignments", "completed_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
+	for _, column := range []string{"claim_id", "claimed_at", "claim_expires_at"} {
+		if err := s.ensureColumn(ctx, "assignments", column, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("migrate sqlite: %w", err)
+		}
+	}
 	if err := s.ensureAssignmentRoleSoftReference(ctx); err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
@@ -407,6 +415,9 @@ func (s *Store) ensureAssignmentRoleSoftReference(ctx context.Context) error {
 			status TEXT NOT NULL,
 			desired_agent_json TEXT NOT NULL DEFAULT '{}',
 			claimed_by TEXT NOT NULL DEFAULT '',
+			claim_id TEXT NOT NULL DEFAULT '',
+			claimed_at TEXT NOT NULL DEFAULT '',
+			claim_expires_at TEXT NOT NULL DEFAULT '',
 			execution_ref TEXT NOT NULL DEFAULT '',
 			context_snapshot_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
@@ -417,8 +428,8 @@ func (s *Store) ensureAssignmentRoleSoftReference(ctx context.Context) error {
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 			FOREIGN KEY (project_id, work_item_id) REFERENCES work_items(project_id, id) ON DELETE CASCADE
 		)`,
-		`INSERT INTO assignments_new (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at)
-			SELECT project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`,
+		`INSERT INTO assignments_new (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, claim_id, claimed_at, claim_expires_at, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at)
+			SELECT project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, claim_id, claimed_at, claim_expires_at, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at FROM assignments`,
 		`DROP TABLE assignments`,
 		`ALTER TABLE assignments_new RENAME TO assignments`,
 	}
@@ -815,6 +826,9 @@ func (s *Store) GetAssignment(ctx context.Context, projectID, id string) (core.A
 }
 
 func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+	if err := core.ValidateAssignmentClaimState(assignment); err != nil {
+		return core.Assignment{}, err
+	}
 	if err := s.requireWorkItem(ctx, assignment.ProjectID, assignment.WorkItemID); err != nil {
 		return core.Assignment{}, err
 	}
@@ -829,8 +843,9 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 	if err != nil {
 		return core.Assignment{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
+	claimID, claimedAt, claimExpiresAt := encodeAssignmentClaim(assignment.Claim)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO assignments (project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, claim_id, claimed_at, claim_expires_at, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		assignment.ProjectID, assignment.ID, assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, claimID, claimedAt, claimExpiresAt, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt))
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
 	}
@@ -840,6 +855,9 @@ func (s *Store) CreateAssignment(ctx context.Context, assignment core.Assignment
 // RestoreAssignmentSnapshot atomically replaces an assignment during offline
 // snapshot import. Live callers must use the narrow transition methods below.
 func (s *Store) RestoreAssignmentSnapshot(ctx context.Context, assignment core.Assignment) (core.Assignment, error) {
+	if err := core.ValidateAssignmentClaimState(assignment); err != nil {
+		return core.Assignment{}, err
+	}
 	if err := s.requireWorkItem(ctx, assignment.ProjectID, assignment.WorkItemID); err != nil {
 		return core.Assignment{}, err
 	}
@@ -854,11 +872,12 @@ func (s *Store) RestoreAssignmentSnapshot(ctx context.Context, assignment core.A
 	if err != nil {
 		return core.Assignment{}, err
 	}
+	claimID, claimedAt, claimExpiresAt := encodeAssignmentClaim(assignment.Claim)
 	row := s.db.QueryRowContext(ctx, `UPDATE assignments
-		SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ?
+		SET work_item_id = ?, role_id = ?, root_id = ?, execution_mode = ?, status = ?, desired_agent_json = ?, claimed_by = ?, claim_id = ?, claimed_at = ?, claim_expires_at = ?, execution_ref = ?, context_snapshot_id = ?, created_at = ?, updated_at = ?, started_at = ?, completed_at = ?
 		WHERE project_id = ? AND id = ?
 		RETURNING `+assignmentColumnsSQL,
-		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
+		assignment.WorkItemID, assignment.RoleID, assignment.RootID, assignment.ExecutionMode, assignment.Status, desiredAgent, assignment.ClaimedBy, claimID, claimedAt, claimExpiresAt, executionRef, assignment.ContextSnapshotID, encodeTime(assignment.CreatedAt), encodeTime(assignment.UpdatedAt), encodeOptionalTime(assignment.StartedAt), encodeOptionalTime(assignment.CompletedAt), assignment.ProjectID, assignment.ID)
 	item, err := scanAssignment(row)
 	if err != nil {
 		return core.Assignment{}, mapSQLiteWriteError(err)
@@ -902,6 +921,269 @@ func (s *Store) UpdateQueuedAssignment(ctx context.Context, projectID, id string
 	return finishAssignmentTransition(tx, row)
 }
 
+func assignmentClaimAllowsMutation(item core.Assignment, claimID string, now time.Time) bool {
+	if item.Claim == nil || claimID == "" || item.Claim.ID != claimID {
+		return false
+	}
+	if item.Status != core.AssignmentClaimed {
+		return true
+	}
+	return !item.Claim.ExpiresAt.IsZero() && item.Claim.ExpiresAt.After(now)
+}
+
+func (s *Store) ClaimAssignmentWithLease(ctx context.Context, projectID, id, claimedBy string, lease core.AssignmentClaimLease, leaseTTL time.Duration, now func() time.Time) (core.Assignment, error) {
+	if lease.ID == "" || leaseTTL <= 0 {
+		return core.Assignment{}, core.ErrInvalid
+	}
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	if current.Status != core.AssignmentQueued {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	operationTime := assignmentOperationTime(now)
+	stamp := assignmentTransitionTimeAt(current, operationTime)
+	lease.AcquiredAt = operationTime
+	lease.ExpiresAt = operationTime.Add(leaseTTL)
+	candidate := current
+	candidate.Status = core.AssignmentClaimed
+	candidate.ClaimedBy = claimedBy
+	candidate.Claim = &lease
+	candidate.UpdatedAt = stamp
+	if err := core.ValidateAssignmentClaimState(candidate); err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, claimed_by = ?, claim_id = ?, claimed_at = ?, claim_expires_at = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = '' AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		core.AssignmentClaimed, claimedBy, lease.ID, encodeTime(lease.AcquiredAt), encodeTime(lease.ExpiresAt), encodeTime(stamp),
+		projectID, id, current.Status, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) RenewAssignmentClaim(ctx context.Context, projectID, id, claimID string, leaseTTL time.Duration, now func() time.Time) (core.Assignment, error) {
+	if leaseTTL <= 0 {
+		return core.Assignment{}, core.ErrInvalid
+	}
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	operationTime := assignmentOperationTime(now)
+	if current.Status != core.AssignmentClaimed || !assignmentClaimAllowsMutation(current, claimID, operationTime) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	expiresAt := operationTime.Add(leaseTTL)
+	if current.Claim.ExpiresAt.After(expiresAt) {
+		expiresAt = current.Claim.ExpiresAt
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET claim_expires_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = ? AND claim_expires_at = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		encodeTime(expiresAt), projectID, id, current.Status, claimID, encodeTime(current.Claim.ExpiresAt), encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) RecoverAssignmentClaim(ctx context.Context, projectID, id, expectedClaimID string, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	operationTime := assignmentOperationTime(now)
+	if current.Status != core.AssignmentClaimed || current.Claim == nil || current.Claim.ID != expectedClaimID || current.Claim.ExpiresAt.IsZero() || current.Claim.ExpiresAt.After(operationTime) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTimeAt(current, operationTime)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, claimed_by = '', claim_id = '', claimed_at = '', claim_expires_at = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = ? AND claim_expires_at = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		core.AssignmentQueued, encodeTime(stamp),
+		projectID, id, current.Status, expectedClaimID, encodeTime(current.Claim.ExpiresAt), encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) PrepareAssignmentWithClaim(ctx context.Context, projectID, id string, preparation core.AssignmentPreparation, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	operationTime := assignmentOperationTime(now)
+	if current.Status != core.AssignmentClaimed || !assignmentClaimAllowsMutation(current, preparation.ClaimID, operationTime) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	executionRef := current.ExecutionRef
+	if !preparation.ExecutionRef.Empty() {
+		executionRef = preparation.ExecutionRef
+	}
+	encodedRef, err := encodeExecutionRef(executionRef)
+	if err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	contextSnapshotID := current.ContextSnapshotID
+	if preparation.ContextSnapshotID != "" {
+		contextSnapshotID = preparation.ContextSnapshotID
+	}
+	stamp := assignmentTransitionTimeAt(current, operationTime)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET execution_ref = ?, context_snapshot_id = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = ? AND claim_expires_at = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		encodedRef, contextSnapshotID, encodeTime(stamp),
+		projectID, id, current.Status, preparation.ClaimID, encodeTime(current.Claim.ExpiresAt), encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) ReleaseAssignmentWithClaim(ctx context.Context, projectID, id, claimID string, now func() time.Time) (core.Assignment, error) {
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	operationTime := assignmentOperationTime(now)
+	if current.Status != core.AssignmentClaimed || !assignmentClaimAllowsMutation(current, claimID, operationTime) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTimeAt(current, operationTime)
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, claimed_by = '', claim_id = '', claimed_at = '', claim_expires_at = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = ? AND claim_expires_at = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		core.AssignmentQueued, encodeTime(stamp),
+		projectID, id, current.Status, claimID, encodeTime(current.Claim.ExpiresAt), encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) UpdateAssignmentStatusWithClaim(ctx context.Context, projectID, id, status string, executionRef core.ExecutionRef, claimID string, now func() time.Time) (core.Assignment, error) {
+	if err := core.ValidateAssignmentProgressStatus(status); err != nil {
+		return core.Assignment{}, err
+	}
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	operationTime := assignmentOperationTime(now)
+	if current.Status == core.AssignmentQueued || terminalAssignmentStatus(current.Status) || !assignmentClaimAllowsMutation(current, claimID, operationTime) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTimeAt(current, operationTime)
+	startedAt := current.StartedAt
+	if startedAt.IsZero() {
+		startedAt = stamp
+	}
+	ref := current.ExecutionRef
+	if !executionRef.Empty() {
+		ref = executionRef
+	}
+	encodedRef, err := encodeExecutionRef(ref)
+	if err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	claimExpiresAt := encodeOptionalTime(current.Claim.ExpiresAt)
+	if current.Status == core.AssignmentClaimed {
+		claimExpiresAt = ""
+	}
+	candidate := current
+	candidate.Status = status
+	candidate.StartedAt = startedAt
+	candidate.ExecutionRef = ref
+	candidate.UpdatedAt = stamp
+	if candidate.Claim != nil && current.Status == core.AssignmentClaimed {
+		claim := *candidate.Claim
+		claim.ExpiresAt = time.Time{}
+		candidate.Claim = &claim
+	}
+	if err := core.ValidateAssignmentClaimState(candidate); err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, started_at = ?, execution_ref = ?, claim_expires_at = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		status, encodeTime(startedAt), encodedRef, claimExpiresAt, encodeTime(stamp),
+		projectID, id, current.Status, claimID, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
+func (s *Store) CompleteAssignmentWithClaim(ctx context.Context, projectID, id, status string, executionRef core.ExecutionRef, claimID string, now func() time.Time) (core.Assignment, error) {
+	if err := core.ValidateAssignmentCompletionStatus(status); err != nil {
+		return core.Assignment{}, err
+	}
+	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
+	if err != nil {
+		return core.Assignment{}, err
+	}
+	operationTime := assignmentOperationTime(now)
+	if terminalAssignmentStatus(current.Status) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	if current.Status == core.AssignmentQueued || !assignmentClaimAllowsMutation(current, claimID, operationTime) {
+		_ = tx.Rollback()
+		return core.Assignment{}, core.ErrConflict
+	}
+	stamp := assignmentTransitionTimeAt(current, operationTime)
+	startedAt := current.StartedAt
+	if startedAt.IsZero() && !(current.Status == core.AssignmentQueued && status == core.AssignmentCancelled) {
+		startedAt = stamp
+	}
+	completedAt := current.CompletedAt
+	if terminalAssignmentStatus(status) && completedAt.IsZero() {
+		completedAt = stamp
+	}
+	ref := current.ExecutionRef
+	if !executionRef.Empty() {
+		ref = executionRef
+	}
+	encodedRef, err := encodeExecutionRef(ref)
+	if err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	claimExpiresAt := ""
+	if current.Claim != nil && current.Status != core.AssignmentClaimed {
+		claimExpiresAt = encodeOptionalTime(current.Claim.ExpiresAt)
+	}
+	currentClaimID := ""
+	if current.Claim != nil {
+		currentClaimID = current.Claim.ID
+	}
+	candidate := current
+	candidate.Status = status
+	candidate.StartedAt = startedAt
+	candidate.CompletedAt = completedAt
+	candidate.ExecutionRef = ref
+	candidate.UpdatedAt = stamp
+	if candidate.Claim != nil && current.Status == core.AssignmentClaimed {
+		claim := *candidate.Claim
+		claim.ExpiresAt = time.Time{}
+		candidate.Claim = &claim
+	}
+	if err := core.ValidateAssignmentClaimState(candidate); err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE assignments
+		SET status = ?, started_at = ?, completed_at = ?, execution_ref = ?, claim_expires_at = ?, updated_at = ?
+		WHERE project_id = ? AND id = ? AND status = ? AND claim_id = ? AND updated_at = ?
+		RETURNING `+assignmentColumnsSQL,
+		status, encodeOptionalTime(startedAt), encodeOptionalTime(completedAt), encodedRef, claimExpiresAt, encodeTime(stamp),
+		projectID, id, current.Status, currentClaimID, encodeTime(current.UpdatedAt))
+	return finishAssignmentTransition(tx, row)
+}
+
 func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy string, now func() time.Time) (core.Assignment, error) {
 	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
 	if err != nil {
@@ -913,7 +1195,7 @@ func (s *Store) ClaimAssignment(ctx context.Context, projectID, id, claimedBy st
 	}
 	stamp := assignmentTransitionTime(current, now)
 	row := tx.QueryRowContext(ctx, `UPDATE assignments
-		SET status = ?, claimed_by = ?, updated_at = ?
+		SET status = ?, claimed_by = ?, claim_id = '', claimed_at = '', claim_expires_at = '', updated_at = ?
 		WHERE project_id = ? AND id = ? AND status = ? AND updated_at = ?
 		RETURNING `+assignmentColumnsSQL,
 		core.AssignmentClaimed, claimedBy, encodeTime(stamp),
@@ -964,7 +1246,7 @@ func (s *Store) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy 
 	}
 	stamp := assignmentTransitionTime(current, now)
 	row := tx.QueryRowContext(ctx, `UPDATE assignments
-		SET status = ?, claimed_by = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ?
+		SET status = ?, claimed_by = '', claim_id = '', claimed_at = '', claim_expires_at = '', execution_ref = '', context_snapshot_id = '', started_at = '', completed_at = '', updated_at = ?
 		WHERE project_id = ? AND id = ? AND status = ? AND claimed_by = ? AND updated_at = ?
 		RETURNING `+assignmentColumnsSQL,
 		core.AssignmentQueued, encodeTime(stamp),
@@ -973,6 +1255,9 @@ func (s *Store) ReleaseAssignment(ctx context.Context, projectID, id, claimedBy 
 }
 
 func (s *Store) CompleteAssignment(ctx context.Context, projectID, id, status string, executionRef core.ExecutionRef, now func() time.Time) (core.Assignment, error) {
+	if err := core.ValidateAssignmentCompletionStatus(status); err != nil {
+		return core.Assignment{}, err
+	}
 	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
 	if err != nil {
 		return core.Assignment{}, err
@@ -999,16 +1284,38 @@ func (s *Store) CompleteAssignment(ctx context.Context, projectID, id, status st
 		_ = tx.Rollback()
 		return core.Assignment{}, err
 	}
+	claimExpiresAt := ""
+	if current.Claim != nil && current.Status != core.AssignmentClaimed {
+		claimExpiresAt = encodeOptionalTime(current.Claim.ExpiresAt)
+	}
+	candidate := current
+	candidate.Status = status
+	candidate.StartedAt = startedAt
+	candidate.CompletedAt = completedAt
+	candidate.ExecutionRef = ref
+	candidate.UpdatedAt = stamp
+	if candidate.Claim != nil && current.Status == core.AssignmentClaimed {
+		claim := *candidate.Claim
+		claim.ExpiresAt = time.Time{}
+		candidate.Claim = &claim
+	}
+	if err := core.ValidateAssignmentClaimState(candidate); err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
 	row := tx.QueryRowContext(ctx, `UPDATE assignments
-		SET status = ?, started_at = ?, completed_at = ?, execution_ref = ?, updated_at = ?
+		SET status = ?, started_at = ?, completed_at = ?, execution_ref = ?, claim_expires_at = ?, updated_at = ?
 		WHERE project_id = ? AND id = ? AND status = ? AND updated_at = ?
 		RETURNING `+assignmentColumnsSQL,
-		status, encodeOptionalTime(startedAt), encodeOptionalTime(completedAt), encodedRef, encodeTime(stamp),
+		status, encodeOptionalTime(startedAt), encodeOptionalTime(completedAt), encodedRef, claimExpiresAt, encodeTime(stamp),
 		projectID, id, current.Status, encodeTime(current.UpdatedAt))
 	return finishAssignmentTransition(tx, row)
 }
 
 func (s *Store) UpdateAssignmentStatus(ctx context.Context, projectID, id, status string, executionRef core.ExecutionRef, now func() time.Time) (core.Assignment, error) {
+	if err := core.ValidateAssignmentProgressStatus(status); err != nil {
+		return core.Assignment{}, err
+	}
 	tx, current, err := s.beginAssignmentTransition(ctx, projectID, id)
 	if err != nil {
 		return core.Assignment{}, err
@@ -1031,11 +1338,29 @@ func (s *Store) UpdateAssignmentStatus(ctx context.Context, projectID, id, statu
 		_ = tx.Rollback()
 		return core.Assignment{}, err
 	}
+	claimExpiresAt := ""
+	if current.Claim != nil && current.Status != core.AssignmentClaimed {
+		claimExpiresAt = encodeOptionalTime(current.Claim.ExpiresAt)
+	}
+	candidate := current
+	candidate.Status = status
+	candidate.StartedAt = startedAt
+	candidate.ExecutionRef = ref
+	candidate.UpdatedAt = stamp
+	if candidate.Claim != nil && current.Status == core.AssignmentClaimed {
+		claim := *candidate.Claim
+		claim.ExpiresAt = time.Time{}
+		candidate.Claim = &claim
+	}
+	if err := core.ValidateAssignmentClaimState(candidate); err != nil {
+		_ = tx.Rollback()
+		return core.Assignment{}, err
+	}
 	row := tx.QueryRowContext(ctx, `UPDATE assignments
-		SET status = ?, started_at = ?, execution_ref = ?, updated_at = ?
+		SET status = ?, started_at = ?, execution_ref = ?, claim_expires_at = ?, updated_at = ?
 		WHERE project_id = ? AND id = ? AND status = ? AND updated_at = ?
 		RETURNING `+assignmentColumnsSQL,
-		status, encodeTime(startedAt), encodedRef, encodeTime(stamp),
+		status, encodeTime(startedAt), encodedRef, claimExpiresAt, encodeTime(stamp),
 		projectID, id, current.Status, encodeTime(current.UpdatedAt))
 	return finishAssignmentTransition(tx, row)
 }
@@ -1166,10 +1491,17 @@ func finishHandoffTransition(transition *assignmentTransition, row *sql.Row, not
 }
 
 func assignmentTransitionTime(current core.Assignment, now func() time.Time) time.Time {
-	stamp := time.Now().UTC()
+	return assignmentTransitionTimeAt(current, assignmentOperationTime(now))
+}
+
+func assignmentOperationTime(now func() time.Time) time.Time {
 	if now != nil {
-		stamp = now()
+		return now().UTC()
 	}
+	return time.Now().UTC()
+}
+
+func assignmentTransitionTimeAt(current core.Assignment, stamp time.Time) time.Time {
 	if stamp.Before(current.StartedAt) {
 		stamp = current.StartedAt
 	}
@@ -2071,7 +2403,7 @@ func (s *Store) UpdateAssistantProposal(ctx context.Context, record core.Assista
 	return record, nil
 }
 
-const assignmentColumnsSQL = `project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at`
+const assignmentColumnsSQL = `project_id, id, work_item_id, role_id, root_id, execution_mode, status, desired_agent_json, claimed_by, claim_id, claimed_at, claim_expires_at, execution_ref, context_snapshot_id, created_at, updated_at, started_at, completed_at`
 const assignmentSelectSQL = `SELECT ` + assignmentColumnsSQL + ` FROM assignments`
 
 const handoffColumnsSQL = `project_id, id, work_item_id, source_assignment_id, source_run_id, source_chat_session_id, source_message_id, from_role_id, to_role_id, target_assignment_id, target_work_item_id, title, body, recommended_next_action, linked_artifact_ids_json, linked_memory_ids_json, context_refs_json, status, provenance_kind, trust_label, created_at, updated_at, status_changed_at`
@@ -2173,8 +2505,8 @@ func scanRole(row scanner) (core.Role, error) {
 
 func scanAssignment(row scanner) (core.Assignment, error) {
 	var item core.Assignment
-	var desiredAgentJSON, executionRef, createdAt, updatedAt, startedAt, completedAt string
-	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &executionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
+	var desiredAgentJSON, claimID, claimedAt, claimExpiresAt, executionRef, createdAt, updatedAt, startedAt, completedAt string
+	if err := row.Scan(&item.ProjectID, &item.ID, &item.WorkItemID, &item.RoleID, &item.RootID, &item.ExecutionMode, &item.Status, &desiredAgentJSON, &item.ClaimedBy, &claimID, &claimedAt, &claimExpiresAt, &executionRef, &item.ContextSnapshotID, &createdAt, &updatedAt, &startedAt, &completedAt); err != nil {
 		return core.Assignment{}, mapSQLiteReadError(err)
 	}
 	if err := decodeJSON(desiredAgentJSON, &item.DesiredAgent); err != nil {
@@ -2183,6 +2515,19 @@ func scanAssignment(row scanner) (core.Assignment, error) {
 	var err error
 	if item.ExecutionRef, err = decodeExecutionRef(executionRef); err != nil {
 		return core.Assignment{}, err
+	}
+	if claimID != "" {
+		claim := core.AssignmentClaimLease{ID: claimID}
+		if claim.AcquiredAt, err = decodeOptionalTime(claimedAt); err != nil {
+			return core.Assignment{}, err
+		}
+		if claim.AcquiredAt.IsZero() {
+			return core.Assignment{}, errors.New("decode assignment claim: claimed_at is required when claim_id is set")
+		}
+		if claim.ExpiresAt, err = decodeOptionalTime(claimExpiresAt); err != nil {
+			return core.Assignment{}, err
+		}
+		item.Claim = &claim
 	}
 	if item.CreatedAt, err = decodeTime(createdAt); err != nil {
 		return core.Assignment{}, err
@@ -2454,6 +2799,13 @@ func encodeOptionalTime(value time.Time) string {
 		return ""
 	}
 	return encodeTime(value)
+}
+
+func encodeAssignmentClaim(claim *core.AssignmentClaimLease) (id, acquiredAt, expiresAt string) {
+	if claim == nil {
+		return "", "", ""
+	}
+	return claim.ID, encodeOptionalTime(claim.AcquiredAt), encodeOptionalTime(claim.ExpiresAt)
 }
 
 func decodeTime(value string) (time.Time, error) {

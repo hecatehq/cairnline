@@ -784,9 +784,13 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "Claimed assignment "+assignmentID+" by agent-temp") {
 		t.Fatalf("temp claim assignment response = %s", output.String())
 	}
+	tempClaim, err := service.GetAssignment(ctx, project.ID, assignmentID)
+	if err != nil || tempClaim.Claim == nil {
+		t.Fatalf("GetAssignment(temp claim) = %+v, %v; want lease", tempClaim, err)
+	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"assignments.release","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claimed_by":"agent-temp"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"assignments.release","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claim_id":"` + tempClaim.Claim.ID + `"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -817,9 +821,14 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	if !strings.Contains(output.String(), "Claimed assignment "+assignmentID+" by agent-a") {
 		t.Fatalf("claim assignment response = %s", output.String())
 	}
+	claimedAssignment, err := service.GetAssignment(ctx, project.ID, assignmentID)
+	if err != nil || claimedAssignment.Claim == nil {
+		t.Fatalf("GetAssignment(claim) = %+v, %v; want lease", claimedAssignment, err)
+	}
+	claimID := claimedAssignment.Claim.ID
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":63,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claimed_by":"agent-a","execution_ref":{"session_id":"session-1"},"context_snapshot_id":"ctx-prepared"}}}` + "\n",
+		`{"jsonrpc":"2.0","id":63,"method":"tools/call","params":{"name":"assignments.prepare","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claim_id":"` + claimID + `","execution_ref":{"session_id":"session-1"},"context_snapshot_id":"ctx-prepared"}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -830,7 +839,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","status":"running","execution_ref":{"run_id":"run-1"}}}}` + "\n",
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"assignments.update_status","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claim_id":"` + claimID + `","status":"running","execution_ref":{"run_id":"run-1"}}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {
@@ -1022,7 +1031,7 @@ func TestMCPTools_AssignmentPullLifecycle(t *testing.T) {
 	}
 
 	input = strings.NewReader(
-		`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","execution_ref":{"run_id":"run-1"}}}}` + "\n",
+		`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"assignments.complete","arguments":{"project_id":"` + project.ID + `","assignment_id":"` + assignmentID + `","claim_id":"` + claimID + `","execution_ref":{"run_id":"run-1"}}}}` + "\n",
 	)
 	output.Reset()
 	if err := server.Serve(ctx, input, &output); err != nil {

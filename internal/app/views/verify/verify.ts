@@ -77,13 +77,13 @@ const operations = {
   project_id: "proj_demo",
   status: "attention",
   title: "Next: unblock deploy approval",
-  detail: "1 blocked assignment leads the queue.",
+  detail: "2 blocked assignments lead the queue.",
   counts: {
     work_items: 6,
     open_work_items: 4,
     assignments: 5,
     active_assignments: 2,
-    blocked_assignments: 1,
+    blocked_assignments: 2,
     pending_memory_candidates: 2,
     review_follow_ups: 1,
     missing_evidence: 1,
@@ -102,6 +102,15 @@ const operations = {
       kind: "review",
       severity: "action",
       title: "Address review follow-up",
+    },
+    {
+      kind: "assignment",
+      severity: "blocked",
+      status: "claimed",
+      title: "Recover expired claim for browser checks",
+      detail: "Reconcile prepared host resources before recovery.",
+      action_kind: "recover_assignment_claim",
+      action_label: "Recover claim",
     },
   ],
 };
@@ -216,7 +225,8 @@ page.on("console", (m) => {
 await page.goto("file://" + hostFile, { waitUntil: "load" });
 
 const viewFrame = () => page.frames().find((f) => f.url().includes("project-status"));
-const deliver = (structuredContent) => page.evaluate((sc) => window.__deliver(sc), structuredContent);
+const deliver = (structuredContent) =>
+  page.evaluate((sc) => window.__deliver(sc), structuredContent);
 
 // The view renders into Web Component shadow roots, so the rendered text is not
 // reachable via a single element's textContent. These walkers cross every shadow
@@ -249,7 +259,9 @@ const deepIncludes = (needle) => {
 await page.waitForFunction(
   () => {
     const log = window.__hostLog || [];
-    return log.indexOf("initialize") !== -1 && log.indexOf("initialized") > log.indexOf("initialize");
+    return (
+      log.indexOf("initialize") !== -1 && log.indexOf("initialized") > log.indexOf("initialize")
+    );
   },
   null,
   { timeout: 15000 },
@@ -272,6 +284,7 @@ const expected = [
   "Start assignment",
   "Operations brief",
   "Next: unblock deploy approval",
+  "Recover claim",
   "Activity",
   "Implement gateway retry",
 ];
@@ -311,7 +324,12 @@ if (missing.length > 0) {
   process.exit(1);
 }
 if (bled.length > 0) {
-  console.error("state bled across projects; stale text after project switch: " + JSON.stringify(bled));
+  console.error(
+    "state bled across projects; stale text after project switch: " + JSON.stringify(bled),
+  );
   process.exit(1);
 }
-console.log("OK: handshake ordered, all sections rendered, no cross-project bleed; screenshot -> " + screenshotPath);
+console.log(
+  "OK: handshake ordered, all sections rendered, no cross-project bleed; screenshot -> " +
+    screenshotPath,
+);
